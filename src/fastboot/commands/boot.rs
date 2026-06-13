@@ -3,7 +3,7 @@ use std::{
     io::{self, Read, Seek, SeekFrom},
 };
 
-use abootimg_oxide::Header;
+use abootimg_oxide::{Header, HeaderV0Versioned};
 
 use crate::{
     fastboot::{CommandContext, PostResponseAction},
@@ -50,6 +50,11 @@ fn prepare_staged_boot_image(context: &CommandContext<'_>) -> io::Result<KexecIm
     }
 
     let cmdline = android_cmdline(header.cmdline())?;
+    tracing::info!(
+        header_version = header.header_version(),
+        cmdline = %cmdline,
+        "parsed Android boot image"
+    );
     let kernel = extract_section(
         &mut boot_img,
         "boot-kernel",
@@ -66,8 +71,33 @@ fn prepare_staged_boot_image(context: &CommandContext<'_>) -> io::Result<KexecIm
             header.ramdisk_size(),
         )?)
     };
+    let dtb = extract_dtb(&mut boot_img, &header)?;
 
-    KexecImage::new(kernel, initrd, &cmdline)
+    KexecImage::new(kernel, initrd, dtb, &cmdline)
+}
+
+fn extract_dtb(boot_img: &mut fs::File, header: &Header) -> io::Result<Option<fs::File>> {
+    let Some((position, size)) = boot_dtb_section(header) else {
+        return Ok(None);
+    };
+    if size == 0 {
+        return Ok(None);
+    }
+
+    tracing::info!(position, bytes = size, "extracting boot image DTB section");
+    extract_section(boot_img, "boot-dtb", position, size).map(Some)
+}
+
+fn boot_dtb_section(header: &Header) -> Option<(usize, u32)> {
+    match header {
+        Header::V0(header) => match header.versioned {
+            HeaderV0Versioned::V2 { dtb_size, .. } => {
+                header.dtb_position().map(|position| (position, dtb_size))
+            }
+            HeaderV0Versioned::V0 | HeaderV0Versioned::V1 { .. } => None,
+        },
+        Header::V3(_) => None,
+    }
 }
 
 fn extract_section(

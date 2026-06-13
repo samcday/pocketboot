@@ -31,6 +31,7 @@ const RESPONSE_STATUS_LEN: usize = 4;
 const RESPONSE_PAYLOAD_MAX: usize = RESPONSE_MAX - RESPONSE_STATUS_LEN;
 const RESPONSE_TIMEOUT: Duration = Duration::from_secs(1);
 const TRANSFER_TIMEOUT: Duration = Duration::from_secs(30);
+const DISCONNECT_RETRY_DELAY: Duration = Duration::from_millis(250);
 const FASTBOOT_SUBCLASS: u8 = 0x42;
 const FASTBOOT_PROTOCOL: u8 = 0x03;
 
@@ -38,6 +39,11 @@ pub(crate) type PostResponseAction = Box<dyn FnOnce() -> io::Result<()> + Send +
 pub(crate) type CommandHandler =
     fn(&mut CommandContext<'_>, &str) -> io::Result<Option<PostResponseAction>>;
 pub(crate) type CommandMap = HashMap<&'static str, CommandHandler>;
+
+enum ServerStep {
+    Continue,
+    Exit(Option<PostResponseAction>),
+}
 
 pub(crate) struct UsbFunction {
     handle: Handle,
@@ -140,58 +146,90 @@ impl FastbootServer {
     }
 
     pub(crate) fn run(mut self) -> io::Result<Option<PostResponseAction>> {
+        let mut disconnected = false;
+
         loop {
-            let command = self.read_command()?;
-            let Ok(command) = std::str::from_utf8(&command) else {
-                FastbootResponder::new(&mut self.tx).fail(b"unrecognized command")?;
-                continue;
-            };
-
-            if command == "continue" {
-                tracing::info!(command, "fastboot command received");
-                match FastbootResponder::new(&mut self.tx).okay_best_effort(b"") {
-                    Ok(()) => tracing::debug!(command, "fastboot OKAY sent"),
-                    Err(err) => {
-                        tracing::warn!(command, error = ?err, "fastboot OKAY send failed")
+            match self.run_once() {
+                Ok(ServerStep::Continue) => {
+                    if disconnected {
+                        tracing::info!("fastboot host reconnected");
+                        disconnected = false;
                     }
                 }
-                return Ok(None);
-            }
-
-            if matches!(command, "upload" | "get_staged") {
-                self.upload_staged()?;
-                continue;
-            }
-
-            if command.starts_with(DOWNLOAD_PREFIX) {
-                match parse_download_command(command) {
-                    Ok(Some(size)) => {
-                        tracing::info!(command, bytes = size, "fastboot download requested");
-                        if let Err(err) = self.download(size) {
-                            tracing::warn!(command, error = ?err, "fastboot download failed");
-                            FastbootResponder::new(&mut self.tx).fail(format!("{err}"))?;
-                        }
+                Ok(ServerStep::Exit(action)) => return Ok(action),
+                Err(err) if is_usb_disconnect(&err) => {
+                    if disconnected {
+                        tracing::debug!(error = ?err, "fastboot host still disconnected");
+                    } else {
+                        tracing::info!(error = ?err, "fastboot host disconnected");
+                        disconnected = true;
                     }
-                    Ok(None) => unreachable!("download prefix was checked"),
-                    Err(err) => FastbootResponder::new(&mut self.tx).fail(format!("{err}"))?,
+                    thread::sleep(DISCONNECT_RETRY_DELAY);
                 }
-                continue;
-            }
-
-            let handler = self.commands.get(command).copied();
-            let mut context = CommandContext::new(&mut self.tx, &mut self.staged);
-            match handler {
-                Some(handler) => match handler(&mut context, command) {
-                    Ok(Some(action)) => return Ok(Some(action)),
-                    Ok(None) => {}
-                    Err(err) => {
-                        tracing::warn!(command, error = ?err, "fastboot command failed");
-                        context.fail(format!("{err}"))?;
-                    }
-                },
-                None => context.fail(b"unsupported command")?,
+                Err(err) => return Err(err),
             }
         }
+    }
+
+    fn run_once(&mut self) -> io::Result<ServerStep> {
+        let command = self.read_command()?;
+        let Ok(command) = std::str::from_utf8(&command) else {
+            FastbootResponder::new(&mut self.tx).fail(b"unrecognized command")?;
+            return Ok(ServerStep::Continue);
+        };
+
+        if command == "continue" {
+            tracing::info!(command, "fastboot command received");
+            match FastbootResponder::new(&mut self.tx).okay_best_effort(b"") {
+                Ok(()) => tracing::debug!(command, "fastboot OKAY sent"),
+                Err(err) => {
+                    tracing::warn!(command, error = ?err, "fastboot OKAY send failed")
+                }
+            }
+            return Ok(ServerStep::Exit(None));
+        }
+
+        if matches!(command, "upload" | "get_staged") {
+            self.upload_staged()?;
+            return Ok(ServerStep::Continue);
+        }
+
+        if command.starts_with(DOWNLOAD_PREFIX) {
+            match parse_download_command(command) {
+                Ok(Some(size)) => {
+                    tracing::info!(command, bytes = size, "fastboot download requested");
+                    if let Err(err) = self.download(size) {
+                        if is_usb_disconnect(&err) {
+                            return Err(err);
+                        }
+                        tracing::warn!(command, error = ?err, "fastboot download failed");
+                        FastbootResponder::new(&mut self.tx).fail(format!("{err}"))?;
+                    }
+                }
+                Ok(None) => unreachable!("download prefix was checked"),
+                Err(err) => FastbootResponder::new(&mut self.tx).fail(format!("{err}"))?,
+            }
+            return Ok(ServerStep::Continue);
+        }
+
+        let handler = self.commands.get(command).copied();
+        let mut context = CommandContext::new(&mut self.tx, &mut self.staged);
+        match handler {
+            Some(handler) => match handler(&mut context, command) {
+                Ok(Some(action)) => return Ok(ServerStep::Exit(Some(action))),
+                Ok(None) => {}
+                Err(err) => {
+                    if is_usb_disconnect(&err) {
+                        return Err(err);
+                    }
+                    tracing::warn!(command, error = ?err, "fastboot command failed");
+                    context.fail(format!("{err}"))?;
+                }
+            },
+            None => context.fail(b"unsupported command")?,
+        }
+
+        Ok(ServerStep::Continue)
     }
 
     fn read_command(&mut self) -> io::Result<Vec<u8>> {
@@ -499,6 +537,19 @@ fn read_packet(endpoint: &mut EndpointOut, buffer: &mut [u8]) -> io::Result<usiz
     }
 }
 
+fn is_usb_disconnect(err: &io::Error) -> bool {
+    matches!(
+        err.raw_os_error(),
+        Some(libc::ESHUTDOWN | libc::EPIPE | libc::ENODEV | libc::ECONNRESET)
+    ) || matches!(
+        err.kind(),
+        io::ErrorKind::BrokenPipe
+            | io::ErrorKind::ConnectionAborted
+            | io::ErrorKind::ConnectionReset
+            | io::ErrorKind::NotConnected
+    )
+}
+
 fn parse_download_command(command: &str) -> io::Result<Option<u32>> {
     let Some(size) = command.strip_prefix(DOWNLOAD_PREFIX) else {
         return Ok(None);
@@ -559,4 +610,46 @@ fn write_all_fd(fd: RawFd, mut data: &[u8]) -> io::Result<()> {
         }
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn recognizes_usb_disconnect_errno_values() {
+        for errno in [libc::ESHUTDOWN, libc::EPIPE, libc::ENODEV, libc::ECONNRESET] {
+            let err = io::Error::from_raw_os_error(errno);
+            assert!(is_usb_disconnect(&err), "errno {errno} was not recognized");
+        }
+    }
+
+    #[test]
+    fn recognizes_usb_disconnect_error_kinds() {
+        for kind in [
+            io::ErrorKind::BrokenPipe,
+            io::ErrorKind::ConnectionAborted,
+            io::ErrorKind::ConnectionReset,
+            io::ErrorKind::NotConnected,
+        ] {
+            let err = io::Error::new(kind, "transport closed");
+            assert!(is_usb_disconnect(&err), "kind {kind:?} was not recognized");
+        }
+    }
+
+    #[test]
+    fn does_not_treat_protocol_errors_as_disconnects() {
+        for kind in [
+            io::ErrorKind::InvalidInput,
+            io::ErrorKind::InvalidData,
+            io::ErrorKind::UnexpectedEof,
+            io::ErrorKind::TimedOut,
+        ] {
+            let err = io::Error::new(kind, "protocol error");
+            assert!(
+                !is_usb_disconnect(&err),
+                "kind {kind:?} was treated as disconnect"
+            );
+        }
+    }
 }

@@ -50,18 +50,45 @@ fn forward_once() -> io::Result<()> {
     let mut backlog = Backlog::default();
     drain_kmsg_to_backlog(&mut kmsg, &mut backlog, &mut record)?;
 
-    let mut tty = wait_for_tty(&mut kmsg, &mut backlog, &mut record)?;
-    flush_backlog(&mut tty, &mut backlog)?;
+    loop {
+        let mut tty = match wait_for_tty(&mut kmsg, &mut backlog, &mut record) {
+            Ok(tty) => tty,
+            Err(err) if is_tty_disconnect(&err) => {
+                tracing::info!(error = ?err, "kmsg forwarder tty disconnected while attaching");
+                thread::sleep(Duration::from_millis(100));
+                continue;
+            }
+            Err(err) => return Err(err),
+        };
+
+        match forward_attached(&mut kmsg, &mut tty, &mut backlog, &mut record) {
+            Ok(()) => unreachable!("attached kmsg forwarder loop should not exit"),
+            Err(err) if is_tty_disconnect(&err) => {
+                tracing::info!(error = ?err, "kmsg forwarder tty disconnected");
+            }
+            Err(err) => return Err(err),
+        }
+    }
+}
+
+fn forward_attached(
+    kmsg: &mut File,
+    tty: &mut File,
+    backlog: &mut Backlog,
+    record: &mut [u8],
+) -> io::Result<()> {
+    flush_backlog(tty, backlog)?;
 
     loop {
-        match read_kmsg(&mut kmsg, &mut record)? {
+        match read_kmsg(kmsg, record)? {
             KmsgRead::Record(read) => {
-                write_kmsg_record(&mut tty, &record[..read])?;
-                wait_for_tty_queue(&tty)?;
+                backlog.push(&record[..read]);
+                flush_backlog_records(tty, backlog)?;
             }
             KmsgRead::Empty => thread::sleep(Duration::from_millis(50)),
             KmsgRead::Overwritten => {
-                write_tty_line(&mut tty, b"pocketboot: kmsg records were overwritten")?;
+                backlog.push_message(b"pocketboot: kmsg records were overwritten");
+                flush_backlog_records(tty, backlog)?;
             }
         }
     }
@@ -166,6 +193,19 @@ fn should_retry_open(err: &io::Error) -> bool {
     matches!(
         err.kind(),
         io::ErrorKind::NotFound | io::ErrorKind::PermissionDenied | io::ErrorKind::WouldBlock
+    ) || is_tty_disconnect(err)
+}
+
+fn is_tty_disconnect(err: &io::Error) -> bool {
+    matches!(
+        err.raw_os_error(),
+        Some(libc::EIO | libc::ENODEV | libc::ESHUTDOWN | libc::EPIPE | libc::ECONNRESET)
+    ) || matches!(
+        err.kind(),
+        io::ErrorKind::BrokenPipe
+            | io::ErrorKind::ConnectionAborted
+            | io::ErrorKind::ConnectionReset
+            | io::ErrorKind::NotConnected
     )
 }
 
@@ -202,10 +242,19 @@ impl Backlog {
         self.push(message);
     }
 
-    fn pop(&mut self) -> Option<Vec<u8>> {
+    fn front(&self) -> Option<&[u8]> {
+        self.records.front().map(Vec::as_slice)
+    }
+
+    fn pop_front(&mut self) -> Option<Vec<u8>> {
         let record = self.records.pop_front()?;
         self.bytes -= record.len();
         Some(record)
+    }
+
+    fn clear_dropped(&mut self) {
+        self.dropped_records = 0;
+        self.dropped_bytes = 0;
     }
 }
 
@@ -243,10 +292,10 @@ fn drain_kmsg_to_backlog(
 }
 
 fn flush_backlog(tty: &mut File, backlog: &mut Backlog) -> io::Result<()> {
-    write_tty_line(tty, b"pocketboot: forwarding kernel log from /dev/kmsg")?;
+    write_tty_line_flushed(tty, b"pocketboot: forwarding kernel log from /dev/kmsg")?;
 
     if backlog.dropped_records > 0 {
-        write_tty_line(
+        write_tty_line_flushed(
             tty,
             format!(
                 "pocketboot: kmsg backlog dropped {} records/{} bytes",
@@ -254,6 +303,7 @@ fn flush_backlog(tty: &mut File, backlog: &mut Backlog) -> io::Result<()> {
             )
             .as_bytes(),
         )?;
+        backlog.clear_dropped();
     }
 
     tracing::info!(
@@ -262,18 +312,40 @@ fn flush_backlog(tty: &mut File, backlog: &mut Backlog) -> io::Result<()> {
         "flushing kmsg backlog"
     );
 
-    while let Some(record) = backlog.pop() {
-        write_kmsg_record(tty, &record)?;
-        wait_for_tty_queue(tty)?;
-    }
+    flush_backlog_records(tty, backlog)?;
 
     tracing::info!("kmsg forwarder backlog flushed");
-    tty.flush()
+    Ok(())
+}
+
+fn flush_backlog_records(tty: &mut File, backlog: &mut Backlog) -> io::Result<()> {
+    flush_backlog_records_with(backlog, |record| {
+        write_kmsg_record(tty, record)?;
+        wait_for_tty_queue(tty)
+    })
+}
+
+fn flush_backlog_records_with(
+    backlog: &mut Backlog,
+    mut flush: impl FnMut(&[u8]) -> io::Result<()>,
+) -> io::Result<()> {
+    while let Some(record) = backlog.front() {
+        flush(record)?;
+        backlog.pop_front();
+    }
+
+    Ok(())
 }
 
 fn write_kmsg_record(tty: &mut File, raw: &[u8]) -> io::Result<()> {
     kmsg::for_each_record_line(raw, |line| write_tty_line(tty, line.as_bytes()))?;
     tty.flush()
+}
+
+fn write_tty_line_flushed(tty: &mut File, line: &[u8]) -> io::Result<()> {
+    write_tty_line(tty, line)?;
+    tty.flush()?;
+    wait_for_tty_queue(tty)
 }
 
 fn write_tty_line(tty: &mut File, line: &[u8]) -> io::Result<()> {
@@ -315,4 +387,66 @@ fn tty_modem_bits(tty: &File) -> io::Result<libc::c_int> {
     }
 
     Ok(bits)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn successful_flush_removes_records_from_backlog() {
+        let mut backlog = Backlog::default();
+        backlog.push(b"one");
+        backlog.push(b"two");
+
+        let mut flushed = Vec::new();
+        flush_backlog_records_with(&mut backlog, |record| {
+            flushed.push(record.to_vec());
+            Ok(())
+        })
+        .unwrap();
+
+        assert_eq!(flushed, [b"one".to_vec(), b"two".to_vec()]);
+        assert!(backlog.records.is_empty());
+        assert_eq!(backlog.bytes, 0);
+    }
+
+    #[test]
+    fn failed_flush_keeps_failed_record_in_backlog() {
+        let mut backlog = Backlog::default();
+        backlog.push(b"one");
+        backlog.push(b"two");
+
+        let mut flushed = Vec::new();
+        let mut calls = 0;
+        let err = flush_backlog_records_with(&mut backlog, |record| {
+            calls += 1;
+            if calls == 2 {
+                return Err(io::Error::new(io::ErrorKind::BrokenPipe, "tty closed"));
+            }
+            flushed.push(record.to_vec());
+            Ok(())
+        })
+        .unwrap_err();
+
+        assert_eq!(err.kind(), io::ErrorKind::BrokenPipe);
+        assert_eq!(flushed, [b"one".to_vec()]);
+        assert_eq!(backlog.records.len(), 1);
+        assert_eq!(backlog.front(), Some(&b"two"[..]));
+        assert_eq!(backlog.bytes, b"two".len());
+    }
+
+    #[test]
+    fn recognizes_tty_disconnect_errors() {
+        for errno in [
+            libc::EIO,
+            libc::ENODEV,
+            libc::ESHUTDOWN,
+            libc::EPIPE,
+            libc::ECONNRESET,
+        ] {
+            let err = io::Error::from_raw_os_error(errno);
+            assert!(is_tty_disconnect(&err), "errno {errno} was not recognized");
+        }
+    }
 }
