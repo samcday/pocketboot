@@ -7,6 +7,10 @@ use std::{
     time::{Duration, Instant},
 };
 
+mod gadget;
+#[path = "kmsg-forwarder.rs"]
+mod kmsg_forwarder;
+
 type Result<T> = std::result::Result<T, String>;
 
 const SYS_BLOCK: &str = "/sys/block";
@@ -31,6 +35,8 @@ fn run() -> Result<()> {
     log_line("pocketboot: starting pid1 beachhead");
     mount_core_vfs()?;
     log_line("pocketboot: mounted /proc /sys /dev /run");
+    gadget::spawn();
+    kmsg_forwarder::spawn();
 
     wait_for_block_devices(Duration::from_secs(5));
     let devices = block_devices()?;
@@ -49,7 +55,7 @@ fn run() -> Result<()> {
     thread::sleep(Duration::from_millis(3000));
     log_line("pocketboot: exiting so the kernel can panic/reboot");
     thread::sleep(Duration::from_millis(3000));
-    
+
     Ok(())
 }
 
@@ -244,11 +250,11 @@ fn format_size(sectors: u64) -> String {
     format!("size={sectors} sectors/{mib} MiB")
 }
 
-fn log_line(message: &str) {
-    if write_line("/dev/console", message).is_ok() {
+pub(crate) fn log_line(message: &str) {
+    if write_line("/dev/kmsg", message).is_ok() {
         return;
     }
-    if write_line("/dev/kmsg", message).is_ok() {
+    if write_line("/dev/console", message).is_ok() {
         return;
     }
     eprintln!("{message}");
