@@ -1,13 +1,14 @@
 use std::{
     ffi::CString,
-    fs::{self, File},
-    io::{self, Write},
+    fs, io,
     path::{Path, PathBuf},
     thread,
     time::{Duration, Instant},
 };
 
+mod fastboot;
 mod gadget;
+mod kmsg;
 #[path = "kmsg-forwarder.rs"]
 mod kmsg_forwarder;
 
@@ -19,7 +20,8 @@ fn main() {
     let code = match run() {
         Ok(()) => 0,
         Err(err) => {
-            log_line(&format!("pocketboot: fatal: {err}"));
+            kmsg::init_tracing();
+            tracing::error!(error = %err, "fatal error");
             1
         }
     };
@@ -32,31 +34,48 @@ fn run() -> Result<()> {
         return Err("pocketboot must run as PID 1 (/init)".to_string());
     }
 
-    log_line("pocketboot: starting pid1 beachhead");
     mount_core_vfs()?;
-    log_line("pocketboot: mounted /proc /sys /dev /run");
-    gadget::spawn();
+    kmsg::init_tracing();
+    tracing::info!("starting pid1 beachhead");
+    tracing::info!("mounted core VFS");
+    let fastboot_thread = gadget::spawn(gadget::Mode::Fastboot)
+        .map_err(|err| format!("spawn fastboot gadget thread: {err}"))?;
     kmsg_forwarder::spawn();
 
     wait_for_block_devices(Duration::from_secs(5));
     let devices = block_devices()?;
     if devices.is_empty() {
-        log_line("pocketboot: no block devices found");
+        tracing::warn!("no block devices found");
     } else {
-        log_line(&format!("pocketboot: block devices ({})", devices.len()));
+        tracing::info!(count = devices.len(), "block devices found");
         for device in devices {
-            log_line(&format!("pocketboot:   {}", device.describe()));
+            tracing::info!(device = %device.name, description = %device.describe(), "block device");
             for partition in device.partitions {
-                log_line(&format!("pocketboot:     {}", partition.describe()));
+                tracing::info!(partition = %partition.name, description = %partition.describe(), "block partition");
             }
         }
     }
 
-    thread::sleep(Duration::from_millis(3000));
-    log_line("pocketboot: exiting so the kernel can panic/reboot");
-    thread::sleep(Duration::from_millis(3000));
-
+    tracing::info!("waiting for fastboot continue");
+    let action = join_fastboot_thread(fastboot_thread)?;
+    if let Some(action) = action {
+        tracing::info!("running fastboot post-response action");
+        action().map_err(|err| format!("fastboot post-response action failed: {err}"))?;
+    }
     Ok(())
+}
+
+fn join_fastboot_thread(
+    handle: thread::JoinHandle<gadget::ThreadResult>,
+) -> Result<Option<fastboot::PostResponseAction>> {
+    match handle.join() {
+        Ok(Ok(action)) => {
+            tracing::info!("fastboot thread exited");
+            Ok(action)
+        }
+        Ok(Err(err)) => Err(format!("fastboot thread failed: {err}")),
+        Err(_) => Err("fastboot thread panicked".to_string()),
+    }
 }
 
 fn mount_core_vfs() -> Result<()> {
@@ -248,19 +267,4 @@ fn format_size(sectors: u64) -> String {
     let bytes = sectors as u128 * 512;
     let mib = bytes / 1024 / 1024;
     format!("size={sectors} sectors/{mib} MiB")
-}
-
-pub(crate) fn log_line(message: &str) {
-    if write_line("/dev/kmsg", message).is_ok() {
-        return;
-    }
-    if write_line("/dev/console", message).is_ok() {
-        return;
-    }
-    eprintln!("{message}");
-}
-
-fn write_line(path: &str, message: &str) -> io::Result<()> {
-    let mut file = File::options().write(true).open(path)?;
-    writeln!(file, "{message}")
 }

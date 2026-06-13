@@ -11,6 +11,8 @@ edition = "2024"
 gadgetry-most-foul = { path = "../gadgetry-most-foul" }
 libc = "0.2.177"
 rustix = { version = "1", features = ["termios"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", default-features = false, features = ["fmt", "registry", "std"] }
 
 [profile.release]
 codegen-units = 1
