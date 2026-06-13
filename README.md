@@ -30,6 +30,20 @@ The userspace is implemented as a monolithic static Rust binary. This gives
 us a rich environment to build a streamlined and user-friendly pre-boot
 environment with all the bells and whistles.
 
+## Building
+
+The current beachhead is a tiny `/init` binary that mounts `/proc`, `/sys`,
+`/dev` and `/run`, prints the block devices visible in `/sys/block`, and exits
+so PID 1 death trips the kernel panic/reboot path.
+
+```sh
+cargo xtask cpio
+```
+
+This builds `target/aarch64-unknown-linux-musl/release/pocketboot` and writes an
+initrd-ready `newc` archive to `target/pocketboot-initrd.cpio` with the binary
+installed as `/init`.
+
 Planned features:
 
  * Touch-enabled boot menu
