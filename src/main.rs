@@ -3,14 +3,16 @@ use std::{
     fs, io,
     path::{Path, PathBuf},
     thread,
-    time::{Duration, Instant},
+    time::Duration,
 };
 
 mod fastboot;
 mod gadget;
+mod kexec;
 mod kmsg;
 #[path = "kmsg-forwarder.rs"]
 mod kmsg_forwarder;
+mod settle;
 
 type Result<T> = std::result::Result<T, String>;
 
@@ -42,7 +44,29 @@ fn run() -> Result<()> {
         .map_err(|err| format!("spawn fastboot gadget thread: {err}"))?;
     kmsg_forwarder::spawn();
 
-    wait_for_block_devices(Duration::from_secs(5));
+    let settled = settle::wait_for_local_flash(Duration::from_secs(5));
+    if settled.timed_out {
+        tracing::warn!(
+            elapsed_ms = settled.elapsed.as_millis(),
+            disks = settled.disks,
+            partitions = settled.partitions,
+            events = settled.events,
+            snapshot_changes = settled.snapshot_changes,
+            snapshot = %settled.summary,
+            "local flash settle timed out"
+        );
+    } else {
+        tracing::info!(
+            elapsed_ms = settled.elapsed.as_millis(),
+            disks = settled.disks,
+            partitions = settled.partitions,
+            events = settled.events,
+            snapshot_changes = settled.snapshot_changes,
+            snapshot = %settled.summary,
+            "local flash settled"
+        );
+    }
+
     let devices = block_devices()?;
     if devices.is_empty() {
         tracing::warn!("no block devices found");
@@ -56,7 +80,7 @@ fn run() -> Result<()> {
         }
     }
 
-    tracing::info!("waiting for fastboot continue");
+    tracing::info!("waiting for fastboot exit");
     let action = join_fastboot_thread(fastboot_thread)?;
     if let Some(action) = action {
         tracing::info!("running fastboot post-response action");
@@ -152,22 +176,6 @@ fn mount_fs(
 
 fn cstring(value: &str) -> Result<CString> {
     CString::new(value).map_err(|_| format!("string contains NUL byte: {value:?}"))
-}
-
-fn wait_for_block_devices(timeout: Duration) {
-    let start = Instant::now();
-    while start.elapsed() < timeout {
-        if has_block_devices() {
-            return;
-        }
-        thread::sleep(Duration::from_millis(100));
-    }
-}
-
-fn has_block_devices() -> bool {
-    fs::read_dir(SYS_BLOCK)
-        .map(|mut entries| entries.any(|entry| entry.is_ok()))
-        .unwrap_or(false)
 }
 
 #[derive(Debug)]

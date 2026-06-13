@@ -1,6 +1,7 @@
 use std::{
     collections::HashMap,
-    io,
+    fs::File,
+    io::{self, Read, Seek, SeekFrom, Write},
     os::fd::{AsRawFd, RawFd},
     sync::{
         Arc,
@@ -18,9 +19,13 @@ use gadgetry_most_foul::{
     },
 };
 
+use crate::kexec;
+
 pub(crate) mod commands;
 
 const COMMAND_MAX: usize = 64;
+const DOWNLOAD_PREFIX: &str = "download:";
+const TRANSFER_CHUNK: usize = 1024 * 1024;
 const RESPONSE_MAX: usize = 64;
 const RESPONSE_STATUS_LEN: usize = 4;
 const RESPONSE_PAYLOAD_MAX: usize = RESPONSE_MAX - RESPONSE_STATUS_LEN;
@@ -158,6 +163,21 @@ impl FastbootServer {
                 continue;
             }
 
+            if command.starts_with(DOWNLOAD_PREFIX) {
+                match parse_download_command(command) {
+                    Ok(Some(size)) => {
+                        tracing::info!(command, bytes = size, "fastboot download requested");
+                        if let Err(err) = self.download(size) {
+                            tracing::warn!(command, error = ?err, "fastboot download failed");
+                            FastbootResponder::new(&mut self.tx).fail(format!("{err}"))?;
+                        }
+                    }
+                    Ok(None) => unreachable!("download prefix was checked"),
+                    Err(err) => FastbootResponder::new(&mut self.tx).fail(format!("{err}"))?,
+                }
+                continue;
+            }
+
             let handler = self.commands.get(command).copied();
             let mut context = CommandContext::new(&mut self.tx, &mut self.staged);
             match handler {
@@ -185,12 +205,47 @@ impl FastbootServer {
         Ok(command[..end].to_vec())
     }
 
+    fn download(&mut self, size: u32) -> io::Result<()> {
+        let size_u64 = u64::from(size);
+        let mut file = kexec::create_payload_memfd("fastboot-download")?;
+        file.set_len(size_u64)?;
+
+        let buffer_len = usize::try_from(size_u64.min(TRANSFER_CHUNK as u64)).map_err(|_| {
+            io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "download size does not fit usize",
+            )
+        })?;
+        let mut buffer = transfer_buffer(buffer_len)?;
+
+        FastbootResponder::new(&mut self.tx).data(size)?;
+
+        let mut remaining = size_u64;
+        while remaining > 0 {
+            let chunk_len = usize::try_from(remaining.min(buffer.len() as u64)).map_err(|_| {
+                io::Error::new(
+                    io::ErrorKind::InvalidInput,
+                    "download chunk does not fit usize",
+                )
+            })?;
+            let chunk = &mut buffer[..chunk_len];
+            self.rx.read_exact_timeout(chunk, TRANSFER_TIMEOUT)?;
+            file.write_all(chunk)?;
+            remaining -= chunk_len as u64;
+        }
+
+        file.seek(SeekFrom::Start(0))?;
+        self.staged = Some(StagedData::file("download", file, size_u64));
+        tracing::info!(bytes = size_u64, "download staged");
+        FastbootResponder::new(&mut self.tx).okay(b"")
+    }
+
     fn upload_staged(&mut self) -> io::Result<()> {
         let Some(staged) = self.staged.as_ref() else {
             FastbootResponder::new(&mut self.tx).fail(b"no staged data")?;
             return Ok(());
         };
-        let Ok(size) = u32::try_from(staged.data.len()) else {
+        let Ok(size) = u32::try_from(staged.len()) else {
             FastbootResponder::new(&mut self.tx).fail(b"staged data too large")?;
             return Ok(());
         };
@@ -199,17 +254,69 @@ impl FastbootServer {
             return Ok(());
         }
 
-        tracing::info!(name = %staged.name, bytes = staged.data.len(), "uploading staged data");
+        tracing::info!(name = %staged.name, bytes = staged.len(), "uploading staged data");
         let mut responder = FastbootResponder::new(&mut self.tx);
         responder.data(size)?;
-        responder.send_payload(&staged.data)?;
+        staged.send(&mut responder)?;
         responder.okay(b"")
     }
 }
 
 struct StagedData {
     name: String,
-    data: Vec<u8>,
+    payload: StagedPayload,
+}
+
+enum StagedPayload {
+    Memory(Vec<u8>),
+    File { file: File, size: u64 },
+}
+
+impl StagedData {
+    fn memory(name: impl Into<String>, data: Vec<u8>) -> Self {
+        Self {
+            name: name.into(),
+            payload: StagedPayload::Memory(data),
+        }
+    }
+
+    fn file(name: impl Into<String>, file: File, size: u64) -> Self {
+        Self {
+            name: name.into(),
+            payload: StagedPayload::File { file, size },
+        }
+    }
+
+    fn len(&self) -> u64 {
+        match &self.payload {
+            StagedPayload::Memory(data) => data.len() as u64,
+            StagedPayload::File { size, .. } => *size,
+        }
+    }
+
+    fn as_file(&self) -> io::Result<File> {
+        match &self.payload {
+            StagedPayload::Memory(data) => {
+                let mut file = kexec::create_payload_memfd(&self.name)?;
+                file.write_all(data)?;
+                file.seek(SeekFrom::Start(0))?;
+                Ok(file)
+            }
+            StagedPayload::File { file, .. } => {
+                File::open(format!("/proc/self/fd/{}", file.as_raw_fd()))
+            }
+        }
+    }
+
+    fn send(&self, responder: &mut FastbootResponder<'_>) -> io::Result<()> {
+        match &self.payload {
+            StagedPayload::Memory(data) => responder.send_payload(data),
+            StagedPayload::File { .. } => {
+                let mut file = self.as_file()?;
+                responder.send_payload_from_reader(&mut file, self.len())
+            }
+        }
+    }
 }
 
 pub(crate) struct CommandContext<'a> {
@@ -226,10 +333,14 @@ impl<'a> CommandContext<'a> {
     }
 
     pub(crate) fn stage(&mut self, name: impl Into<String>, data: Vec<u8>) {
-        *self.staged = Some(StagedData {
-            name: name.into(),
-            data,
-        });
+        *self.staged = Some(StagedData::memory(name, data));
+    }
+
+    pub(crate) fn staged_file(&self) -> io::Result<File> {
+        self.staged
+            .as_ref()
+            .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "no staged data"))?
+            .as_file()
     }
 
     pub(crate) fn info(&mut self, message: impl AsRef<[u8]>) -> io::Result<()> {
@@ -280,6 +391,26 @@ impl<'a> FastbootResponder<'a> {
 
     fn send_payload(&mut self, data: &[u8]) -> io::Result<()> {
         self.tx.write_all_timeout(data, TRANSFER_TIMEOUT)
+    }
+
+    fn send_payload_from_reader(
+        &mut self,
+        mut reader: impl Read,
+        mut remaining: u64,
+    ) -> io::Result<()> {
+        let mut buffer = transfer_buffer(TRANSFER_CHUNK)?;
+        while remaining > 0 {
+            let chunk_len = usize::try_from(remaining.min(buffer.len() as u64)).map_err(|_| {
+                io::Error::new(
+                    io::ErrorKind::InvalidInput,
+                    "upload chunk does not fit usize",
+                )
+            })?;
+            reader.read_exact(&mut buffer[..chunk_len])?;
+            self.send_payload(&buffer[..chunk_len])?;
+            remaining -= chunk_len as u64;
+        }
+        Ok(())
     }
 
     fn okay_best_effort(&mut self, message: impl AsRef<[u8]>) -> io::Result<()> {
@@ -342,6 +473,15 @@ impl<'a> FastbootResponder<'a> {
     }
 }
 
+fn transfer_buffer(len: usize) -> io::Result<Vec<u8>> {
+    let mut buffer = Vec::new();
+    buffer
+        .try_reserve_exact(len)
+        .map_err(|err| io::Error::other(format!("allocate transfer buffer: {err}")))?;
+    buffer.resize(len, 0);
+    Ok(buffer)
+}
+
 fn read_packet(endpoint: &mut EndpointOut, buffer: &mut [u8]) -> io::Result<usize> {
     let control = endpoint.control()?;
     let fd = control.as_raw_fd();
@@ -357,6 +497,22 @@ fn read_packet(endpoint: &mut EndpointOut, buffer: &mut [u8]) -> io::Result<usiz
             return Err(err);
         }
     }
+}
+
+fn parse_download_command(command: &str) -> io::Result<Option<u32>> {
+    let Some(size) = command.strip_prefix(DOWNLOAD_PREFIX) else {
+        return Ok(None);
+    };
+    if size.len() != 8 {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "download size must be 8 hex digits",
+        ));
+    }
+
+    u32::from_str_radix(size, 16)
+        .map(Some)
+        .map_err(|_| io::Error::new(io::ErrorKind::InvalidInput, "invalid download size"))
 }
 
 fn set_nonblocking(fd: RawFd) -> io::Result<libc::c_int> {

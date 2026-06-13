@@ -1,5 +1,4 @@
 use std::{
-    convert::Infallible,
     ffi::CString,
     fs::File,
     io,
@@ -8,6 +7,10 @@ use std::{
 
 const KEXEC_FILE_NO_INITRAMFS: libc::c_ulong = 0x00000004;
 const LINUX_REBOOT_CMD_KEXEC: libc::c_int = 0x45584543;
+#[cfg(target_arch = "aarch64")]
+const SYS_KEXEC_FILE_LOAD: libc::c_long = 294;
+#[cfg(not(target_arch = "aarch64"))]
+const SYS_KEXEC_FILE_LOAD: libc::c_long = libc::SYS_kexec_file_load;
 
 pub(crate) struct KexecImage {
     kernel: File,
@@ -37,11 +40,6 @@ impl KexecImage {
             &self.cmdline,
         )
     }
-
-    pub(crate) fn load_and_exec(&self) -> io::Result<Infallible> {
-        self.load()?;
-        exec_loaded_image()
-    }
 }
 
 pub(crate) fn create_payload_memfd(name: &str) -> io::Result<File> {
@@ -62,7 +60,7 @@ pub(crate) fn reopen_payload_readonly(file: File) -> io::Result<File> {
     Ok(readonly)
 }
 
-pub(crate) fn exec_loaded_image() -> io::Result<Infallible> {
+pub(crate) fn exec_loaded_image() -> io::Result<()> {
     let rc = unsafe { libc::reboot(LINUX_REBOOT_CMD_KEXEC) };
     if rc < 0 {
         return Err(io::Error::last_os_error());
@@ -85,7 +83,7 @@ fn kexec_file_load(
     let cmdline_len = cmdline.as_bytes_with_nul().len();
     let rc = unsafe {
         libc::syscall(
-            libc::SYS_kexec_file_load,
+            SYS_KEXEC_FILE_LOAD,
             libc::c_long::from(kernel_fd),
             libc::c_long::from(initrd_fd),
             cmdline_len as libc::c_ulong,
