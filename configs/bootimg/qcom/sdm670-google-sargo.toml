@@ -1,0 +1,13 @@
+# Google Pixel 3a (sargo) Android boot image packaging
+
+header_version = 2
+page_size = 4096
+base = 0x0
+
+kernel_offset = 0x00008000
+ramdisk_offset = 0x01000000
+second_offset = 0x00f00000
+tags_offset = 0x00000100
+dtb_offset = 0x01100000
+
+cmdline = ""

@@ -5,3 +5,7 @@ edition = "2024"
 publish = false
 
 [dependencies]
+abootimg-oxide = { version = "0.5.1", features = ["hash"] }
+serde = { version = "1", features = ["derive"] }
+sha1 = "0.11"
+toml = "0.8"

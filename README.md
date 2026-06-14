@@ -54,6 +54,16 @@ cargo xtask kernel qcom/msm8916-samsung-a5u-eur ./linux
 The kernel build uses `target/kernel/<vendor>/<device>` as `O=`, embeds a fresh
 pocketboot initramfs, and builds `Image.gz` plus the inferred DTB.
 
+Once the kernel is built, package those artifacts as an Android boot image:
+
+```sh
+cargo xtask bootimg qcom/sdm670-google-sargo
+```
+
+Boot image packaging is device-specific and configured by
+`configs/bootimg/<vendor>/<device>.toml`. The command requires an existing
+kernel build and writes `target/kernel/<vendor>/<device>/boot.img` by default.
+
 Planned features:
 
  * Touch-enabled boot menu

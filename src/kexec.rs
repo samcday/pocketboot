@@ -43,7 +43,7 @@ impl KexecImage {
         let dtb = match &self.dtb {
             Some(dtb) => {
                 tracing::info!("using DTB from staged boot image");
-                read_payload(dtb)?
+                with_live_memory(read_payload(dtb)?)?
             }
             None => {
                 tracing::info!("using current DTB from /sys/firmware/fdt");
@@ -99,6 +99,29 @@ fn read_current_dtb() -> io::Result<Vec<u8>> {
             format!("no DTB supplied and /sys/firmware/fdt could not be read: {err}"),
         )
     })
+}
+
+#[cfg(target_arch = "aarch64")]
+fn with_live_memory(dtb: Vec<u8>) -> io::Result<Vec<u8>> {
+    let live_dtb = fs::read("/sys/firmware/fdt").map_err(|err| {
+        io::Error::new(
+            err.kind(),
+            format!(
+                "DTB supplied but /sys/firmware/fdt could not be read for /memory graft: {err}"
+            ),
+        )
+    })?;
+    let grafted = fdt::graft_memory(&dtb, &live_dtb)?;
+    tracing::info!(
+        bytes = grafted.len(),
+        "grafted live /memory nodes into supplied DTB"
+    );
+    Ok(grafted)
+}
+
+#[cfg(not(target_arch = "aarch64"))]
+fn with_live_memory(dtb: Vec<u8>) -> io::Result<Vec<u8>> {
+    Ok(dtb)
 }
 
 #[cfg(not(target_arch = "aarch64"))]
@@ -604,6 +627,18 @@ mod fdt {
         booted_from_kexec: u32,
     }
 
+    struct MemoryFragment {
+        data: Vec<u8>,
+    }
+
+    struct PropertyParts {
+        len: u32,
+        nameoff: u32,
+        value_start: usize,
+        value_end: usize,
+        next: usize,
+    }
+
     pub(super) fn patch_chosen(
         dtb: &[u8],
         cmdline: &str,
@@ -633,6 +668,46 @@ mod fdt {
         };
 
         let new_struct = patch_structure_block(struct_block, &strings, &offsets, cmdline, initrd)?;
+        build_dtb(&header, &reserve_map, &new_struct, &strings)
+    }
+
+    pub(super) fn graft_memory(dtb: &[u8], live_dtb: &[u8]) -> io::Result<Vec<u8>> {
+        let header = Header::parse(dtb)?;
+        let reserve_map = reserve_map(dtb, &header)?;
+        let struct_block = checked_slice(
+            dtb,
+            header.off_dt_struct,
+            header.size_dt_struct,
+            "DTB structure block",
+        )?;
+        let mut strings = checked_slice(
+            dtb,
+            header.off_dt_strings,
+            header.size_dt_strings,
+            "DTB strings block",
+        )?
+        .to_vec();
+
+        let live_header = Header::parse(live_dtb)?;
+        let live_struct_block = checked_slice(
+            live_dtb,
+            live_header.off_dt_struct,
+            live_header.size_dt_struct,
+            "live DTB structure block",
+        )?;
+        let live_strings = checked_slice(
+            live_dtb,
+            live_header.off_dt_strings,
+            live_header.size_dt_strings,
+            "live DTB strings block",
+        )?;
+
+        let memory = extract_memory_fragments(live_struct_block, live_strings, &mut strings)?;
+        if memory.is_empty() {
+            return invalid_data("live DTB has no root memory nodes");
+        }
+
+        let new_struct = graft_memory_structure(struct_block, &memory)?;
         build_dtb(&header, &reserve_map, &new_struct, &strings)
     }
 
@@ -792,6 +867,243 @@ mod fdt {
         }
     }
 
+    fn extract_memory_fragments(
+        struct_block: &[u8],
+        strings: &[u8],
+        output_strings: &mut Vec<u8>,
+    ) -> io::Result<Vec<MemoryFragment>> {
+        let mut cursor = 0usize;
+        let mut depth = 0usize;
+        let mut saw_root = false;
+        let mut memory = Vec::new();
+
+        loop {
+            let token_start = cursor;
+            let token = read_be32(struct_block, cursor)?;
+            cursor += 4;
+
+            match token {
+                FDT_BEGIN_NODE => {
+                    let name_start = cursor;
+                    let name_end = find_nul(struct_block, name_start)?;
+                    let name = &struct_block[name_start..name_end];
+                    let next = align_usize(name_end + 1, 4)?;
+
+                    if depth == 0 {
+                        if saw_root {
+                            return invalid_data("DTB structure has multiple root nodes");
+                        }
+                        if !name.is_empty() {
+                            return invalid_data("DTB root node name is not empty");
+                        }
+                        saw_root = true;
+                        depth = 1;
+                        cursor = next;
+                    } else if depth == 1 && is_memory_node_name(name) {
+                        let (data, next) =
+                            copy_node_subtree(struct_block, strings, token_start, output_strings)?;
+                        memory.push(MemoryFragment { data });
+                        cursor = next;
+                    } else {
+                        depth += 1;
+                        cursor = next;
+                    }
+                }
+                FDT_END_NODE => {
+                    if depth == 0 {
+                        return invalid_data("DTB structure has too many END_NODE tokens");
+                    }
+                    depth -= 1;
+                }
+                FDT_PROP => cursor = property_parts(struct_block, cursor)?.next,
+                FDT_NOP => {}
+                FDT_END => {
+                    if !saw_root {
+                        return invalid_data("DTB structure has no root node");
+                    }
+                    if depth != 0 {
+                        return invalid_data("DTB structure ended before all nodes were closed");
+                    }
+                    return Ok(memory);
+                }
+                _ => return invalid_data(format!("DTB has unknown structure token {token}")),
+            }
+        }
+    }
+
+    fn graft_memory_structure(
+        struct_block: &[u8],
+        memory: &[MemoryFragment],
+    ) -> io::Result<Vec<u8>> {
+        let memory_bytes: usize = memory.iter().map(|fragment| fragment.data.len()).sum();
+        let mut cursor = 0usize;
+        let mut depth = 0usize;
+        let mut saw_root = false;
+        let mut inserted_memory = false;
+        let mut output = Vec::with_capacity(struct_block.len() + memory_bytes);
+
+        loop {
+            let token_start = cursor;
+            let token = read_be32(struct_block, cursor)?;
+            cursor += 4;
+
+            match token {
+                FDT_BEGIN_NODE => {
+                    let name_start = cursor;
+                    let name_end = find_nul(struct_block, name_start)?;
+                    let name = &struct_block[name_start..name_end];
+                    let next = align_usize(name_end + 1, 4)?;
+
+                    if depth == 0 {
+                        if saw_root {
+                            return invalid_data("DTB structure has multiple root nodes");
+                        }
+                        if !name.is_empty() {
+                            return invalid_data("DTB root node name is not empty");
+                        }
+                        saw_root = true;
+                        output.extend_from_slice(&struct_block[token_start..next]);
+                        depth = 1;
+                        cursor = next;
+                    } else if depth == 1 && is_memory_node_name(name) {
+                        cursor = skip_node_subtree(struct_block, token_start)?;
+                    } else {
+                        if depth == 1 && !inserted_memory {
+                            append_memory_fragments(&mut output, memory);
+                            inserted_memory = true;
+                        }
+                        output.extend_from_slice(&struct_block[token_start..next]);
+                        depth += 1;
+                        cursor = next;
+                    }
+                }
+                FDT_END_NODE => {
+                    if depth == 0 {
+                        return invalid_data("DTB structure has too many END_NODE tokens");
+                    }
+                    if depth == 1 && !inserted_memory {
+                        append_memory_fragments(&mut output, memory);
+                        inserted_memory = true;
+                    }
+                    output.extend_from_slice(&struct_block[token_start..cursor]);
+                    depth -= 1;
+                }
+                FDT_PROP => {
+                    let next = property_parts(struct_block, cursor)?.next;
+                    output.extend_from_slice(&struct_block[token_start..next]);
+                    cursor = next;
+                }
+                FDT_NOP => output.extend_from_slice(&struct_block[token_start..cursor]),
+                FDT_END => {
+                    output.extend_from_slice(&struct_block[token_start..cursor]);
+                    if !saw_root {
+                        return invalid_data("DTB structure has no root node");
+                    }
+                    if depth != 0 {
+                        return invalid_data("DTB structure ended before all nodes were closed");
+                    }
+                    return Ok(output);
+                }
+                _ => return invalid_data(format!("DTB has unknown structure token {token}")),
+            }
+        }
+    }
+
+    fn copy_node_subtree(
+        struct_block: &[u8],
+        strings: &[u8],
+        start: usize,
+        output_strings: &mut Vec<u8>,
+    ) -> io::Result<(Vec<u8>, usize)> {
+        let mut cursor = start;
+        let mut depth = 0usize;
+        let mut output = Vec::new();
+
+        loop {
+            let token_start = cursor;
+            let token = read_be32(struct_block, cursor)?;
+            cursor += 4;
+
+            match token {
+                FDT_BEGIN_NODE => {
+                    let name_start = cursor;
+                    let name_end = find_nul(struct_block, name_start)?;
+                    let next = align_usize(name_end + 1, 4)?;
+                    output.extend_from_slice(&struct_block[token_start..next]);
+                    cursor = next;
+                    depth += 1;
+                }
+                FDT_END_NODE => {
+                    if depth == 0 {
+                        return invalid_data("DTB structure has too many END_NODE tokens");
+                    }
+                    output.extend_from_slice(&struct_block[token_start..cursor]);
+                    depth -= 1;
+                    if depth == 0 {
+                        return Ok((output, cursor));
+                    }
+                }
+                FDT_PROP => {
+                    let parts = property_parts(struct_block, cursor)?;
+                    let name = string_at(strings, parts.nameoff).ok_or_else(|| {
+                        invalid_data_error(format!(
+                            "DTB property name offset {} is out of range",
+                            parts.nameoff
+                        ))
+                    })?;
+                    let nameoff = ensure_string(output_strings, name)?;
+
+                    write_be32(&mut output, FDT_PROP);
+                    write_be32(&mut output, parts.len);
+                    write_be32(&mut output, nameoff);
+                    output.extend_from_slice(&struct_block[parts.value_start..parts.value_end]);
+                    pad_to(&mut output, 4);
+                    cursor = parts.next;
+                }
+                FDT_NOP => output.extend_from_slice(&struct_block[token_start..cursor]),
+                FDT_END => return invalid_data("DTB node subtree is unterminated"),
+                _ => return invalid_data(format!("DTB has unknown structure token {token}")),
+            }
+        }
+    }
+
+    fn skip_node_subtree(struct_block: &[u8], start: usize) -> io::Result<usize> {
+        let mut cursor = start;
+        let mut depth = 0usize;
+
+        loop {
+            let token = read_be32(struct_block, cursor)?;
+            cursor += 4;
+
+            match token {
+                FDT_BEGIN_NODE => {
+                    let name_end = find_nul(struct_block, cursor)?;
+                    cursor = align_usize(name_end + 1, 4)?;
+                    depth += 1;
+                }
+                FDT_END_NODE => {
+                    if depth == 0 {
+                        return invalid_data("DTB structure has too many END_NODE tokens");
+                    }
+                    depth -= 1;
+                    if depth == 0 {
+                        return Ok(cursor);
+                    }
+                }
+                FDT_PROP => cursor = property_parts(struct_block, cursor)?.next,
+                FDT_NOP => {}
+                FDT_END => return invalid_data("DTB node subtree is unterminated"),
+                _ => return invalid_data(format!("DTB has unknown structure token {token}")),
+            }
+        }
+    }
+
+    fn append_memory_fragments(output: &mut Vec<u8>, memory: &[MemoryFragment]) {
+        for fragment in memory {
+            output.extend_from_slice(&fragment.data);
+        }
+    }
+
     fn append_chosen_props(
         output: &mut Vec<u8>,
         offsets: &ChosenOffsets,
@@ -866,6 +1178,10 @@ mod fdt {
         )
     }
 
+    fn is_memory_node_name(name: &[u8]) -> bool {
+        name == b"memory" || name.starts_with(b"memory@")
+    }
+
     fn is_root(stack: &[Vec<u8>]) -> bool {
         stack.len() == 1 && stack[0].is_empty()
     }
@@ -933,6 +1249,29 @@ mod fdt {
             return invalid_data(format!("{name} extends past DTB payload"));
         }
         Ok(&data[offset..end])
+    }
+
+    fn property_parts(data: &[u8], cursor: usize) -> io::Result<PropertyParts> {
+        let len = read_be32(data, cursor)?;
+        let nameoff = read_be32(data, cursor + 4)?;
+        let value_start = cursor
+            .checked_add(8)
+            .ok_or_else(|| invalid_data_error("DTB property value offset overflow"))?;
+        let value_end = value_start
+            .checked_add(len as usize)
+            .ok_or_else(|| invalid_data_error("DTB property length overflow"))?;
+        let next = align_usize(value_end, 4)?;
+        if next > data.len() {
+            return invalid_data("DTB property extends past structure block");
+        }
+
+        Ok(PropertyParts {
+            len,
+            nameoff,
+            value_start,
+            value_end,
+            next,
+        })
     }
 
     fn find_nul(data: &[u8], start: usize) -> io::Result<usize> {
@@ -1003,6 +1342,12 @@ mod fdt {
             Child(String),
         }
 
+        #[derive(Debug, PartialEq, Eq)]
+        struct TestNode {
+            name: String,
+            props: Vec<(String, Vec<u8>)>,
+        }
+
         #[test]
         fn patched_chosen_properties_are_before_child_nodes() {
             let dtb = test_dtb_with_chosen_child();
@@ -1040,19 +1385,106 @@ mod fdt {
             );
         }
 
+        #[test]
+        fn graft_memory_replaces_supplied_memory_nodes() {
+            let old_reg = b"old memory";
+            let live_reg = b"live memory";
+            let target = test_dtb(|structure, strings| {
+                write_memory_node(structure, strings, b"memory@deadbeef", old_reg);
+                write_empty_node(structure, b"cpus");
+            });
+            let live = test_dtb(|structure, strings| {
+                write_memory_node(structure, strings, b"memory@80000000", live_reg);
+            });
+
+            let grafted = graft_memory(&target, &live).unwrap();
+            let memory = memory_nodes(&grafted).unwrap();
+
+            assert_eq!(memory.len(), 1);
+            assert_eq!(memory[0].name, "memory@80000000");
+            assert_eq!(prop(&memory[0], "reg"), Some(live_reg.as_slice()));
+            assert_ne!(prop(&memory[0], "reg"), Some(old_reg.as_slice()));
+        }
+
+        #[test]
+        fn graft_memory_inserts_when_supplied_dtb_has_no_memory() {
+            let live_reg = b"live memory";
+            let target = test_dtb(|structure, _strings| {
+                write_empty_node(structure, b"cpus");
+            });
+            let live = test_dtb(|structure, strings| {
+                write_memory_node(structure, strings, b"memory", live_reg);
+            });
+
+            let grafted = graft_memory(&target, &live).unwrap();
+            let memory = memory_nodes(&grafted).unwrap();
+
+            assert_eq!(memory.len(), 1);
+            assert_eq!(memory[0].name, "memory");
+            assert_eq!(prop(&memory[0], "reg"), Some(live_reg.as_slice()));
+        }
+
+        #[test]
+        fn graft_memory_preserves_chosen_patching() {
+            let live_reg = b"live memory";
+            let target = test_dtb_with_chosen_child();
+            let live = test_dtb(|structure, strings| {
+                write_memory_node(structure, strings, b"memory@80000000", live_reg);
+            });
+
+            let grafted = graft_memory(&target, &live).unwrap();
+            let patched = patch_chosen(&grafted, "console=tty0", None).unwrap();
+            let memory = memory_nodes(&patched).unwrap();
+            let chosen = chosen_events(&patched).unwrap();
+
+            assert_eq!(memory.len(), 1);
+            assert_eq!(prop(&memory[0], "reg"), Some(live_reg.as_slice()));
+            assert!(chosen.iter().any(|event| matches!(
+                event,
+                ChosenEvent::Prop(name, value)
+                    if name == "bootargs" && value == b"console=tty0\0"
+            )));
+        }
+
+        #[test]
+        fn graft_memory_fails_when_live_dtb_has_no_memory() {
+            let target = test_dtb(|structure, strings| {
+                write_memory_node(structure, strings, b"memory@deadbeef", b"old memory");
+            });
+            let live = test_dtb(|structure, _strings| {
+                write_empty_node(structure, b"cpus");
+            });
+
+            let err = graft_memory(&target, &live).unwrap_err();
+
+            assert_eq!(err.kind(), io::ErrorKind::InvalidData);
+            assert!(
+                err.to_string()
+                    .contains("live DTB has no root memory nodes"),
+                "unexpected error: {err}"
+            );
+        }
+
         fn test_dtb_with_chosen_child() -> Vec<u8> {
+            test_dtb(|structure, strings| {
+                let bootargs = ensure_string(strings, PROP_BOOTARGS).unwrap();
+                let compatible = ensure_string(strings, b"compatible").unwrap();
+
+                write_begin_node(structure, b"chosen");
+                write_prop(structure, bootargs, b"old-console=ttyS0\0");
+                write_begin_node(structure, b"framebuffer@0");
+                write_prop(structure, compatible, b"simple-framebuffer\0");
+                write_be32(structure, FDT_END_NODE);
+                write_be32(structure, FDT_END_NODE);
+            })
+        }
+
+        fn test_dtb(build_root: impl FnOnce(&mut Vec<u8>, &mut Vec<u8>)) -> Vec<u8> {
             let mut strings = Vec::new();
-            let bootargs = ensure_string(&mut strings, PROP_BOOTARGS).unwrap();
-            let compatible = ensure_string(&mut strings, b"compatible").unwrap();
             let mut structure = Vec::new();
 
             write_begin_node(&mut structure, b"");
-            write_begin_node(&mut structure, b"chosen");
-            write_prop(&mut structure, bootargs, b"old-console=ttyS0\0");
-            write_begin_node(&mut structure, b"framebuffer@0");
-            write_prop(&mut structure, compatible, b"simple-framebuffer\0");
-            write_be32(&mut structure, FDT_END_NODE);
-            write_be32(&mut structure, FDT_END_NODE);
+            build_root(&mut structure, &mut strings);
             write_be32(&mut structure, FDT_END_NODE);
             write_be32(&mut structure, FDT_END);
 
@@ -1073,6 +1505,98 @@ mod fdt {
                 &strings,
             )
             .unwrap()
+        }
+
+        fn write_memory_node(
+            structure: &mut Vec<u8>,
+            strings: &mut Vec<u8>,
+            name: &[u8],
+            reg: &[u8],
+        ) {
+            let device_type = ensure_string(strings, b"device_type").unwrap();
+            let reg_name = ensure_string(strings, b"reg").unwrap();
+
+            write_begin_node(structure, name);
+            write_prop(structure, device_type, b"memory\0");
+            write_prop(structure, reg_name, reg);
+            write_be32(structure, FDT_END_NODE);
+        }
+
+        fn write_empty_node(structure: &mut Vec<u8>, name: &[u8]) {
+            write_begin_node(structure, name);
+            write_be32(structure, FDT_END_NODE);
+        }
+
+        fn prop<'a>(node: &'a TestNode, name: &str) -> Option<&'a [u8]> {
+            node.props
+                .iter()
+                .find(|(prop_name, _)| prop_name == name)
+                .map(|(_, value)| value.as_slice())
+        }
+
+        fn memory_nodes(dtb: &[u8]) -> io::Result<Vec<TestNode>> {
+            let header = Header::parse(dtb)?;
+            let struct_block = checked_slice(
+                dtb,
+                header.off_dt_struct,
+                header.size_dt_struct,
+                "DTB structure block",
+            )?;
+            let strings = checked_slice(
+                dtb,
+                header.off_dt_strings,
+                header.size_dt_strings,
+                "DTB strings block",
+            )?;
+            let mut cursor = 0usize;
+            let mut stack: Vec<Vec<u8>> = Vec::new();
+            let mut current_memory = None;
+            let mut memory = Vec::new();
+
+            loop {
+                let token = read_be32(struct_block, cursor)?;
+                cursor += 4;
+
+                match token {
+                    FDT_BEGIN_NODE => {
+                        let name_start = cursor;
+                        let name_end = find_nul(struct_block, name_start)?;
+                        let name = &struct_block[name_start..name_end];
+                        cursor = align_usize(name_end + 1, 4)?;
+
+                        if stack.len() == 1 && is_memory_node_name(name) {
+                            current_memory = Some(TestNode {
+                                name: String::from_utf8_lossy(name).into_owned(),
+                                props: Vec::new(),
+                            });
+                        }
+                        stack.push(name.to_vec());
+                    }
+                    FDT_END_NODE => {
+                        if stack.len() == 2 && is_memory_node_name(&stack[1]) {
+                            memory.push(current_memory.take().unwrap());
+                        }
+                        stack.pop();
+                    }
+                    FDT_PROP => {
+                        let parts = property_parts(struct_block, cursor)?;
+                        cursor = parts.next;
+                        if stack.len() == 2 && is_memory_node_name(&stack[1]) {
+                            let name = string_at(strings, parts.nameoff)
+                                .map(String::from_utf8_lossy)
+                                .map(|name| name.into_owned())
+                                .unwrap_or_else(|| format!("<invalid:{}>", parts.nameoff));
+                            current_memory.as_mut().unwrap().props.push((
+                                name,
+                                struct_block[parts.value_start..parts.value_end].to_vec(),
+                            ));
+                        }
+                    }
+                    FDT_NOP => {}
+                    FDT_END => return Ok(memory),
+                    _ => return invalid_data(format!("unknown test DTB token: {token}")),
+                }
+            }
         }
 
         fn chosen_events(dtb: &[u8]) -> io::Result<Vec<ChosenEvent>> {

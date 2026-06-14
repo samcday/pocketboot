@@ -8,6 +8,10 @@ use std::{
     thread,
 };
 
+use abootimg_oxide::{HeaderV0, HeaderV0Versioned, OsVersionPatch};
+use serde::Deserialize;
+use sha1::Sha1;
+
 const DEFAULT_TARGET: &str = "aarch64-unknown-linux-musl";
 const INIT_BINARY: &str = "pocketboot";
 const DEFAULT_INITRD: &str = "pocketboot-initrd.cpio";
@@ -50,6 +54,18 @@ fn run() -> Result<()> {
                 Ok(())
             } else {
                 kernel(KernelArgs::parse(args)?)
+            }
+        }
+        Some("bootimg") => {
+            let args = args.collect::<Vec<_>>();
+            if args
+                .iter()
+                .any(|arg| matches!(arg.as_str(), "--help" | "-h"))
+            {
+                print_bootimg_usage();
+                Ok(())
+            } else {
+                bootimg(BootImgArgs::parse(args)?)
             }
         }
         Some("help" | "--help" | "-h") | None => {
@@ -169,6 +185,51 @@ impl KernelArgs {
             device: KernelDevice::parse(&args[0])?,
             kernel_tree: PathBuf::from(&args[1]),
         })
+    }
+}
+
+#[derive(Debug)]
+struct BootImgArgs {
+    device: KernelDevice,
+    output: Option<PathBuf>,
+}
+
+impl BootImgArgs {
+    fn parse(args: Vec<String>) -> Result<Self> {
+        let mut device = None;
+        let mut output = None;
+        let mut index = 0;
+
+        while index < args.len() {
+            let arg = &args[index];
+            match arg.as_str() {
+                "--output" | "-o" => {
+                    index += 1;
+                    output = Some(PathBuf::from(
+                        args.get(index)
+                            .ok_or_else(|| "--output requires a value".to_string())?,
+                    ));
+                }
+                value if value.starts_with("--output=") => {
+                    output = Some(PathBuf::from(&value["--output=".len()..]));
+                }
+                value if value.starts_with('-') => {
+                    return Err(format!("unknown bootimg option: {value}"));
+                }
+                value => {
+                    if device.is_some() {
+                        return Err(format!("unexpected positional argument: {value}"));
+                    }
+                    device = Some(KernelDevice::parse(value)?);
+                }
+            }
+            index += 1;
+        }
+
+        let device = device.ok_or_else(|| {
+            "usage: cargo xtask bootimg <vendor/device> [--output PATH]".to_string()
+        })?;
+        Ok(Self { device, output })
     }
 }
 
@@ -296,6 +357,187 @@ fn kernel(args: KernelArgs) -> Result<()> {
     println!("dtb {}", dtb.display());
     println!("config {}", out_dir.join(".config").display());
     Ok(())
+}
+
+fn bootimg(args: BootImgArgs) -> Result<()> {
+    let workspace_root = workspace_root()?;
+    let target_dir = target_dir(&workspace_root);
+    let out_dir = target_dir
+        .join("kernel")
+        .join(&args.device.vendor)
+        .join(&args.device.stem);
+    let image = out_dir.join("arch/arm64/boot/Image.gz");
+    let dtb = out_dir
+        .join("arch/arm64/boot/dts")
+        .join(&args.device.vendor)
+        .join(format!("{}.dtb", args.device.stem));
+    let config_path = workspace_root
+        .join("configs/bootimg")
+        .join(&args.device.vendor)
+        .join(format!("{}.toml", args.device.stem));
+    let output = args.output.unwrap_or_else(|| out_dir.join("boot.img"));
+
+    ensure_file(&image, "kernel image")?;
+    ensure_file(&dtb, "device tree blob")?;
+    ensure_file(&config_path, "boot image config")?;
+
+    let config = load_bootimg_config(&config_path)?;
+    write_bootimg(&config, &config_path, &image, &dtb, &output)?;
+
+    println!("wrote {}", output.display());
+    println!("image {}", image.display());
+    println!("dtb {}", dtb.display());
+    println!("config {}", config_path.display());
+    Ok(())
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct BootImgConfig {
+    header_version: u32,
+    page_size: u32,
+    base: u64,
+    kernel_offset: u64,
+    ramdisk_offset: u64,
+    second_offset: u64,
+    tags_offset: u64,
+    dtb_offset: u64,
+    #[serde(default)]
+    board: String,
+    #[serde(default)]
+    cmdline: String,
+}
+
+fn load_bootimg_config(path: &Path) -> Result<BootImgConfig> {
+    let contents =
+        fs::read_to_string(path).map_err(|err| format!("read {}: {err}", path.display()))?;
+    toml::from_str(&contents).map_err(|err| format!("parse {}: {err}", path.display()))
+}
+
+fn write_bootimg(
+    config: &BootImgConfig,
+    config_path: &Path,
+    image: &Path,
+    dtb: &Path,
+    output: &Path,
+) -> Result<()> {
+    if config.header_version != 2 {
+        return Err(format!(
+            "boot image header version {} is not supported yet; expected 2",
+            config.header_version
+        ));
+    }
+    if config.page_size == 0 {
+        return Err("boot image page_size must be non-zero".to_string());
+    }
+
+    let kernel_size = file_size_u32(image, "kernel image")?;
+    let dtb_size = file_size_u32(dtb, "device tree blob")?;
+    let hash_digest = bootimg_hash_digest(image, dtb)?;
+    let kernel_addr = boot_addr_u32(config.base, config.kernel_offset, "kernel_addr")?;
+    let ramdisk_addr = boot_addr_u32(config.base, config.ramdisk_offset, "ramdisk_addr")?;
+    let second_bootloader_addr =
+        boot_addr_u32(config.base, config.second_offset, "second_bootloader_addr")?;
+    let tags_addr = boot_addr_u32(config.base, config.tags_offset, "tags_addr")?;
+    let dtb_addr = config
+        .base
+        .checked_add(config.dtb_offset)
+        .ok_or_else(|| "dtb_addr overflows u64".to_string())?;
+
+    let header = HeaderV0 {
+        kernel_size,
+        kernel_addr,
+        ramdisk_size: 0,
+        ramdisk_addr,
+        second_bootloader_size: 0,
+        second_bootloader_addr,
+        tags_addr,
+        page_size: config.page_size,
+        osversionpatch: OsVersionPatch(0),
+        board_name: fixed_bytes(&config.board, "board", config_path)?,
+        hash_digest,
+        cmdline: Box::new(fixed_bytes(&config.cmdline, "cmdline", config_path)?),
+        versioned: HeaderV0Versioned::V2 {
+            recovery_dtbo_size: 0,
+            recovery_dtbo_addr: 0,
+            dtb_size,
+            dtb_addr,
+        },
+    };
+
+    if let Some(parent) = output
+        .parent()
+        .filter(|parent| !parent.as_os_str().is_empty())
+    {
+        fs::create_dir_all(parent).map_err(|err| format!("create {}: {err}", parent.display()))?;
+    }
+
+    let mut output_file =
+        File::create(output).map_err(|err| format!("create {}: {err}", output.display()))?;
+    let mut kernel_file =
+        File::open(image).map_err(|err| format!("open {}: {err}", image.display()))?;
+    let mut dtb_file = File::open(dtb).map_err(|err| format!("open {}: {err}", dtb.display()))?;
+    header
+        .full_write(
+            &mut output_file,
+            Some(&mut kernel_file),
+            None::<&mut File>,
+            None::<&mut File>,
+            None::<&mut File>,
+            Some(&mut dtb_file),
+        )
+        .map_err(|err| format!("write {}: {err}", output.display()))?;
+    output_file
+        .set_len(header.boot_image_size() as u64)
+        .map_err(|err| format!("truncate {}: {err}", output.display()))?;
+    output_file
+        .flush()
+        .map_err(|err| format!("flush {}: {err}", output.display()))?;
+    Ok(())
+}
+
+fn file_size_u32(path: &Path, description: &str) -> Result<u32> {
+    let size = fs::metadata(path)
+        .map_err(|err| format!("stat {}: {err}", path.display()))?
+        .len();
+    u32::try_from(size).map_err(|_| format!("{description} is too large: {}", path.display()))
+}
+
+fn bootimg_hash_digest(image: &Path, dtb: &Path) -> Result<[u8; 32]> {
+    let mut kernel_file =
+        File::open(image).map_err(|err| format!("open {}: {err}", image.display()))?;
+    let mut dtb_file = File::open(dtb).map_err(|err| format!("open {}: {err}", dtb.display()))?;
+
+    HeaderV0::compute_hash_digest::<File, Sha1>(
+        Some(&mut kernel_file),
+        None::<&mut File>,
+        None::<&mut File>,
+        None::<&mut File>,
+        Some(&mut dtb_file),
+    )
+    .map_err(|err| format!("compute boot image hash digest: {err}"))
+}
+
+fn boot_addr_u32(base: u64, offset: u64, name: &str) -> Result<u32> {
+    let value = base
+        .checked_add(offset)
+        .ok_or_else(|| format!("{name} overflows u64"))?;
+    u32::try_from(value).map_err(|_| format!("{name} does not fit in u32: 0x{value:x}"))
+}
+
+fn fixed_bytes<const N: usize>(value: &str, field: &str, context: &Path) -> Result<[u8; N]> {
+    let bytes = value.as_bytes();
+    if bytes.len() > N {
+        return Err(format!(
+            "{field} is too long for Android boot header near {}: {} > {N} bytes",
+            context.display(),
+            bytes.len()
+        ));
+    }
+
+    let mut output = [0; N];
+    output[..bytes.len()].copy_from_slice(bytes);
+    Ok(output)
 }
 
 fn kernel_tree(path: &Path) -> Result<PathBuf> {
@@ -496,7 +738,7 @@ fn source_date_epoch() -> u32 {
 
 fn print_usage() {
     println!(
-        "usage: cargo xtask <command>\n\ncommands:\n  cpio      build pocketboot and create an initrd cpio\n  kernel    build a pocketboot kernel image for one device"
+        "usage: cargo xtask <command>\n\ncommands:\n  cpio      build pocketboot and create an initrd cpio\n  kernel    build a pocketboot kernel image for one device\n  bootimg   package an already-built pocketboot kernel as boot.img"
     );
 }
 
@@ -509,5 +751,11 @@ fn print_cpio_usage() {
 fn print_kernel_usage() {
     println!(
         "usage: cargo xtask kernel <vendor/device> <kernel-tree>\n\nexample: cargo xtask kernel qcom/msm8916-samsung-a5u-eur ./linux\n\noutputs: target/kernel/<vendor>/<device>/arch/arm64/boot/Image.gz and the inferred DTB"
+    );
+}
+
+fn print_bootimg_usage() {
+    println!(
+        "usage: cargo xtask bootimg <vendor/device> [--output PATH]\n\nexample: cargo xtask bootimg qcom/sdm670-google-sargo\n\nrequires: target/kernel/<vendor>/<device>/arch/arm64/boot/Image.gz and the inferred DTB\ndefault output: target/kernel/<vendor>/<device>/boot.img"
     );
 }
