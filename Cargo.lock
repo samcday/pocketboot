@@ -213,7 +213,9 @@ dependencies = [
 
 [[package]]
 name = "gadgetry-most-foul"
-version = "0.1.0"
+version = "0.1.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "706c81a929c7009eaa6427d32b3af28ce5dd2133abafe63ff79f9c8fd79e849d"
 dependencies = [
  "async-io",
  "bitflags",

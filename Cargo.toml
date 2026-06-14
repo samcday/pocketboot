@@ -9,7 +9,7 @@ edition = "2024"
 
 [dependencies]
 abootimg-oxide = "0.5.1"
-gadgetry-most-foul = { path = "../gadgetry-most-foul" }
+gadgetry-most-foul = "0.1.1"
 libc = "0.2.177"
 rustix = { version = "1", features = ["termios"] }
 tracing = "0.1"
