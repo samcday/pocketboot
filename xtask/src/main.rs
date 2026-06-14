@@ -10,12 +10,14 @@ use std::{
 
 use abootimg_oxide::{HeaderV0, HeaderV0Versioned, OsVersionPatch};
 use serde::Deserialize;
-use sha1::Sha1;
+use sha1::{Digest, Sha1};
 
 const DEFAULT_TARGET: &str = "aarch64-unknown-linux-musl";
 const INIT_BINARY: &str = "pocketboot";
 const DEFAULT_INITRD: &str = "pocketboot-initrd.cpio";
 const KERNEL_ARCH: &str = "arm64";
+const ANDROID_BOOT_MAGIC: &[u8; 8] = b"ANDROID!";
+const SEANDROID_ENFORCE: &[u8] = b"SEANDROIDENFORCE";
 
 type Result<T> = std::result::Result<T, String>;
 
@@ -406,6 +408,24 @@ struct BootImgConfig {
     board: String,
     #[serde(default)]
     cmdline: String,
+    #[serde(default)]
+    ramdisk_size: u32,
+    #[serde(default)]
+    append_seandroid_enforce: bool,
+    qcdt: Option<QcdtConfig>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct QcdtConfig {
+    entries: Vec<QcdtEntry>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct QcdtEntry {
+    msm_id: [u32; 2],
+    board_id: [u32; 2],
 }
 
 fn load_bootimg_config(path: &Path) -> Result<BootImgConfig> {
@@ -421,14 +441,43 @@ fn write_bootimg(
     dtb: &Path,
     output: &Path,
 ) -> Result<()> {
-    if config.header_version != 2 {
+    if config.page_size == 0 || !config.page_size.is_power_of_two() {
+        return Err("boot image page_size must be a non-zero power of two".to_string());
+    }
+
+    match config.header_version {
+        0 => write_bootimg_v0(config, config_path, image, dtb, output),
+        2 => write_bootimg_v2(config, config_path, image, dtb, output),
+        version => Err(format!(
+            "boot image header version {version} is not supported yet; expected 0 or 2"
+        )),
+    }
+}
+
+fn write_bootimg_v2(
+    config: &BootImgConfig,
+    config_path: &Path,
+    image: &Path,
+    dtb: &Path,
+    output: &Path,
+) -> Result<()> {
+    if config.qcdt.is_some() {
         return Err(format!(
-            "boot image header version {} is not supported yet; expected 2",
-            config.header_version
+            "{}: qcdt requires boot image header_version = 0",
+            config_path.display()
         ));
     }
-    if config.page_size == 0 {
-        return Err("boot image page_size must be non-zero".to_string());
+    if config.ramdisk_size != 0 {
+        return Err(format!(
+            "{}: ramdisk_size is only supported for header_version = 0",
+            config_path.display()
+        ));
+    }
+    if config.append_seandroid_enforce {
+        return Err(format!(
+            "{}: append_seandroid_enforce is only supported for header_version = 0",
+            config_path.display()
+        ));
     }
 
     let kernel_size = file_size_u32(image, "kernel image")?;
@@ -496,6 +545,121 @@ fn write_bootimg(
     Ok(())
 }
 
+fn write_bootimg_v0(
+    config: &BootImgConfig,
+    config_path: &Path,
+    image: &Path,
+    dtb: &Path,
+    output: &Path,
+) -> Result<()> {
+    let kernel = fs::read(image).map_err(|err| format!("read {}: {err}", image.display()))?;
+    let dtb = fs::read(dtb).map_err(|err| format!("read {}: {err}", dtb.display()))?;
+    let ramdisk = vec![0; config.ramdisk_size as usize];
+    let vendor_dt = match &config.qcdt {
+        Some(qcdt) => build_qcdt(qcdt, config.page_size, &dtb, config_path)?,
+        None => Vec::new(),
+    };
+
+    let kernel_size = u32_len(kernel.len(), "kernel image", image)?;
+    let ramdisk_size = u32_len(ramdisk.len(), "ramdisk", config_path)?;
+    let qcdt_size = u32_len(vendor_dt.len(), "QCDT", config_path)?;
+    let kernel_addr = boot_addr_u32(config.base, config.kernel_offset, "kernel_addr")?;
+    let ramdisk_addr = boot_addr_u32(config.base, config.ramdisk_offset, "ramdisk_addr")?;
+    let second_bootloader_addr =
+        boot_addr_u32(config.base, config.second_offset, "second_bootloader_addr")?;
+    let tags_addr = boot_addr_u32(config.base, config.tags_offset, "tags_addr")?;
+    let page_size = usize::try_from(config.page_size)
+        .map_err(|_| format!("{}: page_size does not fit usize", config_path.display()))?;
+
+    let mut header = Vec::new();
+    header.extend_from_slice(ANDROID_BOOT_MAGIC);
+    write_u32_le(&mut header, kernel_size);
+    write_u32_le(&mut header, kernel_addr);
+    write_u32_le(&mut header, ramdisk_size);
+    write_u32_le(&mut header, ramdisk_addr);
+    write_u32_le(&mut header, 0);
+    write_u32_le(&mut header, second_bootloader_addr);
+    write_u32_le(&mut header, tags_addr);
+    write_u32_le(&mut header, config.page_size);
+    write_u32_le(&mut header, qcdt_size);
+    write_u32_le(&mut header, 0);
+    header.extend_from_slice(&fixed_bytes::<16>(&config.board, "board", config_path)?);
+
+    let cmdline = fixed_bytes::<{ 512 + 1024 }>(&config.cmdline, "cmdline", config_path)?;
+    header.extend_from_slice(&cmdline[..512]);
+    header.extend_from_slice(&bootimg_hash_digest_v0(&kernel, &ramdisk, &vendor_dt));
+    header.extend_from_slice(&cmdline[512..]);
+    pad_vec_to(&mut header, page_size)?;
+
+    let mut bootimg = header;
+    append_padded(&mut bootimg, &kernel, page_size)?;
+    append_padded(&mut bootimg, &ramdisk, page_size)?;
+    append_padded(&mut bootimg, &vendor_dt, page_size)?;
+    if config.append_seandroid_enforce {
+        bootimg.extend_from_slice(SEANDROID_ENFORCE);
+    }
+
+    if let Some(parent) = output
+        .parent()
+        .filter(|parent| !parent.as_os_str().is_empty())
+    {
+        fs::create_dir_all(parent).map_err(|err| format!("create {}: {err}", parent.display()))?;
+    }
+    fs::write(output, bootimg).map_err(|err| format!("write {}: {err}", output.display()))
+}
+
+fn build_qcdt(
+    config: &QcdtConfig,
+    page_size: u32,
+    dtb: &[u8],
+    config_path: &Path,
+) -> Result<Vec<u8>> {
+    if config.entries.is_empty() {
+        return Err(format!("{}: qcdt.entries is empty", config_path.display()));
+    }
+
+    let page_size = usize::try_from(page_size)
+        .map_err(|_| format!("{}: page_size does not fit usize", config_path.display()))?;
+    let record_size = 24usize;
+    let header_size = 12usize
+        .checked_add(
+            record_size
+                .checked_mul(config.entries.len())
+                .ok_or_else(|| "QCDT record table size overflows usize".to_string())?,
+        )
+        .ok_or_else(|| "QCDT header size overflows usize".to_string())?;
+    let dtb_offset = align_up_usize(header_size, page_size)?;
+    let dtb_size = align_up_usize(dtb.len(), page_size)?;
+    let dtb_offset_u32 = u32_len(dtb_offset, "QCDT DTB offset", config_path)?;
+    let dtb_size_u32 = u32_len(dtb_size, "QCDT DTB size", config_path)?;
+
+    let mut qcdt = Vec::with_capacity(
+        dtb_offset
+            .checked_add(dtb_size)
+            .ok_or_else(|| "QCDT size overflows usize".to_string())?,
+    );
+    qcdt.extend_from_slice(b"QCDT");
+    write_u32_le(&mut qcdt, 2);
+    write_u32_le(
+        &mut qcdt,
+        u32_len(config.entries.len(), "QCDT entry count", config_path)?,
+    );
+
+    for entry in &config.entries {
+        write_u32_le(&mut qcdt, entry.msm_id[0]);
+        write_u32_le(&mut qcdt, entry.board_id[0]);
+        write_u32_le(&mut qcdt, entry.board_id[1]);
+        write_u32_le(&mut qcdt, entry.msm_id[1]);
+        write_u32_le(&mut qcdt, dtb_offset_u32);
+        write_u32_le(&mut qcdt, dtb_size_u32);
+    }
+
+    pad_vec_to(&mut qcdt, page_size)?;
+    qcdt.extend_from_slice(dtb);
+    pad_vec_to(&mut qcdt, page_size)?;
+    Ok(qcdt)
+}
+
 fn file_size_u32(path: &Path, description: &str) -> Result<u32> {
     let size = fs::metadata(path)
         .map_err(|err| format!("stat {}: {err}", path.display()))?
@@ -516,6 +680,61 @@ fn bootimg_hash_digest(image: &Path, dtb: &Path) -> Result<[u8; 32]> {
         Some(&mut dtb_file),
     )
     .map_err(|err| format!("compute boot image hash digest: {err}"))
+}
+
+fn bootimg_hash_digest_v0(kernel: &[u8], ramdisk: &[u8], vendor_dt: &[u8]) -> [u8; 32] {
+    let mut hasher = Sha1::new();
+    update_bootimg_hash(&mut hasher, kernel);
+    update_bootimg_hash(&mut hasher, ramdisk);
+    update_bootimg_hash(&mut hasher, &[]);
+    if !vendor_dt.is_empty() {
+        update_bootimg_hash(&mut hasher, vendor_dt);
+    }
+
+    let digest = hasher.finalize();
+    let mut output = [0; 32];
+    output[..digest.len()].copy_from_slice(&digest);
+    output
+}
+
+fn update_bootimg_hash(hasher: &mut Sha1, payload: &[u8]) {
+    hasher.update(payload);
+    hasher.update((payload.len() as u32).to_le_bytes());
+}
+
+fn append_padded(output: &mut Vec<u8>, payload: &[u8], alignment: usize) -> Result<()> {
+    if payload.is_empty() {
+        return Ok(());
+    }
+
+    output.extend_from_slice(payload);
+    pad_vec_to(output, alignment)
+}
+
+fn pad_vec_to(output: &mut Vec<u8>, alignment: usize) -> Result<()> {
+    let padded_len = align_up_usize(output.len(), alignment)?;
+    output.resize(padded_len, 0);
+    Ok(())
+}
+
+fn align_up_usize(value: usize, alignment: usize) -> Result<usize> {
+    let pad = (alignment - (value % alignment)) % alignment;
+    value
+        .checked_add(pad)
+        .ok_or_else(|| "aligned size overflows usize".to_string())
+}
+
+fn u32_len(value: usize, description: &str, context: &Path) -> Result<u32> {
+    u32::try_from(value).map_err(|_| {
+        format!(
+            "{description} is too large near {}: {value} bytes",
+            context.display()
+        )
+    })
+}
+
+fn write_u32_le(output: &mut Vec<u8>, value: u32) {
+    output.extend_from_slice(&value.to_le_bytes());
 }
 
 fn boot_addr_u32(base: u64, offset: u64, name: &str) -> Result<u32> {
@@ -759,4 +978,61 @@ fn print_bootimg_usage() {
     println!(
         "usage: cargo xtask bootimg <vendor/device> [--output PATH]\n\nexample: cargo xtask bootimg qcom/sdm670-google-sargo\n\nrequires: target/kernel/<vendor>/<device>/arch/arm64/boot/Image.gz and the inferred DTB\ndefault output: target/kernel/<vendor>/<device>/boot.img"
     );
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn qcdt_records_point_to_page_aligned_dtb() {
+        let qcdt = build_qcdt(
+            &QcdtConfig {
+                entries: vec![QcdtEntry {
+                    msm_id: [206, 0],
+                    board_id: [0xce08ff01, 1],
+                }],
+            },
+            16,
+            b"dtb",
+            Path::new("test.toml"),
+        )
+        .unwrap();
+
+        assert_eq!(&qcdt[..4], b"QCDT");
+        assert_eq!(u32_at(&qcdt, 4), 2);
+        assert_eq!(u32_at(&qcdt, 8), 1);
+        assert_eq!(u32_at(&qcdt, 12), 206);
+        assert_eq!(u32_at(&qcdt, 16), 0xce08ff01);
+        assert_eq!(u32_at(&qcdt, 20), 1);
+        assert_eq!(u32_at(&qcdt, 24), 0);
+        assert_eq!(u32_at(&qcdt, 28), 48);
+        assert_eq!(u32_at(&qcdt, 32), 16);
+        assert_eq!(&qcdt[48..51], b"dtb");
+        assert_eq!(qcdt.len(), 64);
+    }
+
+    #[test]
+    fn samsung_a5u_eur_config_is_legacy_qcdt() {
+        let config = load_bootimg_config(
+            &workspace_root()
+                .unwrap()
+                .join("configs/bootimg/qcom/msm8916-samsung-a5u-eur.toml"),
+        )
+        .unwrap();
+
+        let qcdt = config.qcdt.unwrap();
+        assert_eq!(config.header_version, 0);
+        assert_eq!(config.page_size, 2048);
+        assert_eq!(config.base, 0x80000000);
+        assert_eq!(config.ramdisk_size, 1);
+        assert!(config.append_seandroid_enforce);
+        assert_eq!(qcdt.entries.len(), 1);
+        assert_eq!(qcdt.entries[0].msm_id, [206, 0]);
+        assert_eq!(qcdt.entries[0].board_id, [0xce08ff01, 1]);
+    }
+
+    fn u32_at(data: &[u8], offset: usize) -> u32 {
+        u32::from_le_bytes(data[offset..offset + 4].try_into().unwrap())
+    }
 }

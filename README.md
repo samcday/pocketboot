@@ -58,11 +58,14 @@ Once the kernel is built, package those artifacts as an Android boot image:
 
 ```sh
 cargo xtask bootimg qcom/sdm670-google-sargo
+cargo xtask bootimg qcom/msm8916-samsung-a5u-eur
 ```
 
 Boot image packaging is device-specific and configured by
 `configs/bootimg/<vendor>/<device>.toml`. The command requires an existing
 kernel build and writes `target/kernel/<vendor>/<device>/boot.img` by default.
+Both Android boot header v2 DTB sections and legacy QCDT vendor DT payloads are
+supported.
 
 Planned features:
 
