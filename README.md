@@ -44,6 +44,16 @@ This builds `target/aarch64-unknown-linux-musl/release/pocketboot` and writes an
 initrd-ready `newc` archive to `target/pocketboot-initrd.cpio` with the binary
 installed as `/init`.
 
+To build a pocketboot kernel for a supported device, pass the canonical arm64
+DTB path without the `.dtb` suffix and a kernel tree:
+
+```sh
+cargo xtask kernel qcom/msm8916-samsung-a5u-eur ./linux
+```
+
+The kernel build uses `target/kernel/<vendor>/<device>` as `O=`, embeds a fresh
+pocketboot initramfs, and builds `Image.gz` plus the inferred DTB.
+
 Planned features:
 
  * Touch-enabled boot menu
