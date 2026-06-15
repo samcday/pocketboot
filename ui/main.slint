@@ -1,0 +1,22 @@
+import "../../slint/demos/printerdemo/ui/fonts/Inter-24pt-Regular.ttf";
+
+export component MainWindow inherits Window {
+    background: #080b12;
+    default-font-family: "Inter 24pt";
+
+    in-out property <float> touch-x: 540;
+    in-out property <float> touch-y: 1110;
+
+    Text {
+        width: 520px;
+        height: 96px;
+        x: root.touch-x * 1px - self.width / 2;
+        y: root.touch-y * 1px - self.height / 2;
+        text: "hello world";
+        color: #f8fafc;
+        font-size: 72px;
+        font-weight: 400;
+        horizontal-alignment: center;
+        vertical-alignment: center;
+    }
+}

@@ -13,6 +13,7 @@ mod kmsg;
 #[path = "kmsg-forwarder.rs"]
 mod kmsg_forwarder;
 mod settle;
+mod ui;
 
 type Result<T> = std::result::Result<T, String>;
 
@@ -40,6 +41,9 @@ fn run() -> Result<()> {
     kmsg::init_tracing();
     tracing::info!("starting pid1 beachhead");
     tracing::info!("mounted core VFS");
+    if let Err(err) = ui::spawn() {
+        tracing::warn!(error = %err, "failed to spawn UI thread");
+    }
     let fastboot_thread = gadget::spawn(gadget::Mode::Fastboot)
         .map_err(|err| format!("spawn fastboot gadget thread: {err}"))?;
     kmsg_forwarder::spawn();
