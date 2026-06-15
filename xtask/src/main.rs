@@ -354,17 +354,47 @@ fn run_qemu(
 struct KernelArgs {
     device: KernelDevice,
     kernel_tree: PathBuf,
+    initrd: Option<PathBuf>,
 }
 
 impl KernelArgs {
     fn parse(args: Vec<String>) -> Result<Self> {
-        if args.len() != 2 {
-            return Err("usage: cargo xtask kernel <vendor/device> <kernel-tree>".to_string());
+        let mut initrd = None;
+        let mut positionals = Vec::new();
+        let mut index = 0;
+
+        while index < args.len() {
+            let arg = &args[index];
+            match arg.as_str() {
+                "--initrd" => {
+                    index += 1;
+                    initrd = Some(PathBuf::from(
+                        args.get(index)
+                            .ok_or_else(|| "--initrd requires a value".to_string())?,
+                    ));
+                }
+                value if value.starts_with("--initrd=") => {
+                    initrd = Some(PathBuf::from(&value["--initrd=".len()..]));
+                }
+                value if value.starts_with('-') => {
+                    return Err(format!("unknown kernel option: {value}"));
+                }
+                value => positionals.push(value.to_string()),
+            }
+            index += 1;
+        }
+
+        if positionals.len() != 2 {
+            return Err(
+                "usage: cargo xtask kernel [--initrd PATH] <vendor/device> <kernel-tree>"
+                    .to_string(),
+            );
         }
 
         Ok(Self {
-            device: KernelDevice::parse(&args[0])?,
-            kernel_tree: PathBuf::from(&args[1]),
+            device: KernelDevice::parse(&positionals[0])?,
+            kernel_tree: PathBuf::from(&positionals[1]),
+            initrd,
         })
     }
 }
@@ -490,8 +520,14 @@ fn kernel(args: KernelArgs) -> Result<()> {
     ensure_file(&device_config, "device config")?;
     ensure_file(&dts_source, "device tree source")?;
 
-    let initrd = build_initrd(&workspace_root, DEFAULT_TARGET, None)?;
-    println!("wrote {}", initrd.display());
+    let initrd = match args.initrd {
+        Some(initrd) => canonical_file(&initrd, "initrd cpio")?,
+        None => {
+            let initrd = build_initrd(&workspace_root, DEFAULT_TARGET, None)?;
+            println!("wrote {}", initrd.display());
+            initrd
+        }
+    };
 
     let initramfs_config = out_dir.join("pocketboot-initramfs.config");
     fs::write(
@@ -949,6 +985,13 @@ fn kernel_tree(path: &Path) -> Result<PathBuf> {
     Ok(path)
 }
 
+fn canonical_file(path: &Path, description: &str) -> Result<PathBuf> {
+    let path =
+        fs::canonicalize(path).map_err(|err| format!("canonicalize {}: {err}", path.display()))?;
+    ensure_file(&path, description)?;
+    Ok(path)
+}
+
 fn make_command(kernel_tree: &Path, out_dir: &Path) -> Command {
     let make = env::var_os("MAKE").unwrap_or_else(|| "make".into());
     let mut output = OsString::from("O=");
@@ -1152,7 +1195,7 @@ fn print_cpio_usage() {
 
 fn print_kernel_usage() {
     println!(
-        "usage: cargo xtask kernel <vendor/device> <kernel-tree>\n\nexample: cargo xtask kernel qcom/msm8916-samsung-a5u-eur ./linux\n\noutputs: target/kernel/<vendor>/<device>/arch/arm64/boot/Image.gz and the inferred DTB"
+        "usage: cargo xtask kernel [--initrd PATH] <vendor/device> <kernel-tree>\n\nexample: cargo xtask kernel qcom/msm8916-samsung-a5u-eur ./linux\n\nwhen --initrd is omitted, target/{DEFAULT_INITRD} is rebuilt automatically\noutputs: target/kernel/<vendor>/<device>/arch/arm64/boot/Image.gz and the inferred DTB"
     );
 }
 

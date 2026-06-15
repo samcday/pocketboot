@@ -1,0 +1,138 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  cpio:
+    name: cpio
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout pocketboot
+        uses: actions/checkout@v4
+
+      - name: Install Rust
+        run: |
+          rustup toolchain install stable --profile minimal
+          rustup default stable
+          rustup target add aarch64-unknown-linux-musl
+
+      - name: Install userspace build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install --no-install-recommends -y \
+            libfontconfig1-dev \
+            pkg-config
+
+      - name: Cache Cargo downloads
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/git
+            ~/.cargo/registry
+          key: ${{ runner.os }}-cargo-${{ hashFiles('Cargo.lock') }}
+
+      - name: Build initrd cpio
+        run: cargo xtask cpio --output target/pocketboot-initrd.cpio
+
+      - name: Upload initrd cpio
+        uses: actions/upload-artifact@v4
+        with:
+          name: pocketboot-initrd-cpio
+          path: target/pocketboot-initrd.cpio
+          if-no-files-found: error
+
+  kernel-bootimg:
+    name: ${{ matrix.name }} kernels
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    needs: cpio
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: torvalds/master
+            repository: torvalds/linux
+            ref: master
+            artifact: bootimgs-torvalds-master
+            devices: >-
+              qcom/sdm845-oneplus-fajita
+              qcom/msm8916-samsung-a5u-eur
+
+    steps:
+      - name: Checkout pocketboot
+        uses: actions/checkout@v4
+
+      - name: Checkout Linux
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ matrix.repository }}
+          ref: ${{ matrix.ref }}
+          path: linux
+          fetch-depth: 1
+
+      - name: Download initrd cpio
+        uses: actions/download-artifact@v4
+        with:
+          name: pocketboot-initrd-cpio
+          path: target
+
+      - name: Install Rust
+        run: |
+          rustup toolchain install stable --profile minimal
+          rustup default stable
+
+      - name: Install kernel build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install --no-install-recommends -y \
+            bc \
+            bison \
+            flex \
+            gcc-aarch64-linux-gnu \
+            libelf-dev \
+            libssl-dev \
+            make \
+            pkg-config \
+            python3
+
+      - name: Cache Cargo downloads
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/git
+            ~/.cargo/registry
+          key: ${{ runner.os }}-cargo-${{ hashFiles('Cargo.lock') }}
+
+      - name: Build kernels and boot images
+        run: |
+          for device in ${{ matrix.devices }}; do
+            if [ -z "$device" ]; then
+              continue
+            fi
+
+            cargo xtask kernel --initrd target/pocketboot-initrd.cpio "$device" linux
+            cargo xtask bootimg "$device"
+          done
+
+      - name: Upload boot artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact }}
+          path: |
+            target/kernel/**/boot.img
+            target/kernel/**/.config
+            target/kernel/**/arch/arm64/boot/Image.gz
+            target/kernel/**/arch/arm64/boot/dts/**/*.dtb
+          if-no-files-found: error
+          include-hidden-files: true

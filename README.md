@@ -51,8 +51,9 @@ DTB path without the `.dtb` suffix and a kernel tree:
 cargo xtask kernel qcom/msm8916-samsung-a5u-eur ./linux
 ```
 
-The kernel build uses `target/kernel/<vendor>/<device>` as `O=`, embeds a fresh
-pocketboot initramfs, and builds `Image.gz` plus the inferred DTB.
+The kernel build uses `target/kernel/<vendor>/<device>` as `O=`, embeds a
+pocketboot initramfs, and builds `Image.gz` plus the inferred DTB. By default it
+builds a fresh initramfs; pass `--initrd PATH` to embed an existing cpio archive.
 
 Once the kernel is built, package those artifacts as an Android boot image:
 
