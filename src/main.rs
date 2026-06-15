@@ -6,6 +6,7 @@ use std::{
     time::Duration,
 };
 
+mod battery;
 mod fastboot;
 mod gadget;
 mod kexec;
@@ -41,7 +42,14 @@ fn run() -> Result<()> {
     kmsg::init_tracing();
     tracing::info!("starting pid1 beachhead");
     tracing::info!("mounted core VFS");
-    if let Err(err) = ui::spawn() {
+    let battery = match battery::spawn() {
+        Ok(updates) => Some(updates),
+        Err(err) => {
+            tracing::warn!(error = %err, "failed to spawn battery watcher thread");
+            None
+        }
+    };
+    if let Err(err) = ui::spawn(battery) {
         tracing::warn!(error = %err, "failed to spawn UI thread");
     }
     let fastboot_thread = gadget::spawn(gadget::Mode::Fastboot)

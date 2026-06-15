@@ -6,7 +6,9 @@ use std::{
     path::{Path, PathBuf},
     ptr,
     rc::Rc,
-    slice, thread,
+    slice,
+    sync::mpsc,
+    thread,
     time::{Duration, Instant},
 };
 
@@ -18,6 +20,8 @@ use slint::platform::{
 };
 use slint::{ComponentHandle, LogicalPosition, PhysicalSize};
 
+use crate::battery;
+
 slint::include_modules!();
 
 const FB0: &str = "/dev/fb0";
@@ -25,11 +29,11 @@ const INPUT: &str = "/dev/input";
 const UI_START_TIMEOUT: Duration = Duration::from_secs(2);
 const IDLE_SLEEP: Duration = Duration::from_millis(16);
 
-pub(crate) fn spawn() -> io::Result<thread::JoinHandle<()>> {
+pub(crate) fn spawn(battery: Option<battery::Updates>) -> io::Result<thread::JoinHandle<()>> {
     let handle = thread::Builder::new()
         .name("pocketboot-ui".to_string())
-        .spawn(|| {
-            if let Err(err) = run() {
+        .spawn(move || {
+            if let Err(err) = run(battery) {
                 tracing::warn!(error = %err, "UI thread exited");
             }
         })?;
@@ -37,7 +41,7 @@ pub(crate) fn spawn() -> io::Result<thread::JoinHandle<()>> {
     Ok(handle)
 }
 
-fn run() -> Result<(), String> {
+fn run(battery: Option<battery::Updates>) -> Result<(), String> {
     let mut fb = Framebuffer::wait_open(FB0, UI_START_TIMEOUT)?;
     let window = MinimalSoftwareWindow::new(RepaintBufferType::ReusedBuffer);
 
@@ -53,6 +57,7 @@ fn run() -> Result<(), String> {
         .map_err(|err| format!("show Slint window: {err}"))?;
 
     let mut touch = TouchInput::new();
+    let mut battery = battery.map(BatteryUpdates::new);
     let mut pointer_down = false;
     tracing::info!(
         path = FB0,
@@ -64,6 +69,10 @@ fn run() -> Result<(), String> {
 
     loop {
         slint::platform::update_timers_and_animations();
+
+        if let Some(battery) = &mut battery {
+            battery.poll(&main_window);
+        }
 
         for report in touch.poll(fb.width, fb.height) {
             main_window.set_touch_x(report.x);
@@ -98,6 +107,55 @@ fn run() -> Result<(), String> {
             thread::sleep(IDLE_SLEEP);
         }
     }
+}
+
+struct BatteryUpdates {
+    rx: mpsc::Receiver<Option<battery::Snapshot>>,
+    disconnected: bool,
+}
+
+impl BatteryUpdates {
+    fn new(rx: mpsc::Receiver<Option<battery::Snapshot>>) -> Self {
+        Self {
+            rx,
+            disconnected: false,
+        }
+    }
+
+    fn poll(&mut self, window: &MainWindow) {
+        if self.disconnected {
+            return;
+        }
+
+        loop {
+            match self.rx.try_recv() {
+                Ok(snapshot) => apply_battery(window, snapshot),
+                Err(mpsc::TryRecvError::Empty) => return,
+                Err(mpsc::TryRecvError::Disconnected) => {
+                    self.disconnected = true;
+                    tracing::debug!("battery watcher disconnected");
+                    return;
+                }
+            }
+        }
+    }
+}
+
+fn apply_battery(window: &MainWindow, snapshot: Option<battery::Snapshot>) {
+    let Some(snapshot) = snapshot else {
+        window.set_battery_known(false);
+        return;
+    };
+
+    window.set_battery_known(true);
+    window.set_battery_percent(snapshot.percent.into());
+    window.set_battery_status(match snapshot.status {
+        battery::Status::Unknown => BatteryStatus::Unknown,
+        battery::Status::Charging => BatteryStatus::Charging,
+        battery::Status::Discharging => BatteryStatus::Discharging,
+        battery::Status::NotCharging => BatteryStatus::NotCharging,
+        battery::Status::Full => BatteryStatus::Full,
+    });
 }
 
 struct PocketPlatform {

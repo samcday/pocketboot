@@ -1,11 +1,78 @@
 import "../../slint/demos/printerdemo/ui/fonts/Inter-24pt-Regular.ttf";
 
+export enum BatteryStatus { Unknown, Charging, Discharging, NotCharging, Full }
+
 export component MainWindow inherits Window {
     background: #080b12;
     default-font-family: "Inter 24pt";
 
     in-out property <float> touch-x: 540;
     in-out property <float> touch-y: 1110;
+    in-out property <bool> battery-known: false;
+    in-out property <int> battery-percent: 0;
+    in-out property <BatteryStatus> battery-status: BatteryStatus.Unknown;
+
+    battery := Rectangle {
+        visible: root.battery-known;
+        width: 250px;
+        height: 76px;
+        x: parent.width - self.width - 32px;
+        y: 32px;
+        background: #00000000;
+
+        Text {
+            width: 128px;
+            height: parent.height;
+            text: root.battery-percent + "%";
+            color: #f8fafc;
+            font-size: 42px;
+            font-weight: 400;
+            horizontal-alignment: right;
+            vertical-alignment: center;
+        }
+
+        icon := Rectangle {
+            width: 84px;
+            height: 38px;
+            x: 146px;
+            y: (parent.height - self.height) / 2;
+            background: #00000000;
+            border-color: #f8fafc;
+            border-width: 4px;
+            border-radius: 7px;
+
+            Rectangle {
+                x: 5px;
+                y: 5px;
+                width: (parent.width - 10px) * root.battery-percent / 100;
+                height: parent.height - 10px;
+                background: (root.battery-status == BatteryStatus.Charging || root.battery-status == BatteryStatus.Full) ? #22c55e : #f8fafc;
+                border-radius: 3px;
+            }
+        }
+
+        Rectangle {
+            width: 8px;
+            height: 18px;
+            x: icon.x + icon.width + 2px;
+            y: icon.y + (icon.height - self.height) / 2;
+            background: #f8fafc;
+            border-radius: 2px;
+        }
+
+        Text {
+            visible: root.battery-status == BatteryStatus.Charging;
+            width: icon.width;
+            height: icon.height;
+            x: icon.x;
+            y: icon.y - 1px;
+            text: "+";
+            color: #080b12;
+            font-size: 32px;
+            horizontal-alignment: center;
+            vertical-alignment: center;
+        }
+    }
 
     Text {
         width: 520px;
@@ -18,5 +85,10 @@ export component MainWindow inherits Window {
         font-weight: 400;
         horizontal-alignment: center;
         vertical-alignment: center;
+    }
+
+    Text {
+        visible: false;
+        text: "0123456789%+";
     }
 }
