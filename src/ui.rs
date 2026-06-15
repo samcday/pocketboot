@@ -63,7 +63,8 @@ fn run(battery: Option<battery::Updates>) -> Result<(), String> {
         path = FB0,
         width = fb.width,
         height = fb.height,
-        stride = fb.stride_pixels,
+        stride_bytes = fb.stride_bytes,
+        format = ?fb.format,
         "starting frankenSlint UI"
     );
 
@@ -185,11 +186,28 @@ impl Platform for PocketPlatform {
 
 struct Framebuffer {
     _file: File,
-    pixels: *mut FbPixel,
+    pixels: *mut u8,
     map_len: usize,
     width: u32,
     height: u32,
-    stride_pixels: usize,
+    stride_bytes: usize,
+    format: FramebufferFormat,
+    bgr_buffer: Vec<BgrPixel>,
+}
+
+#[derive(Clone, Copy, Debug)]
+enum FramebufferFormat {
+    Xrgb8888,
+    Bgr888,
+}
+
+impl FramebufferFormat {
+    fn bytes_per_pixel(self) -> usize {
+        match self {
+            Self::Xrgb8888 => mem::size_of::<FbPixel>(),
+            Self::Bgr888 => mem::size_of::<BgrPixel>(),
+        }
+    }
 }
 
 impl Framebuffer {
@@ -223,34 +241,54 @@ impl Framebuffer {
         ioctl_read(fd, FBIOGET_VSCREENINFO, &mut var)
             .map_err(|err| format!("FBIOGET_VSCREENINFO {path}: {err}"))?;
 
-        if var.bits_per_pixel != 32
-            || var.red.offset != 16
-            || var.red.length != 8
-            || var.green.offset != 8
-            || var.green.length != 8
-            || var.blue.offset != 0
-            || var.blue.length != 8
-        {
-            return Err(format!(
-                "unsupported framebuffer format: {}bpp r{}:{} g{}:{} b{}:{}",
-                var.bits_per_pixel,
-                var.red.offset,
-                var.red.length,
-                var.green.offset,
-                var.green.length,
-                var.blue.offset,
-                var.blue.length
-            ));
-        }
+        let format = match (
+            var.bits_per_pixel,
+            var.red.offset,
+            var.red.length,
+            var.green.offset,
+            var.green.length,
+            var.blue.offset,
+            var.blue.length,
+        ) {
+            (32, 16, 8, 8, 8, 0, 8) => FramebufferFormat::Xrgb8888,
+            (24, 16, 8, 8, 8, 0, 8) => FramebufferFormat::Bgr888,
+            _ => {
+                return Err(format!(
+                    "unsupported framebuffer format: {}bpp r{}:{} g{}:{} b{}:{}",
+                    var.bits_per_pixel,
+                    var.red.offset,
+                    var.red.length,
+                    var.green.offset,
+                    var.green.length,
+                    var.blue.offset,
+                    var.blue.length
+                ));
+            }
+        };
 
         if var.xres == 0 || var.yres == 0 || fix.line_length == 0 {
             return Err("framebuffer reported empty geometry".to_string());
         }
 
-        let stride_pixels = fix.line_length as usize / mem::size_of::<FbPixel>();
-        let visible_len = stride_pixels
+        let stride_bytes = fix.line_length as usize;
+        let min_stride = (var.xres as usize)
+            .checked_mul(format.bytes_per_pixel())
+            .ok_or_else(|| "framebuffer geometry overflow".to_string())?;
+        if stride_bytes < min_stride {
+            return Err(format!(
+                "framebuffer line length too small: {stride_bytes} < {min_stride}"
+            ));
+        }
+        if matches!(format, FramebufferFormat::Xrgb8888)
+            && stride_bytes % mem::size_of::<FbPixel>() != 0
+        {
+            return Err(format!(
+                "framebuffer line length is not 32bpp aligned: {stride_bytes}"
+            ));
+        }
+
+        let visible_len = stride_bytes
             .checked_mul(var.yres as usize)
-            .and_then(|len| len.checked_mul(mem::size_of::<FbPixel>()))
             .ok_or_else(|| "framebuffer geometry overflow".to_string())?;
         let map_len = usize::max(fix.smem_len as usize, visible_len);
         let pixels = unsafe {
@@ -273,16 +311,53 @@ impl Framebuffer {
             map_len,
             width: var.xres,
             height: var.yres,
-            stride_pixels,
+            stride_bytes,
+            format,
+            bgr_buffer: match format {
+                FramebufferFormat::Xrgb8888 => Vec::new(),
+                FramebufferFormat::Bgr888 => {
+                    vec![BgrPixel::default(); (var.xres as usize) * (var.yres as usize)]
+                }
+            },
         })
     }
 
     fn draw_if_needed(&mut self, window: &MinimalSoftwareWindow) -> bool {
-        let len = self.stride_pixels * self.height as usize;
-        let pixels = unsafe { slice::from_raw_parts_mut(self.pixels, len) };
+        match self.format {
+            FramebufferFormat::Xrgb8888 => self.draw_xrgb8888(window),
+            FramebufferFormat::Bgr888 => self.draw_bgr888(window),
+        }
+    }
+
+    fn draw_xrgb8888(&mut self, window: &MinimalSoftwareWindow) -> bool {
+        let stride_pixels = self.stride_bytes / mem::size_of::<FbPixel>();
+        let len = stride_pixels * self.height as usize;
+        let pixels = unsafe { slice::from_raw_parts_mut(self.pixels.cast::<FbPixel>(), len) };
         window.draw_if_needed(|renderer| {
-            renderer.render(pixels, self.stride_pixels);
+            renderer.render(pixels, stride_pixels);
         })
+    }
+
+    fn draw_bgr888(&mut self, window: &MinimalSoftwareWindow) -> bool {
+        let width = self.width as usize;
+        let redraw = window.draw_if_needed(|renderer| {
+            renderer.render(&mut self.bgr_buffer, width);
+        });
+        if redraw {
+            let fb_len = self.stride_bytes * self.height as usize;
+            let fb = unsafe { slice::from_raw_parts_mut(self.pixels, fb_len) };
+            let row_bytes = width * mem::size_of::<BgrPixel>();
+            for (src_row, dst_row) in self
+                .bgr_buffer
+                .chunks_exact(width)
+                .zip(fb.chunks_exact_mut(self.stride_bytes))
+            {
+                let src =
+                    unsafe { slice::from_raw_parts(src_row.as_ptr().cast::<u8>(), row_bytes) };
+                dst_row[..row_bytes].copy_from_slice(src);
+            }
+        }
+        redraw
     }
 }
 
@@ -321,6 +396,29 @@ impl TargetPixel for FbPixel {
 
     fn from_rgb(red: u8, green: u8, blue: u8) -> Self {
         Self(0xff00_0000 | ((red as u32) << 16) | ((green as u32) << 8) | blue as u32)
+    }
+}
+
+#[repr(C)]
+#[derive(Clone, Copy, Default)]
+struct BgrPixel {
+    blue: u8,
+    green: u8,
+    red: u8,
+}
+
+impl TargetPixel for BgrPixel {
+    fn blend(&mut self, color: PremultipliedRgbaColor) {
+        let inv_alpha = (u8::MAX - color.alpha) as u16;
+        *self = Self::from_rgb(
+            (self.red as u16 * inv_alpha / 255) as u8 + color.red,
+            (self.green as u16 * inv_alpha / 255) as u8 + color.green,
+            (self.blue as u16 * inv_alpha / 255) as u8 + color.blue,
+        );
+    }
+
+    fn from_rgb(red: u8, green: u8, blue: u8) -> Self {
+        Self { blue, green, red }
     }
 }
 
