@@ -1,10 +1,10 @@
-import "../../slint/demos/printerdemo/ui/fonts/Inter-24pt-Regular.ttf";
+import "fonts/FreeSans.ttf";
 
 export enum BatteryStatus { Unknown, Charging, Discharging, NotCharging, Full }
 
 export component MainWindow inherits Window {
     background: #080b12;
-    default-font-family: "Inter 24pt";
+    default-font-family: "FreeSans";
 
     in-out property <float> touch-x: 540;
     in-out property <float> touch-y: 1110;
