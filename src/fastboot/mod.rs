@@ -1,22 +1,21 @@
 use std::{
-    collections::HashMap,
     fs::File,
     io::{self, Read, Seek, SeekFrom, Write},
     os::fd::{AsRawFd, RawFd},
     sync::{
-        Arc,
         atomic::{AtomicBool, Ordering},
+        Arc,
     },
     thread,
     time::Duration,
 };
 
 use gadgetry_most_foul::{
-    Class,
     function::{
-        Handle,
         custom::{Custom, Endpoint, EndpointDirection, EndpointIn, EndpointOut, Event, Interface},
+        Handle,
     },
+    Class,
 };
 
 use crate::kexec;
@@ -38,7 +37,37 @@ const FASTBOOT_PROTOCOL: u8 = 0x03;
 pub(crate) type PostResponseAction = Box<dyn FnOnce() -> io::Result<()> + Send + 'static>;
 pub(crate) type CommandHandler =
     fn(&mut CommandContext<'_>, &str) -> io::Result<Option<PostResponseAction>>;
-pub(crate) type CommandMap = HashMap<&'static str, CommandHandler>;
+pub(crate) type CommandMap = Vec<Command>;
+
+pub(crate) struct Command {
+    name: &'static str,
+    match_kind: CommandMatch,
+    handler: CommandHandler,
+}
+
+#[derive(Clone, Copy)]
+enum CommandMatch {
+    Exact,
+    Prefix,
+}
+
+impl Command {
+    pub(crate) const fn exact(name: &'static str, handler: CommandHandler) -> Self {
+        Self {
+            name,
+            match_kind: CommandMatch::Exact,
+            handler,
+        }
+    }
+
+    pub(crate) const fn prefix(prefix: &'static str, handler: CommandHandler) -> Self {
+        Self {
+            name: prefix,
+            match_kind: CommandMatch::Prefix,
+            handler,
+        }
+    }
+}
 
 enum ServerStep {
     Continue,
@@ -212,7 +241,7 @@ impl FastbootServer {
             return Ok(ServerStep::Continue);
         }
 
-        let handler = self.commands.get(command).copied();
+        let handler = find_command_handler(&self.commands, command);
         let mut context = CommandContext::new(&mut self.tx, &mut self.staged);
         match handler {
             Some(handler) => match handler(&mut context, command) {
@@ -287,11 +316,6 @@ impl FastbootServer {
             FastbootResponder::new(&mut self.tx).fail(b"staged data too large")?;
             return Ok(());
         };
-        if size == 0 {
-            FastbootResponder::new(&mut self.tx).fail(b"no staged data")?;
-            return Ok(());
-        }
-
         tracing::info!(name = %staged.name, bytes = staged.len(), "uploading staged data");
         let mut responder = FastbootResponder::new(&mut self.tx);
         responder.data(size)?;
@@ -372,6 +396,10 @@ impl<'a> CommandContext<'a> {
 
     pub(crate) fn stage(&mut self, name: impl Into<String>, data: Vec<u8>) {
         *self.staged = Some(StagedData::memory(name, data));
+    }
+
+    pub(crate) fn stage_file(&mut self, name: impl Into<String>, file: File, size: u64) {
+        *self.staged = Some(StagedData::file(name, file, size));
     }
 
     pub(crate) fn staged_file(&self) -> io::Result<File> {
@@ -520,6 +548,21 @@ fn transfer_buffer(len: usize) -> io::Result<Vec<u8>> {
     Ok(buffer)
 }
 
+fn find_command_handler(commands: &[Command], command: &str) -> Option<CommandHandler> {
+    commands
+        .iter()
+        .find_map(|entry| match entry.match_kind {
+            CommandMatch::Exact if entry.name == command => Some(entry.handler),
+            _ => None,
+        })
+        .or_else(|| {
+            commands.iter().find_map(|entry| match entry.match_kind {
+                CommandMatch::Prefix if command.starts_with(entry.name) => Some(entry.handler),
+                _ => None,
+            })
+        })
+}
+
 fn read_packet(endpoint: &mut EndpointOut, buffer: &mut [u8]) -> io::Result<usize> {
     let control = endpoint.control()?;
     let fd = control.as_raw_fd();
@@ -615,6 +658,29 @@ fn write_all_fd(fd: RawFd, mut data: &[u8]) -> io::Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn dummy_handler(
+        _context: &mut CommandContext<'_>,
+        _command: &str,
+    ) -> io::Result<Option<PostResponseAction>> {
+        Ok(None)
+    }
+
+    #[test]
+    fn finds_exact_command_handlers() {
+        let commands = vec![Command::exact("oem dmesg", dummy_handler as CommandHandler)];
+
+        assert!(find_command_handler(&commands, "oem dmesg").is_some());
+        assert!(find_command_handler(&commands, "oem dmesg:").is_none());
+    }
+
+    #[test]
+    fn finds_prefix_command_handlers() {
+        let commands = vec![Command::prefix("oem cat:", dummy_handler as CommandHandler)];
+
+        assert!(find_command_handler(&commands, "oem cat:/proc/cmdline").is_some());
+        assert!(find_command_handler(&commands, "oem cat").is_none());
+    }
 
     #[test]
     fn recognizes_usb_disconnect_errno_values() {

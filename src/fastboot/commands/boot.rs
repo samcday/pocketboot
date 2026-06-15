@@ -172,7 +172,7 @@ fn invalid_data(message: impl Into<String>) -> io::Error {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use flate2::{Compression, write::GzEncoder};
+    use flate2::{write::GzEncoder, Compression};
     use std::io::Write;
 
     #[test]
