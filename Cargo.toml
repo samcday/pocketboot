@@ -10,6 +10,7 @@ build = "build.rs"
 
 [dependencies]
 abootimg-oxide = "0.5.1"
+drm = "0.14.1"
 flate2 = "1"
 gadgetry-most-foul = "0.1.1"
 libc = "0.2.177"

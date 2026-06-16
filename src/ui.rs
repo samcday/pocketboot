@@ -2,7 +2,10 @@ use std::{
     fs::{self, File, OpenOptions},
     io::{self, Read},
     mem,
-    os::{fd::AsRawFd, unix::fs::OpenOptionsExt},
+    os::{
+        fd::{AsFd, AsRawFd, BorrowedFd},
+        unix::fs::OpenOptionsExt,
+    },
     path::{Path, PathBuf},
     ptr,
     rc::Rc,
@@ -12,11 +15,20 @@ use std::{
     time::{Duration, Instant},
 };
 
-use slint::platform::{
-    Platform, PlatformError, PointerEventButton, WindowAdapter, WindowEvent,
-    software_renderer::{
-        MinimalSoftwareWindow, PremultipliedRgbaColor, RepaintBufferType, TargetPixel,
+use drm::{
+    buffer::{Buffer, DrmFourcc},
+    control::{
+        self, connector, crtc, framebuffer, Device as ControlDevice, Event, ModeTypeFlags,
+        PageFlipFlags,
     },
+    Device as DrmDevice,
+};
+use slint::platform::{
+    software_renderer::{
+        MinimalSoftwareWindow, PremultipliedRgbaColor, RepaintBufferType, Rgb565Pixel,
+        SoftwareRenderer, TargetPixel,
+    },
+    Platform, PlatformError, PointerEventButton, WindowAdapter, WindowEvent,
 };
 use slint::{ComponentHandle, LogicalPosition, PhysicalSize};
 
@@ -24,7 +36,7 @@ use crate::battery;
 
 slint::include_modules!();
 
-const FB0: &str = "/dev/fb0";
+const DRI: &str = "/dev/dri";
 const INPUT: &str = "/dev/input";
 const UI_START_TIMEOUT: Duration = Duration::from_secs(2);
 const IDLE_SLEEP: Duration = Duration::from_millis(16);
@@ -42,16 +54,16 @@ pub(crate) fn spawn(battery: Option<battery::Updates>) -> io::Result<thread::Joi
 }
 
 fn run(battery: Option<battery::Updates>) -> Result<(), String> {
-    let mut fb = Framebuffer::wait_open(FB0, UI_START_TIMEOUT)?;
-    let window = MinimalSoftwareWindow::new(RepaintBufferType::ReusedBuffer);
+    let mut kms_display = KmsDisplay::wait_open(UI_START_TIMEOUT)?;
+    let window = MinimalSoftwareWindow::new(RepaintBufferType::NewBuffer);
 
     slint::platform::set_platform(Box::new(PocketPlatform::new(window.clone())))
         .map_err(|err| format!("install Slint platform: {err}"))?;
-    window.set_size(PhysicalSize::new(fb.width, fb.height));
+    window.set_size(PhysicalSize::new(kms_display.width, kms_display.height));
 
     let main_window = MainWindow::new().map_err(|err| format!("create Slint window: {err}"))?;
-    main_window.set_touch_x(fb.width as f32 / 2.0);
-    main_window.set_touch_y(fb.height as f32 / 2.0);
+    main_window.set_touch_x(kms_display.width as f32 / 2.0);
+    main_window.set_touch_y(kms_display.height as f32 / 2.0);
     main_window
         .show()
         .map_err(|err| format!("show Slint window: {err}"))?;
@@ -59,12 +71,14 @@ fn run(battery: Option<battery::Updates>) -> Result<(), String> {
     let mut touch = TouchInput::new();
     let mut battery = battery.map(BatteryUpdates::new);
     let mut pointer_down = false;
+    let display_path = kms_display.path.display().to_string();
+    let connector = kms_display.connector.to_string();
     tracing::info!(
-        path = FB0,
-        width = fb.width,
-        height = fb.height,
-        stride_bytes = fb.stride_bytes,
-        format = ?fb.format,
+        path = %display_path,
+        connector = %connector,
+        width = kms_display.width,
+        height = kms_display.height,
+        format = ?kms_display.format,
         "starting frankenSlint UI"
     );
 
@@ -75,7 +89,7 @@ fn run(battery: Option<battery::Updates>) -> Result<(), String> {
             battery.poll(&main_window);
         }
 
-        for report in touch.poll(fb.width, fb.height) {
+        for report in touch.poll(kms_display.width, kms_display.height) {
             main_window.set_touch_x(report.x);
             main_window.set_touch_y(report.y);
 
@@ -104,7 +118,7 @@ fn run(battery: Option<battery::Updates>) -> Result<(), String> {
             }
         }
 
-        if !fb.draw_if_needed(&window) {
+        if !kms_display.draw_if_needed(&window)? {
             thread::sleep(IDLE_SLEEP);
         }
     }
@@ -184,40 +198,30 @@ impl Platform for PocketPlatform {
     }
 }
 
-struct Framebuffer {
-    _file: File,
-    pixels: *mut u8,
-    map_len: usize,
+struct KmsDisplay {
+    card: DrmCard,
+    path: PathBuf,
+    connector: connector::Info,
+    crtc: crtc::Handle,
+    mode: control::Mode,
     width: u32,
     height: u32,
-    stride_bytes: usize,
-    format: FramebufferFormat,
-    bgr_buffer: Vec<BgrPixel>,
+    format: DrmFourcc,
+    front_buffer: KmsBuffer,
+    back_buffer: KmsBuffer,
+    in_flight_buffer: KmsBuffer,
+    posted: bool,
+    page_flip_pending: bool,
 }
 
-#[derive(Clone, Copy, Debug)]
-enum FramebufferFormat {
-    Xrgb8888,
-    Bgr888,
-}
-
-impl FramebufferFormat {
-    fn bytes_per_pixel(self) -> usize {
-        match self {
-            Self::Xrgb8888 => mem::size_of::<FbPixel>(),
-            Self::Bgr888 => mem::size_of::<BgrPixel>(),
-        }
-    }
-}
-
-impl Framebuffer {
-    fn wait_open(path: &str, timeout: Duration) -> Result<Self, String> {
+impl KmsDisplay {
+    fn wait_open(timeout: Duration) -> Result<Self, String> {
         let start = Instant::now();
         loop {
-            match Self::open(path) {
-                Ok(fb) => return Ok(fb),
+            match Self::open_any() {
+                Ok(display) => return Ok(display),
                 Err(err) if start.elapsed() < timeout => {
-                    tracing::debug!(path, error = %err, "framebuffer not ready");
+                    tracing::debug!(error = %err, "DRM display not ready");
                     thread::sleep(Duration::from_millis(50));
                 }
                 Err(err) => return Err(err),
@@ -225,155 +229,381 @@ impl Framebuffer {
         }
     }
 
-    fn open(path: &str) -> Result<Self, String> {
+    fn open_any() -> Result<Self, String> {
+        let entries = fs::read_dir(DRI).map_err(|err| format!("open {DRI}: {err}"))?;
+        let mut paths = entries
+            .flatten()
+            .map(|entry| entry.path())
+            .filter(|path| {
+                path.file_name()
+                    .and_then(|name| name.to_str())
+                    .is_some_and(|name| name.starts_with("card"))
+            })
+            .collect::<Vec<_>>();
+        paths.sort();
+
+        if paths.is_empty() {
+            return Err(format!("no DRM card devices found under {DRI}"));
+        }
+
+        let mut errors = Vec::new();
+        for path in paths {
+            match Self::open_path(&path) {
+                Ok(display) => return Ok(display),
+                Err(err) => errors.push(format!("{}: {err}", path.display())),
+            }
+        }
+
+        Err(format!(
+            "could not initialize DRM display: {}",
+            errors.join("; ")
+        ))
+    }
+
+    fn open_path(path: &Path) -> Result<Self, String> {
         let file = OpenOptions::new()
             .read(true)
             .write(true)
             .custom_flags(libc::O_CLOEXEC)
             .open(path)
-            .map_err(|err| format!("open {path}: {err}"))?;
+            .map_err(|err| format!("open: {err}"))?;
+        let card = DrmCard(file);
+        let _ = card.set_client_capability(drm::ClientCapability::UniversalPlanes, true);
 
-        let fd = file.as_raw_fd();
-        let mut fix = FbFixScreeninfo::default();
-        let mut var = FbVarScreeninfo::default();
-        ioctl_read(fd, FBIOGET_FSCREENINFO, &mut fix)
-            .map_err(|err| format!("FBIOGET_FSCREENINFO {path}: {err}"))?;
-        ioctl_read(fd, FBIOGET_VSCREENINFO, &mut var)
-            .map_err(|err| format!("FBIOGET_VSCREENINFO {path}: {err}"))?;
+        let resources = card
+            .resource_handles()
+            .map_err(|err| format!("query DRM resources: {err}"))?;
+        let connector = choose_connector(&card, &resources)?;
+        let mode = choose_mode(&connector)?;
+        let crtc = choose_crtc(&card, &resources, &connector)?;
+        let format = choose_format(&card, &resources, crtc)?;
+        let (width, height) = mode.size();
+        let size = (width as u32, height as u32);
 
-        let format = match (
-            var.bits_per_pixel,
-            var.red.offset,
-            var.red.length,
-            var.green.offset,
-            var.green.length,
-            var.blue.offset,
-            var.blue.length,
-        ) {
-            (32, 16, 8, 8, 8, 0, 8) => FramebufferFormat::Xrgb8888,
-            (24, 16, 8, 8, 8, 0, 8) => FramebufferFormat::Bgr888,
-            _ => {
-                return Err(format!(
-                    "unsupported framebuffer format: {}bpp r{}:{} g{}:{} b{}:{}",
-                    var.bits_per_pixel,
-                    var.red.offset,
-                    var.red.length,
-                    var.green.offset,
-                    var.green.length,
-                    var.blue.offset,
-                    var.blue.length
-                ));
-            }
-        };
-
-        if var.xres == 0 || var.yres == 0 || fix.line_length == 0 {
-            return Err("framebuffer reported empty geometry".to_string());
-        }
-
-        let stride_bytes = fix.line_length as usize;
-        let min_stride = (var.xres as usize)
-            .checked_mul(format.bytes_per_pixel())
-            .ok_or_else(|| "framebuffer geometry overflow".to_string())?;
-        if stride_bytes < min_stride {
-            return Err(format!(
-                "framebuffer line length too small: {stride_bytes} < {min_stride}"
-            ));
-        }
-        if matches!(format, FramebufferFormat::Xrgb8888)
-            && stride_bytes % mem::size_of::<FbPixel>() != 0
-        {
-            return Err(format!(
-                "framebuffer line length is not 32bpp aligned: {stride_bytes}"
-            ));
-        }
-
-        let visible_len = stride_bytes
-            .checked_mul(var.yres as usize)
-            .ok_or_else(|| "framebuffer geometry overflow".to_string())?;
-        let map_len = usize::max(fix.smem_len as usize, visible_len);
-        let pixels = unsafe {
-            libc::mmap(
-                ptr::null_mut(),
-                map_len,
-                libc::PROT_READ | libc::PROT_WRITE,
-                libc::MAP_SHARED,
-                fd,
-                0,
-            )
-        };
-        if pixels == libc::MAP_FAILED {
-            return Err(format!("mmap {path}: {}", io::Error::last_os_error()));
-        }
+        let front_buffer = KmsBuffer::allocate(&card, size, format)?;
+        let back_buffer = KmsBuffer::allocate(&card, size, format)?;
+        let in_flight_buffer = KmsBuffer::allocate(&card, size, format)?;
 
         Ok(Self {
-            _file: file,
-            pixels: pixels.cast(),
-            map_len,
-            width: var.xres,
-            height: var.yres,
-            stride_bytes,
+            card,
+            path: path.to_path_buf(),
+            connector,
+            crtc,
+            mode,
+            width: size.0,
+            height: size.1,
             format,
-            bgr_buffer: match format {
-                FramebufferFormat::Xrgb8888 => Vec::new(),
-                FramebufferFormat::Bgr888 => {
-                    vec![BgrPixel::default(); (var.xres as usize) * (var.yres as usize)]
-                }
-            },
+            front_buffer,
+            back_buffer,
+            in_flight_buffer,
+            posted: false,
+            page_flip_pending: false,
         })
     }
 
-    fn draw_if_needed(&mut self, window: &MinimalSoftwareWindow) -> bool {
-        match self.format {
-            FramebufferFormat::Xrgb8888 => self.draw_xrgb8888(window),
-            FramebufferFormat::Bgr888 => self.draw_bgr888(window),
-        }
-    }
-
-    fn draw_xrgb8888(&mut self, window: &MinimalSoftwareWindow) -> bool {
-        let stride_pixels = self.stride_bytes / mem::size_of::<FbPixel>();
-        let len = stride_pixels * self.height as usize;
-        let pixels = unsafe { slice::from_raw_parts_mut(self.pixels.cast::<FbPixel>(), len) };
-        window.draw_if_needed(|renderer| {
-            renderer.render(pixels, stride_pixels);
-        })
-    }
-
-    fn draw_bgr888(&mut self, window: &MinimalSoftwareWindow) -> bool {
-        let width = self.width as usize;
+    fn draw_if_needed(&mut self, window: &MinimalSoftwareWindow) -> Result<bool, String> {
+        let mut render_result = Ok(());
         let redraw = window.draw_if_needed(|renderer| {
-            renderer.render(&mut self.bgr_buffer, width);
+            render_result = self.render(renderer);
         });
+
+        render_result?;
+
         if redraw {
-            let fb_len = self.stride_bytes * self.height as usize;
-            let fb = unsafe { slice::from_raw_parts_mut(self.pixels, fb_len) };
-            let row_bytes = width * mem::size_of::<BgrPixel>();
-            for (src_row, dst_row) in self
-                .bgr_buffer
-                .chunks_exact(width)
-                .zip(fb.chunks_exact_mut(self.stride_bytes))
-            {
-                let src =
-                    unsafe { slice::from_raw_parts(src_row.as_ptr().cast::<u8>(), row_bytes) };
-                dst_row[..row_bytes].copy_from_slice(src);
+            self.present()?;
+        }
+
+        Ok(redraw)
+    }
+
+    fn render(&mut self, renderer: &SoftwareRenderer) -> Result<(), String> {
+        let format = self.format;
+        let stride = self.back_buffer.buffer.pitch() as usize / bytes_per_pixel(format);
+        let repaint_buffer_type = repaint_buffer_type_for_age(self.back_buffer.age);
+        let mut mapping = self
+            .card
+            .map_dumb_buffer(&mut self.back_buffer.buffer)
+            .map_err(|err| format!("map DRM dumb buffer: {err}"))?;
+        let buffer = mapping.as_mut();
+
+        renderer.set_repaint_buffer_type(repaint_buffer_type);
+        match format {
+            DrmFourcc::Xrgb8888 | DrmFourcc::Argb8888 => {
+                let pixels = cast_buffer_mut::<Xrgb8888Pixel>(buffer, format)?;
+                renderer.render(pixels, stride);
+            }
+            DrmFourcc::Bgra8888 => {
+                let pixels = cast_buffer_mut::<Bgra8888Pixel>(buffer, format)?;
+                renderer.render(pixels, stride);
+            }
+            DrmFourcc::Rgb565 => {
+                let pixels = cast_buffer_mut::<Rgb565Pixel>(buffer, format)?;
+                renderer.render(pixels, stride);
+            }
+            _ => unreachable!("unsupported DRM format was selected"),
+        }
+
+        Ok(())
+    }
+
+    fn present(&mut self) -> Result<(), String> {
+        self.wait_for_page_flip()?;
+
+        mem::swap(&mut self.back_buffer, &mut self.front_buffer);
+        mem::swap(&mut self.front_buffer, &mut self.in_flight_buffer);
+
+        self.in_flight_buffer.age = 1;
+        for buffer in [&mut self.back_buffer, &mut self.front_buffer] {
+            if buffer.age != 0 {
+                buffer.age = buffer.age.saturating_add(1);
             }
         }
-        redraw
+
+        if self.posted {
+            self.card
+                .page_flip(
+                    self.crtc,
+                    self.in_flight_buffer.framebuffer,
+                    PageFlipFlags::EVENT,
+                    None,
+                )
+                .map_err(|err| format!("page flip DRM buffer: {err}"))?;
+            self.page_flip_pending = true;
+        } else {
+            self.card
+                .set_crtc(
+                    self.crtc,
+                    Some(self.in_flight_buffer.framebuffer),
+                    (0, 0),
+                    &[self.connector.handle()],
+                    Some(self.mode),
+                )
+                .map_err(|err| format!("set DRM CRTC: {err}"))?;
+            self.posted = true;
+        }
+
+        Ok(())
+    }
+
+    fn wait_for_page_flip(&mut self) -> Result<(), String> {
+        if !self.page_flip_pending {
+            return Ok(());
+        }
+
+        loop {
+            let events = self
+                .card
+                .receive_events()
+                .map_err(|err| format!("receive DRM events: {err}"))?;
+            if events.into_iter().any(
+                |event| matches!(event, Event::PageFlip(page_flip) if page_flip.crtc == self.crtc),
+            ) {
+                self.page_flip_pending = false;
+                return Ok(());
+            }
+        }
     }
 }
 
-impl Drop for Framebuffer {
-    fn drop(&mut self) {
-        unsafe {
-            libc::munmap(self.pixels.cast(), self.map_len);
+struct DrmCard(File);
+
+impl AsFd for DrmCard {
+    fn as_fd(&self) -> BorrowedFd<'_> {
+        self.0.as_fd()
+    }
+}
+
+impl DrmDevice for DrmCard {}
+impl ControlDevice for DrmCard {}
+
+struct KmsBuffer {
+    framebuffer: framebuffer::Handle,
+    buffer: control::dumbbuffer::DumbBuffer,
+    age: u8,
+}
+
+impl KmsBuffer {
+    fn allocate(card: &DrmCard, size: (u32, u32), format: DrmFourcc) -> Result<Self, String> {
+        let (depth, bpp) = pixel_format_params(format)?;
+        let buffer = card
+            .create_dumb_buffer(size, format, bpp)
+            .map_err(|err| format!("create DRM dumb buffer: {err}"))?;
+        let framebuffer = card
+            .add_framebuffer(&buffer, depth, bpp)
+            .map_err(|err| format!("create DRM framebuffer object: {err}"))?;
+
+        Ok(Self {
+            framebuffer,
+            buffer,
+            age: 0,
+        })
+    }
+}
+
+fn choose_connector(
+    card: &DrmCard,
+    resources: &control::ResourceHandles,
+) -> Result<connector::Info, String> {
+    let mut fallback = None;
+
+    for handle in resources.connectors() {
+        let connector = card
+            .get_connector(*handle, true)
+            .map_err(|err| format!("query DRM connector {handle:?}: {err}"))?;
+        if connector.modes().is_empty() {
+            continue;
+        }
+        if connector.state() == connector::State::Connected {
+            return Ok(connector);
+        }
+        fallback.get_or_insert(connector);
+    }
+
+    fallback.ok_or_else(|| "no DRM connector with modes found".to_string())
+}
+
+fn choose_mode(connector: &connector::Info) -> Result<control::Mode, String> {
+    connector
+        .modes()
+        .iter()
+        .max_by_key(|mode| {
+            let (width, height) = mode.size();
+            (
+                mode.mode_type().contains(ModeTypeFlags::PREFERRED),
+                width as u32 * height as u32,
+            )
+        })
+        .copied()
+        .ok_or_else(|| format!("DRM connector {connector} reported no modes"))
+}
+
+fn choose_crtc(
+    card: &DrmCard,
+    resources: &control::ResourceHandles,
+    connector: &connector::Info,
+) -> Result<crtc::Handle, String> {
+    if let Some(crtc) = connector
+        .current_encoder()
+        .and_then(|encoder| card.get_encoder(encoder).ok())
+        .and_then(|encoder| encoder.crtc())
+    {
+        return Ok(crtc);
+    }
+
+    connector
+        .encoders()
+        .iter()
+        .filter_map(|encoder| card.get_encoder(*encoder).ok())
+        .flat_map(|encoder| resources.filter_crtcs(encoder.possible_crtcs()))
+        .find(|crtc| card.get_crtc(*crtc).is_ok())
+        .ok_or_else(|| format!("no compatible DRM CRTC found for connector {connector}"))
+}
+
+fn choose_format(
+    card: &DrmCard,
+    resources: &control::ResourceHandles,
+    crtc: crtc::Handle,
+) -> Result<DrmFourcc, String> {
+    let available = supported_formats(card, resources, crtc);
+    for format in [
+        DrmFourcc::Xrgb8888,
+        DrmFourcc::Argb8888,
+        DrmFourcc::Bgra8888,
+        DrmFourcc::Rgb565,
+    ] {
+        if available.contains(&format) {
+            return Ok(format);
         }
     }
+
+    Err(format!(
+        "no supported DRM format found; available formats: {available:?}"
+    ))
+}
+
+fn supported_formats(
+    card: &DrmCard,
+    resources: &control::ResourceHandles,
+    crtc: crtc::Handle,
+) -> Vec<DrmFourcc> {
+    let mut formats = Vec::new();
+
+    if let Ok(planes) = card.plane_handles() {
+        for plane in planes {
+            let Ok(plane) = card.get_plane(plane) else {
+                continue;
+            };
+            let compatible = plane.crtc() == Some(crtc)
+                || resources
+                    .filter_crtcs(plane.possible_crtcs())
+                    .iter()
+                    .any(|candidate| *candidate == crtc);
+            if !compatible {
+                continue;
+            }
+
+            for format in plane.formats() {
+                if let Ok(format) = DrmFourcc::try_from(*format) {
+                    if !formats.contains(&format) {
+                        formats.push(format);
+                    }
+                }
+            }
+        }
+    }
+
+    if formats.is_empty() {
+        formats.push(DrmFourcc::Xrgb8888);
+    }
+
+    formats
+}
+
+fn repaint_buffer_type_for_age(age: u8) -> RepaintBufferType {
+    match age {
+        1 => RepaintBufferType::ReusedBuffer,
+        2 => RepaintBufferType::SwappedBuffers,
+        _ => RepaintBufferType::NewBuffer,
+    }
+}
+
+fn bytes_per_pixel(format: DrmFourcc) -> usize {
+    match format {
+        DrmFourcc::Xrgb8888 | DrmFourcc::Argb8888 | DrmFourcc::Bgra8888 => 4,
+        DrmFourcc::Rgb565 => 2,
+        _ => unreachable!("unsupported DRM format was selected"),
+    }
+}
+
+fn pixel_format_params(format: DrmFourcc) -> Result<(u32, u32), String> {
+    match format {
+        DrmFourcc::Xrgb8888 => Ok((24, 32)),
+        DrmFourcc::Argb8888 | DrmFourcc::Bgra8888 => Ok((32, 32)),
+        DrmFourcc::Rgb565 => Ok((16, 16)),
+        _ => Err(format!("unsupported DRM format {format:?}")),
+    }
+}
+
+fn cast_buffer_mut<T>(buffer: &mut [u8], format: DrmFourcc) -> Result<&mut [T], String> {
+    let pixel_size = mem::size_of::<T>();
+    if buffer.len() % pixel_size != 0 {
+        return Err(format!(
+            "DRM buffer length is not aligned for {format:?}: {} bytes",
+            buffer.len()
+        ));
+    }
+    if buffer.as_ptr() as usize % mem::align_of::<T>() != 0 {
+        return Err(format!("DRM buffer mapping is not aligned for {format:?}"));
+    }
+
+    Ok(unsafe { slice::from_raw_parts_mut(buffer.as_mut_ptr().cast(), buffer.len() / pixel_size) })
 }
 
 #[repr(transparent)]
 #[derive(Clone, Copy, Default)]
-struct FbPixel(u32);
+struct Xrgb8888Pixel(u32);
 
-impl FbPixel {
+impl Xrgb8888Pixel {
     fn rgb(self) -> (u8, u8, u8) {
         (
             ((self.0 >> 16) & 0xff) as u8,
@@ -383,7 +613,7 @@ impl FbPixel {
     }
 }
 
-impl TargetPixel for FbPixel {
+impl TargetPixel for Xrgb8888Pixel {
     fn blend(&mut self, color: PremultipliedRgbaColor) {
         let (red, green, blue) = self.rgb();
         let inv_alpha = (u8::MAX - color.alpha) as u16;
@@ -397,28 +627,45 @@ impl TargetPixel for FbPixel {
     fn from_rgb(red: u8, green: u8, blue: u8) -> Self {
         Self(0xff00_0000 | ((red as u32) << 16) | ((green as u32) << 8) | blue as u32)
     }
+
+    fn background() -> Self {
+        Self(0)
+    }
 }
 
-#[repr(C)]
+#[repr(transparent)]
 #[derive(Clone, Copy, Default)]
-struct BgrPixel {
-    blue: u8,
-    green: u8,
-    red: u8,
+struct Bgra8888Pixel(u32);
+
+impl Bgra8888Pixel {
+    fn rgba(self) -> PremultipliedRgbaColor {
+        PremultipliedRgbaColor {
+            red: (self.0 >> 8) as u8,
+            green: (self.0 >> 16) as u8,
+            blue: (self.0 >> 24) as u8,
+            alpha: self.0 as u8,
+        }
+    }
 }
 
-impl TargetPixel for BgrPixel {
+impl TargetPixel for Bgra8888Pixel {
     fn blend(&mut self, color: PremultipliedRgbaColor) {
-        let inv_alpha = (u8::MAX - color.alpha) as u16;
-        *self = Self::from_rgb(
-            (self.red as u16 * inv_alpha / 255) as u8 + color.red,
-            (self.green as u16 * inv_alpha / 255) as u8 + color.green,
-            (self.blue as u16 * inv_alpha / 255) as u8 + color.blue,
+        let mut background = self.rgba();
+        background.blend(color);
+        *self = Self(
+            background.alpha as u32
+                | ((background.red as u32) << 8)
+                | ((background.green as u32) << 16)
+                | ((background.blue as u32) << 24),
         );
     }
 
     fn from_rgb(red: u8, green: u8, blue: u8) -> Self {
-        Self { blue, green, red }
+        Self(0xff | ((red as u32) << 8) | ((green as u32) << 16) | ((blue as u32) << 24))
+    }
+
+    fn background() -> Self {
+        Self(0)
     }
 }
 
@@ -770,9 +1017,6 @@ fn ioc(direction: u8, type_: u8, number: u8, size: usize) -> u64 {
         | ((size as u64) << IOC_SIZESHIFT)
 }
 
-const FBIOGET_VSCREENINFO: u64 = 0x4600;
-const FBIOGET_FSCREENINFO: u64 = 0x4602;
-
 const IOC_NRBITS: u64 = 8;
 const IOC_TYPEBITS: u64 = 8;
 const IOC_SIZEBITS: u64 = 14;
@@ -794,73 +1038,6 @@ const ABS_MT_SLOT: u16 = 0x2f;
 const ABS_MT_POSITION_X: u16 = 0x35;
 const ABS_MT_POSITION_Y: u16 = 0x36;
 const ABS_MT_TRACKING_ID: u16 = 0x39;
-
-#[repr(C)]
-#[derive(Default)]
-struct FbBitfield {
-    offset: u32,
-    length: u32,
-    msb_right: u32,
-}
-
-#[repr(C)]
-struct FbFixScreeninfo {
-    id: [libc::c_char; 16],
-    smem_start: libc::c_ulong,
-    smem_len: u32,
-    type_: u32,
-    type_aux: u32,
-    visual: u32,
-    xpanstep: u16,
-    ypanstep: u16,
-    ywrapstep: u16,
-    line_length: u32,
-    mmio_start: libc::c_ulong,
-    mmio_len: u32,
-    accel: u32,
-    capabilities: u16,
-    reserved: [u16; 2],
-}
-
-impl Default for FbFixScreeninfo {
-    fn default() -> Self {
-        unsafe { mem::zeroed() }
-    }
-}
-
-#[repr(C)]
-#[derive(Default)]
-struct FbVarScreeninfo {
-    xres: u32,
-    yres: u32,
-    xres_virtual: u32,
-    yres_virtual: u32,
-    xoffset: u32,
-    yoffset: u32,
-    bits_per_pixel: u32,
-    grayscale: u32,
-    red: FbBitfield,
-    green: FbBitfield,
-    blue: FbBitfield,
-    transp: FbBitfield,
-    nonstd: u32,
-    activate: u32,
-    height: u32,
-    width: u32,
-    accel_flags: u32,
-    pixclock: u32,
-    left_margin: u32,
-    right_margin: u32,
-    upper_margin: u32,
-    lower_margin: u32,
-    hsync_len: u32,
-    vsync_len: u32,
-    sync: u32,
-    vmode: u32,
-    rotate: u32,
-    colorspace: u32,
-    reserved: [u32; 4],
-}
 
 #[repr(C)]
 #[derive(Clone, Copy)]

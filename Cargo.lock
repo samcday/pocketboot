@@ -3284,6 +3284,7 @@ name = "pocketboot"
 version = "0.1.0"
 dependencies = [
  "abootimg-oxide",
+ "drm",
  "flate2",
  "gadgetry-most-foul",
  "libc",
