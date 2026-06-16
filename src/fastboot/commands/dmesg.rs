@@ -5,7 +5,7 @@ use std::{
 };
 
 use crate::{
-    fastboot::{CommandContext, PostResponseAction},
+    fastboot::{CommandContext, CommandResult},
     kmsg,
 };
 
@@ -15,7 +15,7 @@ const KMSG_RECORD_MAX: usize = 64 * 1024;
 pub(super) fn handle(
     context: &mut CommandContext<'_>,
     _command: &str,
-) -> io::Result<Option<PostResponseAction>> {
+) -> io::Result<CommandResult> {
     let capture = capture_dmesg()?;
     let records = capture.records;
     let bytes = capture.data.len();
@@ -28,7 +28,7 @@ pub(super) fn handle(
     }
     context.info(b"run fastboot get_staged /dev/stdout to view")?;
     context.okay(b"")?;
-    Ok(None)
+    Ok(CommandResult::continue_())
 }
 
 #[derive(Default)]

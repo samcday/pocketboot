@@ -7,7 +7,7 @@ use abootimg_oxide::{Header, HeaderV0Versioned};
 use flate2::read::MultiGzDecoder;
 
 use crate::{
-    fastboot::{CommandContext, PostResponseAction},
+    fastboot::{CommandContext, CommandResult},
     kexec::{self, KexecImage},
 };
 
@@ -17,29 +17,29 @@ const GZIP_MAGIC: [u8; 2] = [0x1f, 0x8b];
 pub(super) fn handle_boot(
     context: &mut CommandContext<'_>,
     _command: &str,
-) -> io::Result<Option<PostResponseAction>> {
+) -> io::Result<CommandResult> {
     let image = prepare_staged_boot_image(context)?;
     image.load()?;
-    context.okay_then(b"booting", kexec::exec_loaded_image)
+    context.okay_then_exit(b"booting", kexec::exec_loaded_image)
 }
 
 pub(super) fn handle_kexec_load(
     context: &mut CommandContext<'_>,
     _command: &str,
-) -> io::Result<Option<PostResponseAction>> {
+) -> io::Result<CommandResult> {
     let image = prepare_staged_boot_image(context)?;
     image.load()?;
     context.okay(b"loaded")?;
-    Ok(None)
+    Ok(CommandResult::continue_())
 }
 
 pub(super) fn handle_kexec_status(
     context: &mut CommandContext<'_>,
     _command: &str,
-) -> io::Result<Option<PostResponseAction>> {
+) -> io::Result<CommandResult> {
     let status = fs::read_to_string(KEXEC_LOADED)?;
     context.okay(status.trim().as_bytes())?;
-    Ok(None)
+    Ok(CommandResult::continue_())
 }
 
 fn prepare_staged_boot_image(context: &CommandContext<'_>) -> io::Result<KexecImage> {
@@ -172,7 +172,7 @@ fn invalid_data(message: impl Into<String>) -> io::Error {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use flate2::{write::GzEncoder, Compression};
+    use flate2::{Compression, write::GzEncoder};
     use std::io::Write;
 
     #[test]

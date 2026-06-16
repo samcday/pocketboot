@@ -5,7 +5,7 @@ use std::{
 };
 
 use crate::{
-    fastboot::{CommandContext, PostResponseAction},
+    fastboot::{CommandContext, CommandResult},
     kexec,
 };
 
@@ -13,10 +13,7 @@ const COMMAND_PREFIX: &str = "oem cat:";
 const MAX_STAGED_SIZE: u64 = u32::MAX as u64;
 const COPY_CHUNK: usize = 1024 * 1024;
 
-pub(super) fn handle(
-    context: &mut CommandContext<'_>,
-    command: &str,
-) -> io::Result<Option<PostResponseAction>> {
+pub(super) fn handle(context: &mut CommandContext<'_>, command: &str) -> io::Result<CommandResult> {
     let path = parse_path(command)?;
     let staged = stage_file(path)?;
     let bytes = staged.size;
@@ -25,7 +22,7 @@ pub(super) fn handle(
     context.info(format!("{path} staged ({bytes} bytes)"))?;
     context.info(b"run fastboot get_staged /dev/stdout to view")?;
     context.okay(b"")?;
-    Ok(None)
+    Ok(CommandResult::continue_())
 }
 
 struct StagedFile {

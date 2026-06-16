@@ -53,7 +53,11 @@ fn run() -> Result<()> {
     if let Err(err) = ui::spawn(battery) {
         tracing::warn!(error = %err, "failed to spawn UI thread");
     }
-    let fastboot_thread = gadget::spawn(gadget::Mode::Fastboot)
+    let gadget = gadget::Gadget::new();
+    let fastboot_thread = gadget
+        .spawn(gadget::Mode::Fastboot {
+            commands: fastboot_commands(gadget.clone()),
+        })
         .map_err(|err| format!("spawn fastboot gadget thread: {err}"))?;
     kmsg_forwarder::spawn();
 
@@ -142,6 +146,14 @@ fn run() -> Result<()> {
         tracing::warn!("BLS entries were discovered, but none are directly bootable yet");
     }
     Ok(())
+}
+
+fn fastboot_commands(gadget: gadget::Gadget) -> fastboot::CommandMap {
+    let mut commands = fastboot::commands::boot_commands();
+    commands.extend(fastboot::commands::diagnostic_commands());
+    commands.extend(fastboot::commands::ums_commands(gadget));
+    commands.push(fastboot::commands::reboot_command());
+    commands
 }
 
 fn join_fastboot_thread(

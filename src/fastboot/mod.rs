@@ -3,19 +3,19 @@ use std::{
     io::{self, Read, Seek, SeekFrom, Write},
     os::fd::{AsRawFd, RawFd},
     sync::{
-        atomic::{AtomicBool, Ordering},
         Arc,
+        atomic::{AtomicBool, Ordering},
     },
     thread,
     time::Duration,
 };
 
 use gadgetry_most_foul::{
-    function::{
-        custom::{Custom, Endpoint, EndpointDirection, EndpointIn, EndpointOut, Event, Interface},
-        Handle,
-    },
     Class,
+    function::{
+        Handle,
+        custom::{Custom, Endpoint, EndpointDirection, EndpointIn, EndpointOut, Event, Interface},
+    },
 };
 
 use crate::kexec;
@@ -35,14 +35,61 @@ const FASTBOOT_SUBCLASS: u8 = 0x42;
 const FASTBOOT_PROTOCOL: u8 = 0x03;
 
 pub(crate) type PostResponseAction = Box<dyn FnOnce() -> io::Result<()> + Send + 'static>;
-pub(crate) type CommandHandler =
-    fn(&mut CommandContext<'_>, &str) -> io::Result<Option<PostResponseAction>>;
+pub(crate) trait CommandHandler: Send + Sync {
+    fn handle(&self, context: &mut CommandContext<'_>, command: &str) -> io::Result<CommandResult>;
+}
+
+impl<F> CommandHandler for F
+where
+    F: for<'a> Fn(&mut CommandContext<'a>, &str) -> io::Result<CommandResult>
+        + Send
+        + Sync
+        + 'static,
+{
+    fn handle(&self, context: &mut CommandContext<'_>, command: &str) -> io::Result<CommandResult> {
+        self(context, command)
+    }
+}
+
 pub(crate) type CommandMap = Vec<Command>;
+
+pub(crate) struct CommandResult {
+    flow: CommandFlow,
+    action: Option<PostResponseAction>,
+}
+
+enum CommandFlow {
+    Continue,
+    Exit,
+}
+
+impl CommandResult {
+    pub(crate) fn continue_() -> Self {
+        Self {
+            flow: CommandFlow::Continue,
+            action: None,
+        }
+    }
+
+    pub(crate) fn continue_then(action: PostResponseAction) -> Self {
+        Self {
+            flow: CommandFlow::Continue,
+            action: Some(action),
+        }
+    }
+
+    pub(crate) fn exit(action: Option<PostResponseAction>) -> Self {
+        Self {
+            flow: CommandFlow::Exit,
+            action,
+        }
+    }
+}
 
 pub(crate) struct Command {
     name: &'static str,
     match_kind: CommandMatch,
-    handler: CommandHandler,
+    handler: Box<dyn CommandHandler>,
 }
 
 #[derive(Clone, Copy)]
@@ -52,19 +99,19 @@ enum CommandMatch {
 }
 
 impl Command {
-    pub(crate) const fn exact(name: &'static str, handler: CommandHandler) -> Self {
+    pub(crate) fn exact(name: &'static str, handler: impl CommandHandler + 'static) -> Self {
         Self {
             name,
             match_kind: CommandMatch::Exact,
-            handler,
+            handler: Box::new(handler),
         }
     }
 
-    pub(crate) const fn prefix(prefix: &'static str, handler: CommandHandler) -> Self {
+    pub(crate) fn prefix(prefix: &'static str, handler: impl CommandHandler + 'static) -> Self {
         Self {
             name: prefix,
             match_kind: CommandMatch::Prefix,
-            handler,
+            handler: Box::new(handler),
         }
     }
 }
@@ -79,10 +126,11 @@ pub(crate) struct UsbFunction {
     custom: Custom,
     rx: EndpointOut,
     tx: EndpointIn,
+    commands: CommandMap,
 }
 
 impl UsbFunction {
-    pub(crate) fn new() -> Self {
+    pub(crate) fn new(commands: CommandMap) -> Self {
         let (rx, rx_dir) = EndpointDirection::host_to_device();
         let (tx, tx_dir) = EndpointDirection::device_to_host();
         let (custom, handle) = Custom::builder()
@@ -101,6 +149,7 @@ impl UsbFunction {
             custom,
             rx,
             tx,
+            commands,
         }
     }
 
@@ -108,9 +157,9 @@ impl UsbFunction {
         self.handle.clone()
     }
 
-    pub(crate) fn start(self, commands: CommandMap) -> io::Result<(FastbootServer, EventLoop)> {
+    pub(crate) fn start(self) -> io::Result<(FastbootServer, EventLoop)> {
         let event_loop = EventLoop::spawn(self.custom)?;
-        let server = FastbootServer::new(self.rx, self.tx, commands);
+        let server = FastbootServer::new(self.rx, self.tx, self.commands);
         Ok((server, event_loop))
     }
 }
@@ -185,17 +234,26 @@ impl FastbootServer {
                         disconnected = false;
                     }
                 }
-                Ok(ServerStep::Exit(action)) => return Ok(action),
+                Ok(ServerStep::Exit(action)) => {
+                    tracing::info!(
+                        has_action = action.is_some(),
+                        "fastboot server exit requested"
+                    );
+                    return Ok(action);
+                }
                 Err(err) if is_usb_disconnect(&err) => {
                     if disconnected {
-                        tracing::debug!(error = ?err, "fastboot host still disconnected");
+                        tracing::debug!(errno = err.raw_os_error(), error = ?err, "fastboot host still disconnected");
                     } else {
-                        tracing::info!(error = ?err, "fastboot host disconnected");
+                        tracing::info!(errno = err.raw_os_error(), error = ?err, "fastboot host disconnected");
                         disconnected = true;
                     }
                     thread::sleep(DISCONNECT_RETRY_DELAY);
                 }
-                Err(err) => return Err(err),
+                Err(err) => {
+                    tracing::warn!(errno = err.raw_os_error(), error = ?err, "fastboot server fatal transport error");
+                    return Err(err);
+                }
             }
         }
     }
@@ -206,9 +264,9 @@ impl FastbootServer {
             FastbootResponder::new(&mut self.tx).fail(b"unrecognized command")?;
             return Ok(ServerStep::Continue);
         };
+        tracing::info!(command, "fastboot command received");
 
         if command == "continue" {
-            tracing::info!(command, "fastboot command received");
             match FastbootResponder::new(&mut self.tx).okay_best_effort(b"") {
                 Ok(()) => tracing::debug!(command, "fastboot OKAY sent"),
                 Err(err) => {
@@ -244,9 +302,8 @@ impl FastbootServer {
         let handler = find_command_handler(&self.commands, command);
         let mut context = CommandContext::new(&mut self.tx, &mut self.staged);
         match handler {
-            Some(handler) => match handler(&mut context, command) {
-                Ok(Some(action)) => return Ok(ServerStep::Exit(Some(action))),
-                Ok(None) => {}
+            Some(handler) => match handler.handle(&mut context, command) {
+                Ok(result) => return finish_command_result(command, result),
                 Err(err) => {
                     if is_usb_disconnect(&err) {
                         return Err(err);
@@ -321,6 +378,30 @@ impl FastbootServer {
         responder.data(size)?;
         staged.send(&mut responder)?;
         responder.okay(b"")
+    }
+}
+
+fn finish_command_result(command: &str, result: CommandResult) -> io::Result<ServerStep> {
+    match result.flow {
+        CommandFlow::Continue => {
+            if let Some(action) = result.action {
+                tracing::info!(command, "running fastboot post-response action");
+                if let Err(err) = action() {
+                    tracing::warn!(command, error = ?err, "fastboot post-response action failed");
+                } else {
+                    tracing::info!(command, "fastboot post-response action completed");
+                }
+            }
+            Ok(ServerStep::Continue)
+        }
+        CommandFlow::Exit => {
+            tracing::info!(
+                command,
+                has_action = result.action.is_some(),
+                "fastboot command requested exit"
+            );
+            Ok(ServerStep::Exit(result.action))
+        }
     }
 }
 
@@ -417,13 +498,13 @@ impl<'a> CommandContext<'a> {
         self.responder.okay(message)
     }
 
-    pub(crate) fn okay_then(
+    pub(crate) fn okay_then_exit(
         &mut self,
         message: impl AsRef<[u8]>,
         action: impl FnOnce() -> io::Result<()> + Send + 'static,
-    ) -> io::Result<Option<PostResponseAction>> {
+    ) -> io::Result<CommandResult> {
         self.okay(message)?;
-        Ok(Some(Box::new(action)))
+        Ok(CommandResult::exit(Some(Box::new(action))))
     }
 
     pub(crate) fn fail(&mut self, message: impl AsRef<[u8]>) -> io::Result<()> {
@@ -548,16 +629,21 @@ fn transfer_buffer(len: usize) -> io::Result<Vec<u8>> {
     Ok(buffer)
 }
 
-fn find_command_handler(commands: &[Command], command: &str) -> Option<CommandHandler> {
+fn find_command_handler<'a>(
+    commands: &'a [Command],
+    command: &str,
+) -> Option<&'a dyn CommandHandler> {
     commands
         .iter()
         .find_map(|entry| match entry.match_kind {
-            CommandMatch::Exact if entry.name == command => Some(entry.handler),
+            CommandMatch::Exact if entry.name == command => Some(entry.handler.as_ref()),
             _ => None,
         })
         .or_else(|| {
             commands.iter().find_map(|entry| match entry.match_kind {
-                CommandMatch::Prefix if command.starts_with(entry.name) => Some(entry.handler),
+                CommandMatch::Prefix if command.starts_with(entry.name) => {
+                    Some(entry.handler.as_ref())
+                }
                 _ => None,
             })
         })
@@ -583,7 +669,7 @@ fn read_packet(endpoint: &mut EndpointOut, buffer: &mut [u8]) -> io::Result<usiz
 fn is_usb_disconnect(err: &io::Error) -> bool {
     matches!(
         err.raw_os_error(),
-        Some(libc::ESHUTDOWN | libc::EPIPE | libc::ENODEV | libc::ECONNRESET)
+        Some(libc::ESHUTDOWN | libc::EPIPE | libc::ENODEV | libc::ECONNRESET | libc::EIO)
     ) || matches!(
         err.kind(),
         io::ErrorKind::BrokenPipe
@@ -662,13 +748,13 @@ mod tests {
     fn dummy_handler(
         _context: &mut CommandContext<'_>,
         _command: &str,
-    ) -> io::Result<Option<PostResponseAction>> {
-        Ok(None)
+    ) -> io::Result<CommandResult> {
+        Ok(CommandResult::continue_())
     }
 
     #[test]
     fn finds_exact_command_handlers() {
-        let commands = vec![Command::exact("oem dmesg", dummy_handler as CommandHandler)];
+        let commands = vec![Command::exact("oem dmesg", dummy_handler)];
 
         assert!(find_command_handler(&commands, "oem dmesg").is_some());
         assert!(find_command_handler(&commands, "oem dmesg:").is_none());
@@ -676,7 +762,7 @@ mod tests {
 
     #[test]
     fn finds_prefix_command_handlers() {
-        let commands = vec![Command::prefix("oem cat:", dummy_handler as CommandHandler)];
+        let commands = vec![Command::prefix("oem cat:", dummy_handler)];
 
         assert!(find_command_handler(&commands, "oem cat:/proc/cmdline").is_some());
         assert!(find_command_handler(&commands, "oem cat").is_none());
@@ -684,7 +770,13 @@ mod tests {
 
     #[test]
     fn recognizes_usb_disconnect_errno_values() {
-        for errno in [libc::ESHUTDOWN, libc::EPIPE, libc::ENODEV, libc::ECONNRESET] {
+        for errno in [
+            libc::ESHUTDOWN,
+            libc::EPIPE,
+            libc::ENODEV,
+            libc::ECONNRESET,
+            libc::EIO,
+        ] {
             let err = io::Error::from_raw_os_error(errno);
             assert!(is_usb_disconnect(&err), "errno {errno} was not recognized");
         }
@@ -701,6 +793,16 @@ mod tests {
             let err = io::Error::new(kind, "transport closed");
             assert!(is_usb_disconnect(&err), "kind {kind:?} was not recognized");
         }
+    }
+
+    #[test]
+    fn continue_action_failure_does_not_exit_server() {
+        let result = CommandResult::continue_then(Box::new(|| Err(io::Error::other("boom"))));
+
+        assert!(matches!(
+            finish_command_result("oem test", result).unwrap(),
+            ServerStep::Continue
+        ));
     }
 
     #[test]

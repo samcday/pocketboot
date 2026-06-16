@@ -1,14 +1,14 @@
 use std::io;
 
-use crate::fastboot::{CommandContext, PostResponseAction};
+use crate::fastboot::{CommandContext, CommandResult};
 
 const LINUX_REBOOT_CMD_RESTART: libc::c_int = 0x0123_4567;
 
 pub(super) fn handle(
     context: &mut CommandContext<'_>,
     _command: &str,
-) -> io::Result<Option<PostResponseAction>> {
-    context.okay_then(b"rebooting", reboot_system)
+) -> io::Result<CommandResult> {
+    context.okay_then_exit(b"rebooting", reboot_system)
 }
 
 fn reboot_system() -> io::Result<()> {
