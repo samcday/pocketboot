@@ -35,14 +35,16 @@ fn main() {
 }
 
 fn run() -> Result<()> {
+    kmsg::init_tracing();
+    tracing::info!("starting up");
+
     if unsafe { libc::getpid() } != 1 {
         return Err("pocketboot must run as PID 1 (/init)".to_string());
     }
 
     mount_core_vfs()?;
-    kmsg::init_tracing();
-    tracing::info!("starting pid1 beachhead");
-    tracing::info!("mounted core VFS");
+    tracing::debug!("mounted core VFS");
+
     let battery = match battery::spawn() {
         Ok(updates) => Some(updates),
         Err(err) => {

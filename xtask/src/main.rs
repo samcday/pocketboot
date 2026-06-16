@@ -1049,6 +1049,7 @@ fn write_initrd(init: &Path, output: &Path) -> Result<()> {
     let mut writer = NewcWriter::create(output)?;
     writer.dir("dev", 0o755)?;
     writer.char_dev("dev/console", 0o600, 5, 1)?;
+    writer.char_dev("dev/kmsg", 0o600, 1, 11)?;
     writer.char_dev("dev/null", 0o666, 1, 3)?;
     writer.dir("proc", 0o755)?;
     writer.dir("run", 0o755)?;
