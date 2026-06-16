@@ -4,6 +4,7 @@ mod boot;
 mod cat;
 mod dmesg;
 mod reboot;
+mod shell;
 mod ums;
 
 pub(crate) fn boot_commands() -> CommandMap {
@@ -18,6 +19,8 @@ pub(crate) fn diagnostic_commands() -> CommandMap {
     vec![
         Command::prefix("oem cat:", cat::handle),
         Command::exact("oem dmesg", dmesg::handle),
+        Command::prefix("oem shell:", shell::handle),
+        Command::exact("oem shell-staged", shell::handle_staged),
     ]
 }
 

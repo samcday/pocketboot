@@ -44,6 +44,12 @@ This builds `target/aarch64-unknown-linux-musl/release/pocketboot` and writes an
 initrd-ready `newc` archive to `target/pocketboot-initrd.cpio` with the binary
 installed as `/init`.
 
+By default, the initrd also includes BusyBox built from the official 1.38.0
+source release with applet symlinks installed under `/bin`, `/sbin`, `/usr/bin`
+and `/usr/sbin`. The default target expects `aarch64-linux-musl-gcc`; set
+`BUSYBOX_CC` or `BUSYBOX_CROSS_COMPILE` to use another static libc-capable target
+C toolchain, or pass `--no-busybox` to build only the Rust `/init`.
+
 To build a pocketboot kernel for a supported device, pass the canonical arm64
 DTB path without the `.dtb` suffix and a kernel tree:
 

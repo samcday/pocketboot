@@ -14,6 +14,7 @@ mod kexec;
 mod kmsg;
 #[path = "kmsg-forwarder.rs"]
 mod kmsg_forwarder;
+mod reaper;
 mod settle;
 mod ui;
 
@@ -54,6 +55,7 @@ fn run() -> Result<()> {
 
     let serialno = detect_serial();
     tracing::info!(serialno = %serialno, "selected device serialno");
+    reaper::spawn();
     let battery = match battery::spawn() {
         Ok(updates) => Some(updates),
         Err(err) => {

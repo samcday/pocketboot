@@ -8,4 +8,5 @@ publish = false
 abootimg-oxide = { version = "0.5.1", features = ["hash"] }
 serde = { version = "1", features = ["derive"] }
 sha1 = "0.11"
+sha2 = "0.10"
 toml = "0.8"
