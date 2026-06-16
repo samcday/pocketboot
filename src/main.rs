@@ -20,6 +20,13 @@ mod ui;
 type Result<T> = std::result::Result<T, String>;
 
 const SYS_BLOCK: &str = "/sys/block";
+const PROC_CMDLINE: &str = "/proc/cmdline";
+const FDT_SERIALNO_PATHS: [&str; 1] = [
+    // lk2nd puts the serial-number here
+    "/sys/firmware/devicetree/base/serial-number",
+];
+const DEFAULT_SERIALNO: &str = "0001";
+const ANDROIDBOOT_SERIALNO: &str = "androidboot.serialno=";
 
 fn main() {
     let code = match run() {
@@ -45,6 +52,8 @@ fn run() -> Result<()> {
     mount_core_vfs()?;
     tracing::debug!("mounted core VFS");
 
+    let serialno = detect_serial();
+    tracing::info!(serialno = %serialno, "selected device serialno");
     let battery = match battery::spawn() {
         Ok(updates) => Some(updates),
         Err(err) => {
@@ -55,7 +64,7 @@ fn run() -> Result<()> {
     if let Err(err) = ui::spawn(battery) {
         tracing::warn!(error = %err, "failed to spawn UI thread");
     }
-    let gadget = gadget::Gadget::new();
+    let gadget = gadget::Gadget::new(serialno);
     let fastboot_thread = gadget
         .spawn(gadget::Mode::Fastboot {
             commands: fastboot_commands(gadget.clone()),
@@ -156,6 +165,49 @@ fn fastboot_commands(gadget: gadget::Gadget) -> fastboot::CommandMap {
     commands.extend(fastboot::commands::ums_commands(gadget));
     commands.push(fastboot::commands::reboot_command());
     commands
+}
+
+fn detect_serial() -> String {
+    fdt_serialno()
+        .or_else(cmdline_serialno)
+        .unwrap_or_else(|| DEFAULT_SERIALNO.to_string())
+}
+
+fn fdt_serialno() -> Option<String> {
+    FDT_SERIALNO_PATHS.iter().find_map(|path| {
+        let bytes = fs::read(path).ok()?;
+        parse_fdt_serialno(&bytes).map(str::to_string)
+    })
+}
+
+fn cmdline_serialno() -> Option<String> {
+    let cmdline = fs::read_to_string(PROC_CMDLINE).ok()?;
+    parse_androidboot_serialno(&cmdline).map(str::to_string)
+}
+
+fn parse_androidboot_serialno(cmdline: &str) -> Option<&str> {
+    cmdline.split_whitespace().find_map(|arg| {
+        let serialno = arg.strip_prefix(ANDROIDBOOT_SERIALNO)?;
+        (!serialno.is_empty()).then_some(serialno)
+    })
+}
+
+fn parse_fdt_serialno(bytes: &[u8]) -> Option<&str> {
+    let serialno = bytes.split(|byte| *byte == b'\0').next()?;
+    let serialno = trim_ascii_bytes(serialno);
+    (!serialno.is_empty())
+        .then(|| std::str::from_utf8(serialno).ok())
+        .flatten()
+}
+
+fn trim_ascii_bytes(mut bytes: &[u8]) -> &[u8] {
+    while bytes.first().is_some_and(|byte| byte.is_ascii_whitespace()) {
+        bytes = &bytes[1..];
+    }
+    while bytes.last().is_some_and(|byte| byte.is_ascii_whitespace()) {
+        bytes = &bytes[..bytes.len() - 1];
+    }
+    bytes
 }
 
 fn join_fastboot_thread(
@@ -344,4 +396,41 @@ fn format_size(sectors: u64) -> String {
     let bytes = sectors as u128 * 512;
     let mib = bytes / 1024 / 1024;
     format!("size={sectors} sectors/{mib} MiB")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parses_androidboot_serialno() {
+        assert_eq!(
+            parse_androidboot_serialno("foo androidboot.serialno=6ea45af6 bar"),
+            Some("6ea45af6")
+        );
+    }
+
+    #[test]
+    fn ignores_empty_androidboot_serialno() {
+        assert_eq!(
+            parse_androidboot_serialno("foo androidboot.serialno= bar"),
+            None
+        );
+    }
+
+    #[test]
+    fn parses_fdt_serialno() {
+        assert_eq!(parse_fdt_serialno(b"6ea45af6\0"), Some("6ea45af6"));
+    }
+
+    #[test]
+    fn trims_fdt_serialno() {
+        assert_eq!(parse_fdt_serialno(b"  6ea45af6\n\0"), Some("6ea45af6"));
+    }
+
+    #[test]
+    fn ignores_empty_fdt_serialno() {
+        assert_eq!(parse_fdt_serialno(b"\0"), None);
+        assert_eq!(parse_fdt_serialno(b" \n\0"), None);
+    }
 }

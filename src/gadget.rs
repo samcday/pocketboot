@@ -29,9 +29,10 @@ const MAX_UMS_LUNS: usize = 8;
 
 pub(crate) type ThreadResult = io::Result<Option<PostResponseAction>>;
 
-#[derive(Clone, Default)]
+#[derive(Clone)]
 pub(crate) struct Gadget {
     state: Arc<Mutex<State>>,
+    serialno: String,
 }
 
 #[derive(Default)]
@@ -128,8 +129,11 @@ impl GadgetFunction for fastboot::UsbFunction {
 }
 
 impl Gadget {
-    pub(crate) fn new() -> Self {
-        Self::default()
+    pub(crate) fn new(serialno: impl Into<String>) -> Self {
+        Self {
+            state: Arc::new(Mutex::new(State::default())),
+            serialno: serialno.into(),
+        }
     }
 
     pub(crate) fn spawn(&self, mode: Mode) -> io::Result<thread::JoinHandle<ThreadResult>> {
@@ -331,7 +335,7 @@ impl Gadget {
         let gadget = RawGadget::new(
             Class::INTERFACE_SPECIFIC,
             Id::new(VENDOR_ID, PRODUCT_ID),
-            Strings::new("pocketboot", "pocketboot", "0001"),
+            Strings::new("pocketboot", "pocketboot", &self.serialno),
         )
         .with_config(config);
 
