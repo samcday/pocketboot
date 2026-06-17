@@ -15,7 +15,10 @@ use gadgetry_most_foul::{
     },
 };
 
-use crate::fastboot::{self, PostResponseAction};
+use crate::{
+    adb,
+    fastboot::{self, PostResponseAction},
+};
 
 const CONFIGFS: &str = "/sys/kernel/config";
 const VENDOR_ID: u16 = Id::LINUX_FOUNDATION_VID;
@@ -123,6 +126,12 @@ impl GadgetFunction for AcmFunction {
 }
 
 impl GadgetFunction for fastboot::UsbFunction {
+    fn handle(&self) -> Handle {
+        self.handle()
+    }
+}
+
+impl GadgetFunction for adb::UsbFunction {
     fn handle(&self) -> Handle {
         self.handle()
     }
@@ -304,10 +313,13 @@ impl Gadget {
     fn setup_fastboot_gadget(&self, commands: fastboot::CommandMap) -> ThreadResult {
         let serial = AcmFunction::new();
         let fastboot_function = fastboot::UsbFunction::new(commands);
-        let config = config_with_functions(&[&serial, &fastboot_function]);
+        let adb_function = adb::UsbFunction::new();
+        let config = config_with_functions(&[&serial, &fastboot_function, &adb_function]);
         self.register_and_bind(config)?;
 
         let (server, event_loop) = fastboot_function.start()?;
+        let (adb_server, adb_event_loop) = adb_function.start()?;
+        let adb_handle = adb_server.spawn()?;
         let server_result = server.run();
         match &server_result {
             Ok(action) => tracing::info!(
@@ -317,14 +329,20 @@ impl Gadget {
             Err(err) => tracing::warn!(error = ?err, "fastboot server exited with error"),
         }
 
+        adb_handle.stop();
         event_loop.stop();
+        adb_event_loop.stop();
         let unbind_result = self.unbind_and_remove();
         match &unbind_result {
             Ok(()) => tracing::info!("USB gadget unbound"),
             Err(err) => tracing::warn!(error = ?err, "USB gadget unbind failed"),
         }
 
+        if let Err(err) = adb_handle.join() {
+            tracing::warn!(error = ?err, "adb server exited with error");
+        }
         event_loop.join();
+        adb_event_loop.join();
 
         let action = server_result?;
         unbind_result?;

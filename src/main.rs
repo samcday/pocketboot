@@ -6,6 +6,7 @@ use std::{
     time::Duration,
 };
 
+mod adb;
 mod battery;
 mod bootflow;
 mod fastboot;
@@ -239,6 +240,8 @@ fn mount_core_vfs() -> Result<()> {
         0,
         Some("mode=0755"),
     )?;
+    fs::create_dir_all("/dev/pts").map_err(|err| format!("create /dev/pts: {err}"))?;
+    mount_fs(Some("devpts"), "/dev/pts", Some("devpts"), 0, None)?;
     mount_fs(Some("tmpfs"), "/run", Some("tmpfs"), 0, Some("mode=0755"))?;
     Ok(())
 }

@@ -1210,9 +1210,13 @@ fn configure_busybox(config: &Path) -> Result<()> {
         "ASH_TEST",
         "ASH_GETOPTS",
         "ASH_CMDCMD",
+        "CTTYHACK",
         "FEATURE_SH_MATH",
         "FEATURE_SH_STANDALONE",
         "FEATURE_SH_NOFORK",
+        "FEATURE_EDITING",
+        "FEATURE_EDITING_WINCH",
+        "FEATURE_EDITING_FANCY_PROMPT",
         "FEATURE_PREFER_APPLETS",
         "BUSYBOX",
         "CAT",
@@ -1255,12 +1259,15 @@ fn configure_busybox(config: &Path) -> Result<()> {
         "READLINK",
         "REALPATH",
         "REBOOT",
+        "RESET",
         "RM",
         "RMDIR",
         "SED",
+        "SETSID",
         "SLEEP",
         "SORT",
         "STAT",
+        "STTY",
         "STRINGS",
         "SYNC",
         "TAIL",
@@ -1315,6 +1322,8 @@ fn configure_busybox(config: &Path) -> Result<()> {
     set_kconfig_string(&mut contents, "BUSYBOX_EXEC_PATH", "/bin/busybox");
     set_kconfig_string(&mut contents, "PREFIX", "./_install");
     set_kconfig_string(&mut contents, "CROSS_COMPILER_PREFIX", "");
+    set_kconfig_int(&mut contents, "FEATURE_EDITING_MAX_LEN", 1024);
+    set_kconfig_int(&mut contents, "FEATURE_EDITING_HISTORY", 64);
     fs::write(config, contents)
         .map_err(|err| format!("write busybox config {}: {err}", config.display()))
 }
@@ -1346,6 +1355,26 @@ fn set_kconfig_bool(contents: &mut String, name: &str, enabled: bool) {
 fn set_kconfig_string(contents: &mut String, name: &str, value: &str) {
     let prefix = format!("CONFIG_{name}=");
     let line = format!("CONFIG_{name}=\"{value}\"");
+    let mut found = false;
+    let mut lines = Vec::new();
+    for existing in contents.lines() {
+        if existing.starts_with(&prefix) || existing == format!("# CONFIG_{name} is not set") {
+            found = true;
+            lines.push(line.clone());
+        } else {
+            lines.push(existing.to_string());
+        }
+    }
+    if !found {
+        lines.push(line);
+    }
+    *contents = lines.join("\n");
+    contents.push('\n');
+}
+
+fn set_kconfig_int(contents: &mut String, name: &str, value: u32) {
+    let prefix = format!("CONFIG_{name}=");
+    let line = format!("CONFIG_{name}={value}");
     let mut found = false;
     let mut lines = Vec::new();
     for existing in contents.lines() {
