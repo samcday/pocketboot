@@ -55,6 +55,7 @@ DTB path without the `.dtb` suffix and a kernel tree:
 
 ```sh
 cargo xtask kernel qcom/msm8916-samsung-a5u-eur ./linux
+cargo xtask kernel exynos/exynos7870-j7xelte ~/tmp/linux-pocketboot-exynos7870
 ```
 
 The kernel build uses `target/kernel/<vendor>/<device>` as `O=`, embeds a
@@ -66,13 +67,14 @@ Once the kernel is built, package those artifacts as an Android boot image:
 ```sh
 cargo xtask bootimg qcom/sdm670-google-sargo
 cargo xtask bootimg qcom/msm8916-samsung-a5u-eur
+cargo xtask bootimg exynos/exynos7870-j7xelte
 ```
 
 Boot image packaging is device-specific and configured by
 `configs/bootimg/<vendor>/<device>.toml`. The command requires an existing
 kernel build and writes `target/kernel/<vendor>/<device>/boot.img` by default.
-Both Android boot header v2 DTB sections and legacy QCDT vendor DT payloads are
-supported.
+Android boot header v2 DTB sections, legacy QCDT vendor DT payloads and Samsung
+DTBH vendor DT payloads are supported.
 
 Planned features:
 

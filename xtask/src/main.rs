@@ -22,6 +22,11 @@ const QEMU_TARGET: &str = "aarch64-virt";
 const QEMU_DISK_SIZE: u64 = 64 * 1024 * 1024;
 const ANDROID_BOOT_MAGIC: &[u8; 8] = b"ANDROID!";
 const SEANDROID_ENFORCE: &[u8] = b"SEANDROIDENFORCE";
+const DTBH_MAGIC: &[u8; 4] = b"DTBH";
+const DTBH_VERSION: u32 = 2;
+const DTBH_PLATFORM_CODE: u32 = 0x50a6;
+const DTBH_SUBTYPE_CODE: u32 = 0x217584da;
+const DTBH_RECORD_SPACE: u32 = 0x20;
 const BUSYBOX_VERSION: &str = "1.38.0";
 const BUSYBOX_ARCHIVE_SHA256: &str =
     "34f9ea6ff8636f2c9241153b9114eefa9e65674a45318ae1ef95bb5f31c53bb2";
@@ -649,6 +654,7 @@ struct BootImgConfig {
     #[serde(default)]
     append_seandroid_enforce: bool,
     qcdt: Option<QcdtConfig>,
+    dtbh: Option<DtbhConfig>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -662,6 +668,32 @@ struct QcdtConfig {
 struct QcdtEntry {
     msm_id: [u32; 2],
     board_id: [u32; 2],
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct DtbhConfig {
+    #[serde(default = "default_dtbh_platform")]
+    platform: u32,
+    #[serde(default = "default_dtbh_subtype")]
+    subtype: u32,
+    entries: Vec<DtbhEntry>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct DtbhEntry {
+    chip: u32,
+    hw_rev: u32,
+    hw_rev_end: u32,
+}
+
+fn default_dtbh_platform() -> u32 {
+    DTBH_PLATFORM_CODE
+}
+
+fn default_dtbh_subtype() -> u32 {
+    DTBH_SUBTYPE_CODE
 }
 
 fn load_bootimg_config(path: &Path) -> Result<BootImgConfig> {
@@ -679,6 +711,12 @@ fn write_bootimg(
 ) -> Result<()> {
     if config.page_size == 0 || !config.page_size.is_power_of_two() {
         return Err("boot image page_size must be a non-zero power of two".to_string());
+    }
+    if config.qcdt.is_some() && config.dtbh.is_some() {
+        return Err(format!(
+            "{}: qcdt and dtbh are mutually exclusive",
+            config_path.display()
+        ));
     }
 
     match config.header_version {
@@ -700,6 +738,12 @@ fn write_bootimg_v2(
     if config.qcdt.is_some() {
         return Err(format!(
             "{}: qcdt requires boot image header_version = 0",
+            config_path.display()
+        ));
+    }
+    if config.dtbh.is_some() {
+        return Err(format!(
+            "{}: dtbh requires boot image header_version = 0",
             config_path.display()
         ));
     }
@@ -791,14 +835,21 @@ fn write_bootimg_v0(
     let kernel = fs::read(image).map_err(|err| format!("read {}: {err}", image.display()))?;
     let dtb = fs::read(dtb).map_err(|err| format!("read {}: {err}", dtb.display()))?;
     let ramdisk = vec![0; config.ramdisk_size as usize];
-    let vendor_dt = match &config.qcdt {
-        Some(qcdt) => build_qcdt(qcdt, config.page_size, &dtb, config_path)?,
-        None => Vec::new(),
+    let vendor_dt = match (&config.qcdt, &config.dtbh) {
+        (Some(qcdt), None) => build_qcdt(qcdt, config.page_size, &dtb, config_path)?,
+        (None, Some(dtbh)) => build_dtbh(dtbh, config.page_size, &dtb, config_path)?,
+        (None, None) => Vec::new(),
+        (Some(_), Some(_)) => {
+            return Err(format!(
+                "{}: qcdt and dtbh are mutually exclusive",
+                config_path.display()
+            ));
+        }
     };
 
     let kernel_size = u32_len(kernel.len(), "kernel image", image)?;
     let ramdisk_size = u32_len(ramdisk.len(), "ramdisk", config_path)?;
-    let qcdt_size = u32_len(vendor_dt.len(), "QCDT", config_path)?;
+    let vendor_dt_size = u32_len(vendor_dt.len(), "vendor DT", config_path)?;
     let kernel_addr = boot_addr_u32(config.base, config.kernel_offset, "kernel_addr")?;
     let ramdisk_addr = boot_addr_u32(config.base, config.ramdisk_offset, "ramdisk_addr")?;
     let second_bootloader_addr =
@@ -817,7 +868,7 @@ fn write_bootimg_v0(
     write_u32_le(&mut header, second_bootloader_addr);
     write_u32_le(&mut header, tags_addr);
     write_u32_le(&mut header, config.page_size);
-    write_u32_le(&mut header, qcdt_size);
+    write_u32_le(&mut header, vendor_dt_size);
     write_u32_le(&mut header, 0);
     header.extend_from_slice(&fixed_bytes::<16>(&config.board, "board", config_path)?);
 
@@ -894,6 +945,74 @@ fn build_qcdt(
     qcdt.extend_from_slice(dtb);
     pad_vec_to(&mut qcdt, page_size)?;
     Ok(qcdt)
+}
+
+fn build_dtbh(
+    config: &DtbhConfig,
+    page_size: u32,
+    dtb: &[u8],
+    config_path: &Path,
+) -> Result<Vec<u8>> {
+    if config.entries.is_empty() {
+        return Err(format!("{}: dtbh.entries is empty", config_path.display()));
+    }
+
+    let page_size = usize::try_from(page_size)
+        .map_err(|_| format!("{}: page_size does not fit usize", config_path.display()))?;
+    let record_size = 32usize;
+    let header_size = 12usize
+        .checked_add(
+            record_size
+                .checked_mul(config.entries.len())
+                .ok_or_else(|| "DTBH record table size overflows usize".to_string())?,
+        )
+        .and_then(|size| size.checked_add(4))
+        .ok_or_else(|| "DTBH header size overflows usize".to_string())?;
+    let table_size = align_up_usize(header_size, page_size)?;
+    let dtb_size = align_up_usize(dtb.len(), page_size)?;
+    let dtb_size_u32 = u32_len(dtb_size, "DTBH DTB size", config_path)?;
+    let payload_size = dtb_size
+        .checked_mul(config.entries.len())
+        .ok_or_else(|| "DTBH payload size overflows usize".to_string())?;
+
+    let mut dtbh = Vec::with_capacity(
+        table_size
+            .checked_add(payload_size)
+            .ok_or_else(|| "DTBH size overflows usize".to_string())?,
+    );
+    dtbh.extend_from_slice(DTBH_MAGIC);
+    write_u32_le(&mut dtbh, DTBH_VERSION);
+    write_u32_le(
+        &mut dtbh,
+        u32_len(config.entries.len(), "DTBH entry count", config_path)?,
+    );
+
+    let mut dtb_offset = table_size;
+    for entry in &config.entries {
+        write_u32_le(&mut dtbh, entry.chip);
+        write_u32_le(&mut dtbh, config.platform);
+        write_u32_le(&mut dtbh, config.subtype);
+        write_u32_le(&mut dtbh, entry.hw_rev);
+        write_u32_le(&mut dtbh, entry.hw_rev_end);
+        write_u32_le(
+            &mut dtbh,
+            u32_len(dtb_offset, "DTBH DTB offset", config_path)?,
+        );
+        write_u32_le(&mut dtbh, dtb_size_u32);
+        write_u32_le(&mut dtbh, DTBH_RECORD_SPACE);
+        dtb_offset = dtb_offset
+            .checked_add(dtb_size)
+            .ok_or_else(|| "DTBH DTB offset overflows usize".to_string())?;
+    }
+    write_u32_le(&mut dtbh, 0);
+    pad_vec_to(&mut dtbh, page_size)?;
+
+    for _ in &config.entries {
+        dtbh.extend_from_slice(dtb);
+        pad_vec_to(&mut dtbh, page_size)?;
+    }
+
+    Ok(dtbh)
 }
 
 fn file_size_u32(path: &Path, description: &str) -> Result<u32> {
@@ -1725,7 +1844,7 @@ fn print_kernel_usage() {
 
 fn print_bootimg_usage() {
     println!(
-        "usage: cargo xtask bootimg <vendor/device> [--output PATH]\n\nexample: cargo xtask bootimg qcom/sdm670-google-sargo\n\nrequires: target/kernel/<vendor>/<device>/arch/arm64/boot/Image.gz and the inferred DTB\ndefault output: target/kernel/<vendor>/<device>/boot.img"
+        "usage: cargo xtask bootimg <vendor/device> [--output PATH]\n\nexample: cargo xtask bootimg exynos/exynos7870-j7xelte\n\nrequires: target/kernel/<vendor>/<device>/arch/arm64/boot/Image.gz and the inferred DTB\nsupports: Android v2 DTB sections, legacy QCDT and Samsung DTBH vendor DT payloads\ndefault output: target/kernel/<vendor>/<device>/boot.img"
     );
 }
 
@@ -1768,6 +1887,40 @@ mod tests {
     }
 
     #[test]
+    fn dtbh_records_point_to_page_aligned_dtb() {
+        let dtbh = build_dtbh(
+            &DtbhConfig {
+                platform: default_dtbh_platform(),
+                subtype: default_dtbh_subtype(),
+                entries: vec![DtbhEntry {
+                    chip: 7870,
+                    hw_rev: 0,
+                    hw_rev_end: 255,
+                }],
+            },
+            16,
+            b"dtb",
+            Path::new("test.toml"),
+        )
+        .unwrap();
+
+        assert_eq!(&dtbh[..4], b"DTBH");
+        assert_eq!(u32_at(&dtbh, 4), 2);
+        assert_eq!(u32_at(&dtbh, 8), 1);
+        assert_eq!(u32_at(&dtbh, 12), 7870);
+        assert_eq!(u32_at(&dtbh, 16), 0x50a6);
+        assert_eq!(u32_at(&dtbh, 20), 0x217584da);
+        assert_eq!(u32_at(&dtbh, 24), 0);
+        assert_eq!(u32_at(&dtbh, 28), 255);
+        assert_eq!(u32_at(&dtbh, 32), 48);
+        assert_eq!(u32_at(&dtbh, 36), 16);
+        assert_eq!(u32_at(&dtbh, 40), 0x20);
+        assert_eq!(u32_at(&dtbh, 44), 0);
+        assert_eq!(&dtbh[48..51], b"dtb");
+        assert_eq!(dtbh.len(), 64);
+    }
+
+    #[test]
     fn samsung_a5u_eur_config_is_legacy_qcdt() {
         let config = load_bootimg_config(
             &workspace_root()
@@ -1785,6 +1938,28 @@ mod tests {
         assert_eq!(qcdt.entries.len(), 1);
         assert_eq!(qcdt.entries[0].msm_id, [206, 0]);
         assert_eq!(qcdt.entries[0].board_id, [0xce08ff01, 1]);
+    }
+
+    #[test]
+    fn samsung_j7xelte_config_is_legacy_dtbh() {
+        let config = load_bootimg_config(
+            &workspace_root()
+                .unwrap()
+                .join("configs/bootimg/exynos/exynos7870-j7xelte.toml"),
+        )
+        .unwrap();
+
+        assert_eq!(config.header_version, 0);
+        assert_eq!(config.page_size, 2048);
+        assert_eq!(config.base, 0x10000000);
+        assert!(config.qcdt.is_none());
+        let dtbh = config.dtbh.unwrap();
+        assert_eq!(dtbh.platform, 0x50a6);
+        assert_eq!(dtbh.subtype, 0x217584da);
+        assert_eq!(dtbh.entries.len(), 1);
+        assert_eq!(dtbh.entries[0].chip, 7870);
+        assert_eq!(dtbh.entries[0].hw_rev, 0);
+        assert_eq!(dtbh.entries[0].hw_rev_end, 255);
     }
 
     fn u32_at(data: &[u8], offset: usize) -> u32 {
