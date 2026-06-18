@@ -1,0 +1,83 @@
+name: CI Image
+
+on:
+  pull_request:
+    paths:
+      - .github/Dockerfile
+      - .github/workflows/ci-image.yml
+  push:
+    branches:
+      - main
+    paths:
+      - .github/Dockerfile
+      - .github/workflows/ci-image.yml
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  packages: write
+
+concurrency:
+  group: ci-image-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  image:
+    name: Build CI image
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+
+    steps:
+      - name: Checkout pocketboot
+        uses: actions/checkout@v4
+
+      - name: Compute image ID
+        id: image
+        run: |
+          owner="${GITHUB_REPOSITORY_OWNER,,}"
+          hash="$(sha256sum .github/Dockerfile | cut -d ' ' -f1)"
+          image="ghcr.io/${owner}/pocketboot-ci:df-${hash}"
+          {
+            echo "hash=${hash}"
+            echo "image=${image}"
+            echo "short_hash=${hash::12}"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build CI image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: .github/Dockerfile
+          push: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
+          tags: ${{ steps.image.outputs.image }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Update CI image ID
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        env:
+          IMAGE: ${{ steps.image.outputs.image }}
+          SHORT_HASH: ${{ steps.image.outputs.short_hash }}
+        run: |
+          grep -q '^  POCKETBOOT_CI_IMAGE: ' .github/workflows/ci.yml
+          sed -i "s#^  POCKETBOOT_CI_IMAGE: .*#  POCKETBOOT_CI_IMAGE: ${IMAGE}#" .github/workflows/ci.yml
+          if git diff --quiet -- .github/workflows/ci.yml; then
+            exit 0
+          fi
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add .github/workflows/ci.yml
+          git commit -m "ci: update CI image ${SHORT_HASH}"
+          git push
