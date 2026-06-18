@@ -10,6 +10,7 @@ permissions:
 
 env:
   CARGO_TERM_COLOR: always
+  POCKETBOOT_CI_IMAGE: ghcr.io/samcday/pocketboot-ci:df-a7687c73061faab1858ec42445f5734a146565cde1c8d0afe8eea40c8e916b46
 
 jobs:
   cpio:
