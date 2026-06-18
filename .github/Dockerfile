@@ -13,7 +13,7 @@ RUN set -eux; \
         flex \
         gcc-aarch64-linux-gnu \
         git \
-        libclang-dev \
+        libclang-19-dev \
         libelf-dev \
         libfontconfig1-dev \
         libssl-dev \
@@ -26,10 +26,17 @@ RUN set -eux; \
 
 RUN set -eux; \
     rustup target add aarch64-unknown-linux-musl; \
-    rustup component add rust-src; \
-    cargo install --locked bindgen-cli
+    rustup component add rust-src rustfmt; \
+    cargo install --locked bindgen-cli; \
+    rustc --version; \
+    rustfmt --version; \
+    bindgen --version; \
+    printf 'typedef int bindgen_smoke;\n' > /tmp/bindgen-smoke.h; \
+    LIBCLANG_PATH=/usr/lib/llvm-19/lib bindgen /tmp/bindgen-smoke.h > /tmp/bindgen-smoke.rs; \
+    rm /tmp/bindgen-smoke.h /tmp/bindgen-smoke.rs
 
 ENV CARGO_TERM_COLOR=always \
     BUSYBOX_CC=aarch64-linux-musl-gcc \
     BUSYBOX_CFLAGS="-idirafter /usr/aarch64-linux-gnu/include" \
-    BUSYBOX_CROSS_COMPILE=aarch64-linux-gnu-
+    BUSYBOX_CROSS_COMPILE=aarch64-linux-gnu- \
+    LIBCLANG_PATH=/usr/lib/llvm-19/lib
