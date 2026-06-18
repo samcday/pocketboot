@@ -7,51 +7,36 @@ on:
 
 permissions:
   contents: read
+  packages: read
 
 env:
   CARGO_TERM_COLOR: always
-  POCKETBOOT_CI_IMAGE: ghcr.io/samcday/pocketboot-ci:df-a7687c73061faab1858ec42445f5734a146565cde1c8d0afe8eea40c8e916b46
+  POCKETBOOT_CI_IMAGE: &pocketboot_ci_image ghcr.io/samcday/pocketboot-ci:df-a7687c73061faab1858ec42445f5734a146565cde1c8d0afe8eea40c8e916b46
 
 jobs:
   cpio:
     name: cpio
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    container:
+      image: *pocketboot_ci_image
+      credentials:
+        username: ${{ github.actor }}
+        password: ${{ secrets.GITHUB_TOKEN }}
 
     steps:
       - name: Checkout pocketboot
         uses: actions/checkout@v4
 
-      - name: Install Rust
-        run: |
-          rustup toolchain install stable --profile minimal
-          rustup default stable
-          rustup target add aarch64-unknown-linux-musl
-
-      - name: Install userspace build dependencies
-        run: |
-          sudo dpkg --add-architecture arm64
-          sudo apt-get update
-          sudo apt-get install --no-install-recommends -y \
-            binutils-aarch64-linux-gnu \
-            gcc-aarch64-linux-gnu \
-            libfontconfig1-dev \
-            make \
-            musl-dev:arm64 \
-            pkg-config
-
       - name: Cache Cargo downloads
         uses: actions/cache@v4
         with:
           path: |
-            ~/.cargo/git
-            ~/.cargo/registry
+            /usr/local/cargo/git
+            /usr/local/cargo/registry
           key: ${{ runner.os }}-cargo-${{ hashFiles('Cargo.lock') }}
 
       - name: Build initrd cpio
-        env:
-          BUSYBOX_CC: aarch64-linux-musl-gcc
-          BUSYBOX_CROSS_COMPILE: aarch64-linux-gnu-
         run: cargo xtask cpio --output target/pocketboot-initrd.cpio
 
       - name: Upload initrd cpio
@@ -66,6 +51,11 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 120
     needs: cpio
+    container:
+      image: *pocketboot_ci_image
+      credentials:
+        username: ${{ github.actor }}
+        password: ${{ secrets.GITHUB_TOKEN }}
     strategy:
       fail-fast: false
       matrix:
@@ -96,37 +86,13 @@ jobs:
           name: pocketboot-initrd-cpio
           path: target
 
-      - name: Install Rust
-        run: |
-          rustup toolchain install stable --profile minimal
-          rustup default stable
-          rustup component add rust-src
-
-      - name: Install kernel build dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install --no-install-recommends -y \
-            bc \
-            bison \
-            flex \
-            gcc-aarch64-linux-gnu \
-            libelf-dev \
-            libclang-dev \
-            libssl-dev \
-            make \
-            pkg-config \
-            python3
-
       - name: Cache Cargo downloads
         uses: actions/cache@v4
         with:
           path: |
-            ~/.cargo/git
-            ~/.cargo/registry
+            /usr/local/cargo/git
+            /usr/local/cargo/registry
           key: ${{ runner.os }}-cargo-${{ hashFiles('Cargo.lock') }}
-
-      - name: Install bindgen
-        run: cargo install bindgen-cli
 
       - name: Build kernels and boot images
         run: |

@@ -1522,8 +1522,15 @@ fn run_busybox_make(source: &Path, build: &Path, target: &str, args: &[&str]) ->
             let mut value = OsString::from("CC=");
             value.push(busybox_cc(target));
             value
-        })
-        .args(args);
+        });
+    if let Some(cflags) = busybox_cflags() {
+        command.arg({
+            let mut value = OsString::from("EXTRA_CFLAGS=");
+            value.push(cflags);
+            value
+        });
+    }
+    command.args(args);
     run_command(command, "make busybox")
 }
 
@@ -1532,15 +1539,18 @@ fn ensure_busybox_toolchain(build: &Path, target: &str) -> Result<()> {
     let output = build.join("toolchain-check");
     fs::write(
         &source,
-        "#include <byteswap.h>\n#include <sys/types.h>\nint main(void) { return bswap_32(0x12345678) == 0 ? 1 : 0; }\n",
+        "#include <byteswap.h>\n#include <linux/fs.h>\n#include <linux/version.h>\n#include <sys/types.h>\nint main(void) { return bswap_32(0x12345678) == 0 ? 1 : 0; }\n",
     )
     .map_err(|err| format!("write {}: {err}", source.display()))?;
 
     let compiler = busybox_cc(target);
+    let cflags =
+        busybox_cflag_args().map_err(|err| busybox_toolchain_error(target, &compiler, err))?;
     let mut command = Command::new(&compiler);
     command
         .arg("-Os")
         .arg("-static")
+        .args(cflags)
         .arg(&source)
         .arg("-o")
         .arg(&output);
@@ -1562,11 +1572,25 @@ fn ensure_busybox_toolchain(build: &Path, target: &str) -> Result<()> {
 fn busybox_toolchain_error(target: &str, compiler: &OsString, reason: impl AsRef<str>) -> String {
     format!(
         "BusyBox requires a static libc-capable target C compiler for {target}; \
-         tried {}; set BUSYBOX_CC or BUSYBOX_CROSS_COMPILE, install a matching musl toolchain, \
-         or pass --no-busybox ({})",
+         tried {}; set BUSYBOX_CC, BUSYBOX_CFLAGS, or BUSYBOX_CROSS_COMPILE, install a \
+         matching musl toolchain, or pass --no-busybox ({})",
         compiler.to_string_lossy(),
         reason.as_ref()
     )
+}
+
+fn busybox_cflags() -> Option<OsString> {
+    env::var_os("BUSYBOX_CFLAGS").filter(|value| !value.as_os_str().is_empty())
+}
+
+fn busybox_cflag_args() -> Result<Vec<OsString>> {
+    let Some(cflags) = busybox_cflags() else {
+        return Ok(Vec::new());
+    };
+    let cflags = cflags
+        .into_string()
+        .map_err(|_| "BUSYBOX_CFLAGS must be valid UTF-8".to_string())?;
+    Ok(cflags.split_whitespace().map(OsString::from).collect())
 }
 
 fn busybox_cc(target: &str) -> OsString {

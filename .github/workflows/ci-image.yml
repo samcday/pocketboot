@@ -71,7 +71,7 @@ jobs:
           SHORT_HASH: ${{ steps.image.outputs.short_hash }}
         run: |
           grep -q '^  POCKETBOOT_CI_IMAGE: ' .github/workflows/ci.yml
-          sed -i "s#^  POCKETBOOT_CI_IMAGE: .*#  POCKETBOOT_CI_IMAGE: ${IMAGE}#" .github/workflows/ci.yml
+          sed -i -E "s#^  POCKETBOOT_CI_IMAGE: (\&pocketboot_ci_image )?.*#  POCKETBOOT_CI_IMAGE: \&pocketboot_ci_image ${IMAGE}#" .github/workflows/ci.yml
           if git diff --quiet -- .github/workflows/ci.yml; then
             exit 0
           fi
