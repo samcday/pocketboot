@@ -1,6 +1,9 @@
 use std::io;
 
-use crate::fastboot::{Command, CommandContext, CommandResult, MAX_DOWNLOAD_SIZE};
+use crate::{
+    ab_slots::{Slot, Slots},
+    fastboot::{Command, CommandContext, CommandResult, MAX_DOWNLOAD_SIZE},
+};
 
 use super::partitions;
 
@@ -11,11 +14,12 @@ const PRODUCT: &str = "pocketboot";
 #[derive(Clone)]
 pub(super) struct FastbootGetvar {
     serialno: String,
+    slots: Slots,
 }
 
 impl FastbootGetvar {
-    pub(super) fn new(serialno: String) -> Self {
-        Self { serialno }
+    pub(super) fn new(serialno: String, slots: Slots) -> Self {
+        Self { serialno, slots }
     }
 
     pub(super) fn commands(self) -> Vec<Command> {
@@ -39,7 +43,10 @@ impl FastbootGetvar {
     }
 
     fn send_all(&self, context: &mut CommandContext<'_>) -> io::Result<()> {
-        for (name, value) in self.static_variables() {
+        for (name, value) in self.fixed_variables() {
+            context.info(format!("{name}: {value}"))?;
+        }
+        for (name, value) in self.slot_variables()? {
             context.info(format!("{name}: {value}"))?;
         }
 
@@ -56,7 +63,11 @@ impl FastbootGetvar {
     }
 
     fn value(&self, variable: &str) -> io::Result<Option<String>> {
-        if let Some(value) = self.static_value(variable) {
+        if let Some(value) = self.fixed_value(variable) {
+            return Ok(Some(value));
+        }
+
+        if let Some(value) = self.slot_value(variable)? {
             return Ok(Some(value));
         }
 
@@ -73,19 +84,23 @@ impl FastbootGetvar {
             if partition.is_empty() {
                 return Err(invalid_input("partition name is empty"));
             }
-            return Ok(Some("no".to_string()));
+            return Ok(Some(if self.slots.has_slot(partition)? {
+                "yes".to_string()
+            } else {
+                "no".to_string()
+            }));
         }
 
         Ok(None)
     }
 
-    fn static_value(&self, variable: &str) -> Option<String> {
-        self.static_variables()
+    fn fixed_value(&self, variable: &str) -> Option<String> {
+        self.fixed_variables()
             .into_iter()
             .find_map(|(name, value)| (name == variable).then_some(value))
     }
 
-    fn static_variables(&self) -> Vec<(&'static str, String)> {
+    fn fixed_variables(&self) -> Vec<(&'static str, String)> {
         vec![
             ("version", FASTBOOT_VERSION.to_string()),
             ("version-bootloader", PRODUCT.to_string()),
@@ -95,10 +110,90 @@ impl FastbootGetvar {
             ("unlocked", "yes".to_string()),
             ("is-userspace", "yes".to_string()),
             ("max-download-size", format!("0x{MAX_DOWNLOAD_SIZE:08x}")),
-            ("slot-count", "0".to_string()),
-            ("current-slot", String::new()),
         ]
     }
+
+    fn slot_value(&self, variable: &str) -> io::Result<Option<String>> {
+        Ok(match variable {
+            "slot-count" => Some(self.slots.slot_count()?.to_string()),
+            "current-slot" => Some(
+                self.slots
+                    .current_slot()?
+                    .map(Slot::name)
+                    .unwrap_or_default()
+                    .to_string(),
+            ),
+            "slot-suffixes" => Some(
+                if self.slots.slot_count()? > 0 {
+                    "_a,_b"
+                } else {
+                    ""
+                }
+                .to_string(),
+            ),
+            _ => {
+                if let Some(slot) = slot_variable(variable, "slot-successful:")? {
+                    Some(slot_bool(self.slots.is_slot_successful(slot)?))
+                } else if let Some(slot) = slot_variable(variable, "slot-unbootable:")? {
+                    Some(slot_bool(self.slots.is_slot_unbootable(slot)?))
+                } else {
+                    None
+                }
+            }
+        })
+    }
+
+    fn slot_variables(&self) -> io::Result<Vec<(&'static str, String)>> {
+        let slot_count = self.slots.slot_count()?;
+        let current_slot = self
+            .slots
+            .current_slot()?
+            .map(Slot::name)
+            .unwrap_or_default()
+            .to_string();
+        let slot_suffixes = if slot_count > 0 { "_a,_b" } else { "" }.to_string();
+
+        Ok(vec![
+            ("slot-count", slot_count.to_string()),
+            ("current-slot", current_slot),
+            ("slot-suffixes", slot_suffixes),
+            (
+                "slot-successful:a",
+                slot_bool(self.slots.is_slot_successful(Slot::A)?),
+            ),
+            (
+                "slot-successful:b",
+                slot_bool(self.slots.is_slot_successful(Slot::B)?),
+            ),
+            (
+                "slot-unbootable:a",
+                slot_bool(self.slots.is_slot_unbootable(Slot::A)?),
+            ),
+            (
+                "slot-unbootable:b",
+                slot_bool(self.slots.is_slot_unbootable(Slot::B)?),
+            ),
+        ])
+    }
+}
+
+fn slot_variable(variable: &str, prefix: &str) -> io::Result<Option<Slot>> {
+    let Some(value) = variable.strip_prefix(prefix) else {
+        return Ok(None);
+    };
+    if value.is_empty() {
+        return Err(invalid_input("slot variable slot is empty"));
+    }
+    Slot::parse(value)
+        .map(Some)
+        .ok_or_else(|| invalid_input(format!("invalid slot {value:?}")))
+}
+
+fn slot_bool(value: Option<bool>) -> String {
+    value
+        .map(|value| if value { "yes" } else { "no" })
+        .unwrap_or("")
+        .to_string()
 }
 
 fn parse_variable(command: &str) -> io::Result<&str> {
@@ -145,11 +240,14 @@ mod tests {
 
     #[test]
     fn returns_static_values() {
-        let getvar = FastbootGetvar::new("abc123".to_string());
+        let getvar = FastbootGetvar::new(
+            "abc123".to_string(),
+            Slots::new(crate::cmdline::KernelCommandLine::default()),
+        );
 
-        assert_eq!(getvar.static_value("serialno").as_deref(), Some("abc123"));
+        assert_eq!(getvar.fixed_value("serialno").as_deref(), Some("abc123"));
         assert_eq!(
-            getvar.static_value("max-download-size").as_deref(),
+            getvar.fixed_value("max-download-size").as_deref(),
             Some("0x10000000")
         );
     }

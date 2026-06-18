@@ -8,6 +8,7 @@ mod getvar;
 mod partitions;
 mod reboot;
 mod shell;
+mod slots;
 mod ums;
 
 pub(crate) fn boot_commands() -> CommandMap {
@@ -27,12 +28,16 @@ pub(crate) fn diagnostic_commands() -> CommandMap {
     ]
 }
 
-pub(crate) fn getvar_commands(serialno: String) -> CommandMap {
-    getvar::FastbootGetvar::new(serialno).commands()
+pub(crate) fn getvar_commands(serialno: String, slots: crate::ab_slots::Slots) -> CommandMap {
+    getvar::FastbootGetvar::new(serialno, slots).commands()
 }
 
 pub(crate) fn flash_commands() -> CommandMap {
     vec![Command::prefix("flash:", flash::handle)]
+}
+
+pub(crate) fn slot_commands(slots: crate::ab_slots::Slots) -> CommandMap {
+    slots::FastbootSlots::new(slots).commands()
 }
 
 pub(crate) fn reboot_command() -> Command {

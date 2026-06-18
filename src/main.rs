@@ -6,9 +6,11 @@ use std::{
     time::Duration,
 };
 
+mod ab_slots;
 mod adb;
 mod battery;
 mod bootflow;
+mod cmdline;
 mod fastboot;
 mod gadget;
 mod kexec;
@@ -29,8 +31,6 @@ const FDT_SERIALNO_PATHS: [&str; 1] = [
     "/sys/firmware/devicetree/base/serial-number",
 ];
 const DEFAULT_SERIALNO: &str = "0001";
-const ANDROIDBOOT_SERIALNO: &str = "androidboot.serialno=";
-
 fn main() {
     let code = match run() {
         Ok(()) => 0,
@@ -55,7 +55,15 @@ fn run() -> Result<()> {
     mount_core_vfs()?;
     tracing::debug!("mounted core VFS");
 
-    let serialno = detect_serial();
+    let cmdline = match cmdline::KernelCommandLine::read(PROC_CMDLINE) {
+        Ok(cmdline) => cmdline,
+        Err(err) => {
+            tracing::warn!(error = ?err, "failed to read kernel command line");
+            cmdline::KernelCommandLine::default()
+        }
+    };
+
+    let serialno = detect_serial(&cmdline);
     tracing::info!(serialno = %serialno, "selected device serialno");
     reaper::spawn();
     let battery = match battery::spawn() {
@@ -71,7 +79,7 @@ fn run() -> Result<()> {
     let gadget = gadget::Gadget::new(serialno.clone());
     let fastboot_thread = gadget
         .spawn(gadget::Mode::Fastboot {
-            commands: fastboot_commands(gadget.clone(), serialno),
+            commands: fastboot_commands(gadget.clone(), serialno, cmdline.clone()),
         })
         .map_err(|err| format!("spawn fastboot gadget thread: {err}"))?;
     kmsg_forwarder::spawn();
@@ -163,19 +171,25 @@ fn run() -> Result<()> {
     Ok(())
 }
 
-fn fastboot_commands(gadget: gadget::Gadget, serialno: String) -> fastboot::CommandMap {
+fn fastboot_commands(
+    gadget: gadget::Gadget,
+    serialno: String,
+    cmdline: cmdline::KernelCommandLine,
+) -> fastboot::CommandMap {
+    let slots = ab_slots::Slots::new(cmdline);
     let mut commands = fastboot::commands::boot_commands();
-    commands.extend(fastboot::commands::getvar_commands(serialno));
+    commands.extend(fastboot::commands::getvar_commands(serialno, slots.clone()));
     commands.extend(fastboot::commands::flash_commands());
+    commands.extend(fastboot::commands::slot_commands(slots));
     commands.extend(fastboot::commands::diagnostic_commands());
     commands.extend(fastboot::commands::ums_commands(gadget));
     commands.push(fastboot::commands::reboot_command());
     commands
 }
 
-fn detect_serial() -> String {
+fn detect_serial(cmdline: &cmdline::KernelCommandLine) -> String {
     fdt_serialno()
-        .or_else(cmdline_serialno)
+        .or_else(|| cmdline_serialno(cmdline))
         .unwrap_or_else(|| DEFAULT_SERIALNO.to_string())
 }
 
@@ -186,16 +200,8 @@ fn fdt_serialno() -> Option<String> {
     })
 }
 
-fn cmdline_serialno() -> Option<String> {
-    let cmdline = fs::read_to_string(PROC_CMDLINE).ok()?;
-    parse_androidboot_serialno(&cmdline).map(str::to_string)
-}
-
-fn parse_androidboot_serialno(cmdline: &str) -> Option<&str> {
-    cmdline.split_whitespace().find_map(|arg| {
-        let serialno = arg.strip_prefix(ANDROIDBOOT_SERIALNO)?;
-        (!serialno.is_empty()).then_some(serialno)
-    })
+fn cmdline_serialno(cmdline: &cmdline::KernelCommandLine) -> Option<String> {
+    cmdline.value("androidboot.serialno").map(str::to_string)
 }
 
 fn parse_fdt_serialno(bytes: &[u8]) -> Option<&str> {
@@ -412,18 +418,16 @@ mod tests {
 
     #[test]
     fn parses_androidboot_serialno() {
-        assert_eq!(
-            parse_androidboot_serialno("foo androidboot.serialno=6ea45af6 bar"),
-            Some("6ea45af6")
-        );
+        let cmdline = cmdline::KernelCommandLine::parse("foo androidboot.serialno=6ea45af6 bar");
+
+        assert_eq!(cmdline_serialno(&cmdline).as_deref(), Some("6ea45af6"));
     }
 
     #[test]
     fn ignores_empty_androidboot_serialno() {
-        assert_eq!(
-            parse_androidboot_serialno("foo androidboot.serialno= bar"),
-            None
-        );
+        let cmdline = cmdline::KernelCommandLine::parse("foo androidboot.serialno= bar");
+
+        assert_eq!(cmdline_serialno(&cmdline), None);
     }
 
     #[test]
