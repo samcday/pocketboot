@@ -529,6 +529,49 @@ mod tests {
     }
 
     #[test]
+    fn flashes_split_sparse_images_with_leading_dont_care_offsets() {
+        let temp = TempDir::new();
+        let target = temp.file("userdata.img");
+        fs::write(&target, vec![0x5a; 4 * 4096]).unwrap();
+
+        let first_block = vec![0x11; 4096];
+        let mut first_image = sparse_header(4, 2);
+        first_image.extend_from_slice(&sparse_chunk_header(SPARSE_CHUNK_RAW, 1, 12 + 4096));
+        first_image.extend_from_slice(&first_block);
+        first_image.extend_from_slice(&sparse_chunk_header(SPARSE_CHUNK_DONT_CARE, 3, 12));
+        let mut first_source = payload_file(&first_image);
+
+        flash_sparse(
+            &mut first_source,
+            &target,
+            4 * 4096,
+            first_image.len() as u64,
+        )
+        .unwrap();
+
+        let second_block = vec![0x22; 4096];
+        let mut second_image = sparse_header(4, 3);
+        second_image.extend_from_slice(&sparse_chunk_header(SPARSE_CHUNK_DONT_CARE, 1, 12));
+        second_image.extend_from_slice(&sparse_chunk_header(SPARSE_CHUNK_RAW, 1, 12 + 4096));
+        second_image.extend_from_slice(&second_block);
+        second_image.extend_from_slice(&sparse_chunk_header(SPARSE_CHUNK_DONT_CARE, 2, 12));
+        let mut second_source = payload_file(&second_image);
+
+        flash_sparse(
+            &mut second_source,
+            &target,
+            4 * 4096,
+            second_image.len() as u64,
+        )
+        .unwrap();
+
+        let flashed = fs::read(&target).unwrap();
+        assert_eq!(&flashed[..4096], first_block.as_slice());
+        assert_eq!(&flashed[4096..8192], second_block.as_slice());
+        assert!(flashed[8192..].iter().all(|byte| *byte == 0x5a));
+    }
+
+    #[test]
     fn rejects_sparse_images_larger_than_partition() {
         let temp = TempDir::new();
         let target = temp.file("userdata.img");
