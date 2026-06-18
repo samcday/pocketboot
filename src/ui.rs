@@ -63,8 +63,6 @@ fn run(battery: Option<battery::Updates>) -> Result<(), String> {
     window.set_size(PhysicalSize::new(kms_display.width, kms_display.height));
 
     let main_window = MainWindow::new().map_err(|err| format!("create Slint window: {err}"))?;
-    main_window.set_touch_x(kms_display.width as f32 / 2.0);
-    main_window.set_touch_y(kms_display.height as f32 / 2.0);
     main_window.on_power_action(|action| {
         let result = match action {
             PowerAction::Shutdown => power::power_off(),
@@ -101,9 +99,6 @@ fn run(battery: Option<battery::Updates>) -> Result<(), String> {
         }
 
         for report in touch.poll(kms_display.width, kms_display.height) {
-            main_window.set_touch_x(report.x);
-            main_window.set_touch_y(report.y);
-
             let position = LogicalPosition::new(report.x, report.y);
             match report.kind {
                 TouchKind::Down => {
@@ -1030,7 +1025,7 @@ impl TouchState {
     ) -> Option<TouchReport> {
         match event.type_ {
             EV_ABS => self.handle_abs(event.code, event.value),
-            EV_KEY if event.code == BTN_TOUCH => self.legacy_down = event.value != 0,
+            EV_KEY if event.code == BTN_TOUCH => self.handle_touch_button(event.value != 0),
             EV_SYN if event.code == SYN_REPORT => {
                 return self.report(x_axis, y_axis, width, height);
             }
@@ -1054,6 +1049,15 @@ impl TouchState {
             ABS_X => self.legacy_x = Some(value),
             ABS_Y => self.legacy_y = Some(value),
             _ => {}
+        }
+    }
+
+    fn handle_touch_button(&mut self, down: bool) {
+        self.legacy_down = down;
+        if !down {
+            for slot in &mut self.slots {
+                slot.active = false;
+            }
         }
     }
 
@@ -1116,7 +1120,7 @@ impl TouchState {
             }
         }
 
-        if self.legacy_down || self.was_down {
+        if self.legacy_down {
             if let (Some(x), Some(y)) = (self.legacy_x, self.legacy_y) {
                 return Some((x, y));
             }
@@ -1262,4 +1266,133 @@ struct InputAbsInfo {
     fuzz: i32,
     flat: i32,
     resolution: i32,
+}
+
+#[cfg(test)]
+mod touch_tests {
+    use super::*;
+
+    const WIDTH: u32 = 101;
+    const HEIGHT: u32 = 101;
+
+    fn event(type_: u16, code: u16, value: i32) -> InputEvent {
+        InputEvent {
+            time: libc::timeval {
+                tv_sec: 0,
+                tv_usec: 0,
+            },
+            type_,
+            code,
+            value,
+        }
+    }
+
+    fn axis(code: u16) -> Axis {
+        Axis {
+            code,
+            min: 0,
+            max: 1000,
+        }
+    }
+
+    fn sync(state: &mut TouchState, x_axis: Axis, y_axis: Axis) -> Option<TouchReport> {
+        state.handle(event(EV_SYN, SYN_REPORT, 0), x_axis, y_axis, WIDTH, HEIGHT)
+    }
+
+    #[test]
+    fn legacy_touch_reports_release_after_button_up() {
+        let mut state = TouchState::default();
+        let x_axis = axis(ABS_X);
+        let y_axis = axis(ABS_Y);
+
+        state.handle(event(EV_KEY, BTN_TOUCH, 1), x_axis, y_axis, WIDTH, HEIGHT);
+        state.handle(event(EV_ABS, ABS_X, 500), x_axis, y_axis, WIDTH, HEIGHT);
+        state.handle(event(EV_ABS, ABS_Y, 500), x_axis, y_axis, WIDTH, HEIGHT);
+        let report = sync(&mut state, x_axis, y_axis).expect("down report");
+        assert!(matches!(report.kind, TouchKind::Down));
+
+        state.handle(event(EV_KEY, BTN_TOUCH, 0), x_axis, y_axis, WIDTH, HEIGHT);
+        let report = sync(&mut state, x_axis, y_axis).expect("up report");
+        assert!(matches!(report.kind, TouchKind::Up));
+    }
+
+    #[test]
+    fn mt_tracking_id_reports_release() {
+        let mut state = TouchState::default();
+        let x_axis = axis(ABS_MT_POSITION_X);
+        let y_axis = axis(ABS_MT_POSITION_Y);
+
+        state.handle(event(EV_ABS, ABS_MT_SLOT, 0), x_axis, y_axis, WIDTH, HEIGHT);
+        state.handle(
+            event(EV_ABS, ABS_MT_TRACKING_ID, 42),
+            x_axis,
+            y_axis,
+            WIDTH,
+            HEIGHT,
+        );
+        state.handle(
+            event(EV_ABS, ABS_MT_POSITION_X, 500),
+            x_axis,
+            y_axis,
+            WIDTH,
+            HEIGHT,
+        );
+        state.handle(
+            event(EV_ABS, ABS_MT_POSITION_Y, 500),
+            x_axis,
+            y_axis,
+            WIDTH,
+            HEIGHT,
+        );
+        let report = sync(&mut state, x_axis, y_axis).expect("down report");
+        assert!(matches!(report.kind, TouchKind::Down));
+
+        state.handle(event(EV_ABS, ABS_MT_SLOT, 0), x_axis, y_axis, WIDTH, HEIGHT);
+        state.handle(
+            event(EV_ABS, ABS_MT_TRACKING_ID, -1),
+            x_axis,
+            y_axis,
+            WIDTH,
+            HEIGHT,
+        );
+        let report = sync(&mut state, x_axis, y_axis).expect("up report");
+        assert!(matches!(report.kind, TouchKind::Up));
+    }
+
+    #[test]
+    fn button_up_releases_mt_slot_without_tracking_id_release() {
+        let mut state = TouchState::default();
+        let x_axis = axis(ABS_MT_POSITION_X);
+        let y_axis = axis(ABS_MT_POSITION_Y);
+
+        state.handle(event(EV_KEY, BTN_TOUCH, 1), x_axis, y_axis, WIDTH, HEIGHT);
+        state.handle(event(EV_ABS, ABS_MT_SLOT, 0), x_axis, y_axis, WIDTH, HEIGHT);
+        state.handle(
+            event(EV_ABS, ABS_MT_TRACKING_ID, 42),
+            x_axis,
+            y_axis,
+            WIDTH,
+            HEIGHT,
+        );
+        state.handle(
+            event(EV_ABS, ABS_MT_POSITION_X, 500),
+            x_axis,
+            y_axis,
+            WIDTH,
+            HEIGHT,
+        );
+        state.handle(
+            event(EV_ABS, ABS_MT_POSITION_Y, 500),
+            x_axis,
+            y_axis,
+            WIDTH,
+            HEIGHT,
+        );
+        let report = sync(&mut state, x_axis, y_axis).expect("down report");
+        assert!(matches!(report.kind, TouchKind::Down));
+
+        state.handle(event(EV_KEY, BTN_TOUCH, 0), x_axis, y_axis, WIDTH, HEIGHT);
+        let report = sync(&mut state, x_axis, y_axis).expect("up report");
+        assert!(matches!(report.kind, TouchKind::Up));
+    }
 }
