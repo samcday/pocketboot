@@ -1,25 +1,99 @@
 name: CI
 
 on:
-  pull_request:
+  pull_request_target:
+    types:
+      - labeled
+      - opened
+      - reopened
+      - synchronize
   push:
   workflow_dispatch:
 
 permissions:
   contents: read
-  packages: read
+  packages: write
 
 env:
   CARGO_TERM_COLOR: always
-  POCKETBOOT_CI_IMAGE: &pocketboot_ci_image ghcr.io/samcday/pocketboot-ci:df-a7687c73061faab1858ec42445f5734a146565cde1c8d0afe8eea40c8e916b46
 
 jobs:
+  ci-image:
+    name: Ensure CI image
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    outputs:
+      image: ${{ steps.image.outputs.image }}
+
+    steps:
+      - name: Check PR authorization
+        if: |
+          github.event_name == 'pull_request_target' &&
+          github.event.pull_request.author_association != 'COLLABORATOR' &&
+          github.event.pull_request.author_association != 'OWNER' &&
+          !contains(github.event.pull_request.labels.*.name, 'ci-ok')
+        run: |
+          echo "This PR has not yet been marked as safe with a ci-ok label"
+          exit 1
+
+      - name: Checkout pocketboot
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ github.event.pull_request.head.repo.full_name || github.repository }}
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+
+      - name: Compute image ID
+        id: image
+        run: |
+          owner="${GITHUB_REPOSITORY_OWNER,,}"
+          hash="$(sha256sum .github/Dockerfile | cut -d ' ' -f1)"
+          image="ghcr.io/${owner}/pocketboot-ci:df-${hash}"
+          {
+            echo "hash=${hash}"
+            echo "image=${image}"
+            echo "short_hash=${hash::12}"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Check CI image
+        id: image-status
+        env:
+          IMAGE: ${{ steps.image.outputs.image }}
+        run: |
+          if docker buildx imagetools inspect "$IMAGE" >/dev/null 2>&1; then
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "exists=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Build and push CI image
+        if: steps.image-status.outputs.exists != 'true'
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: .github/Dockerfile
+          push: true
+          tags: ${{ steps.image.outputs.image }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
   cpio:
     name: cpio
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    needs: ci-image
     container:
-      image: *pocketboot_ci_image
+      image: ${{ needs.ci-image.outputs.image }}
       credentials:
         username: ${{ github.actor }}
         password: ${{ secrets.GITHUB_TOKEN }}
@@ -27,6 +101,10 @@ jobs:
     steps:
       - name: Checkout pocketboot
         uses: actions/checkout@v4
+        with:
+          repository: ${{ github.event.pull_request.head.repo.full_name || github.repository }}
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
 
       - name: Cache Cargo downloads
         uses: actions/cache@v4
@@ -50,9 +128,11 @@ jobs:
     name: ${{ matrix.name }} kernels
     runs-on: ubuntu-latest
     timeout-minutes: 120
-    needs: cpio
+    needs:
+      - ci-image
+      - cpio
     container:
-      image: *pocketboot_ci_image
+      image: ${{ needs.ci-image.outputs.image }}
       credentials:
         username: ${{ github.actor }}
         password: ${{ secrets.GITHUB_TOKEN }}
@@ -71,6 +151,10 @@ jobs:
     steps:
       - name: Checkout pocketboot
         uses: actions/checkout@v4
+        with:
+          repository: ${{ github.event.pull_request.head.repo.full_name || github.repository }}
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
 
       - name: Checkout Linux
         uses: actions/checkout@v4
@@ -79,6 +163,7 @@ jobs:
           ref: ${{ matrix.ref }}
           path: linux
           fetch-depth: 1
+          persist-credentials: false
 
       - name: Download initrd cpio
         uses: actions/download-artifact@v4
