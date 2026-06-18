@@ -29,9 +29,14 @@ jobs:
 
       - name: Install userspace build dependencies
         run: |
+          sudo dpkg --add-architecture arm64
           sudo apt-get update
           sudo apt-get install --no-install-recommends -y \
+            binutils-aarch64-linux-gnu \
+            gcc-aarch64-linux-gnu \
             libfontconfig1-dev \
+            make \
+            musl-dev:arm64 \
             pkg-config
 
       - name: Cache Cargo downloads
@@ -43,6 +48,9 @@ jobs:
           key: ${{ runner.os }}-cargo-${{ hashFiles('Cargo.lock') }}
 
       - name: Build initrd cpio
+        env:
+          BUSYBOX_CC: aarch64-linux-musl-gcc
+          BUSYBOX_CROSS_COMPILE: aarch64-linux-gnu-
         run: cargo xtask cpio --output target/pocketboot-initrd.cpio
 
       - name: Upload initrd cpio
@@ -91,6 +99,7 @@ jobs:
         run: |
           rustup toolchain install stable --profile minimal
           rustup default stable
+          rustup component add rust-src
 
       - name: Install kernel build dependencies
         run: |
@@ -101,6 +110,7 @@ jobs:
             flex \
             gcc-aarch64-linux-gnu \
             libelf-dev \
+            libclang-dev \
             libssl-dev \
             make \
             pkg-config \
@@ -113,6 +123,9 @@ jobs:
             ~/.cargo/git
             ~/.cargo/registry
           key: ${{ runner.os }}-cargo-${{ hashFiles('Cargo.lock') }}
+
+      - name: Install bindgen
+        run: cargo install bindgen-cli
 
       - name: Build kernels and boot images
         run: |

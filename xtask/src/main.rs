@@ -1399,6 +1399,11 @@ fn run_busybox_make(source: &Path, build: &Path, target: &str, args: &[&str]) ->
         .env("CROSS_COMPILE", busybox_cross_compile(target))
         .stdin(Stdio::null())
         .arg(format!("O={}", build.display()))
+        .arg({
+            let mut value = OsString::from("CC=");
+            value.push(busybox_cc(target));
+            value
+        })
         .args(args);
     run_command(command, "make busybox")
 }
