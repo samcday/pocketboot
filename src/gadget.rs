@@ -24,6 +24,7 @@ const CONFIGFS: &str = "/sys/kernel/config";
 const VENDOR_ID: u16 = Id::LINUX_FOUNDATION_VID;
 const PRODUCT_ID: u16 = 0x0104;
 const CONFIG_NAME: &str = "pocketboot";
+const CONFIG_MAX_POWER_MA: u16 = 2;
 const CONFIG_DIR: &str = "configs/c.1";
 const FUNCTIONS_DIR: &str = "functions";
 const MASS_STORAGE_FUNCTION: &str = "mass_storage.pocketboot-ums";
@@ -397,6 +398,7 @@ impl Gadget {
 
 fn config_with_functions(functions: &[&dyn GadgetFunction]) -> Config {
     let mut config = Config::new(CONFIG_NAME);
+    config.max_power = CONFIG_MAX_POWER_MA;
     for function in functions {
         config.add_function(function.handle());
     }
