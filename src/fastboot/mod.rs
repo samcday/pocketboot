@@ -24,6 +24,7 @@ pub(crate) mod commands;
 
 const COMMAND_MAX: usize = 64;
 const DOWNLOAD_PREFIX: &str = "download:";
+pub(crate) const MAX_DOWNLOAD_SIZE: u32 = 256 * 1024 * 1024;
 const TRANSFER_CHUNK: usize = 1024 * 1024;
 const RESPONSE_MAX: usize = 64;
 const RESPONSE_STATUS_LEN: usize = 4;
@@ -330,6 +331,13 @@ impl FastbootServer {
     }
 
     fn download(&mut self, size: u32) -> io::Result<()> {
+        if size > MAX_DOWNLOAD_SIZE {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                format!("download size exceeds max-download-size 0x{MAX_DOWNLOAD_SIZE:08x}"),
+            ));
+        }
+
         let size_u64 = u64::from(size);
         let mut file = kexec::create_payload_memfd("fastboot-download")?;
         file.set_len(size_u64)?;
