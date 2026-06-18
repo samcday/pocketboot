@@ -1,4 +1,4 @@
-FROM rust:1-bookworm@sha256:19817ead3289c8c631c73df281e18b59b172f6a31f4f563290f69cddd06c30e9
+FROM rust:1-trixie@sha256:4fd8406017c992f7b8ab55a2f99a1d56aeb1d7ecd255850dfa04239a88601f73
 
 ENV DEBIAN_FRONTEND=noninteractive
 
