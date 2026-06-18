@@ -1,9 +1,9 @@
 use std::{
     fs,
-    io::{self, Read, Seek, SeekFrom},
+    io::{self, Read, Seek, SeekFrom, Write},
 };
 
-use abootimg_oxide::{Header, HeaderV0Versioned};
+use abootimg_oxide::{Dtbh, Header, HeaderV0Versioned, Qcdt};
 use flate2::read::MultiGzDecoder;
 
 use crate::{
@@ -107,15 +107,16 @@ fn is_gzip_payload(payload: &mut fs::File) -> io::Result<bool> {
 }
 
 fn extract_dtb(boot_img: &mut fs::File, header: &Header) -> io::Result<Option<fs::File>> {
-    let Some((position, size)) = boot_dtb_section(header) else {
-        return Ok(None);
-    };
-    if size == 0 {
-        return Ok(None);
+    if let Some((position, size)) = boot_dtb_section(header) {
+        if size == 0 {
+            return Ok(None);
+        }
+
+        tracing::info!(position, bytes = size, "extracting boot image DTB section");
+        return extract_section(boot_img, "boot-dtb", position, size).map(Some);
     }
 
-    tracing::info!(position, bytes = size, "extracting boot image DTB section");
-    extract_section(boot_img, "boot-dtb", position, size).map(Some)
+    extract_vendor_dt_dtb(boot_img, header)
 }
 
 fn boot_dtb_section(header: &Header) -> Option<(usize, u32)> {
@@ -126,8 +127,66 @@ fn boot_dtb_section(header: &Header) -> Option<(usize, u32)> {
             }
             HeaderV0Versioned::V0 | HeaderV0Versioned::V1 { .. } => None,
         },
+        Header::V0VendorDt(_) => None,
         Header::V3(_) => None,
     }
+}
+
+fn extract_vendor_dt_dtb(boot_img: &mut fs::File, header: &Header) -> io::Result<Option<fs::File>> {
+    let Some(position) = header.vendor_dt_position() else {
+        return Ok(None);
+    };
+    let size = header
+        .vendor_dt_size()
+        .ok_or_else(|| invalid_data("boot image vendor-dt section has no size"))?;
+    let size_usize = usize::try_from(size)
+        .map_err(|_| invalid_data("boot image vendor-dt size does not fit usize"))?;
+    let mut vendor_dt = vec![0; size_usize];
+
+    tracing::info!(
+        position,
+        bytes = size,
+        "extracting boot image vendor-dt section"
+    );
+    boot_img.seek(SeekFrom::Start(u64::try_from(position).map_err(|_| {
+        invalid_data("boot image vendor-dt position does not fit u64")
+    })?))?;
+    boot_img.read_exact(&mut vendor_dt).map_err(|err| {
+        io::Error::new(
+            err.kind(),
+            format!("boot image vendor-dt section is truncated: {err}"),
+        )
+    })?;
+
+    let (kind, entries, version, dtb_range) = if vendor_dt.starts_with(b"QCDT") {
+        let qcdt = Qcdt::parse(&vendor_dt)
+            .map_err(|err| invalid_data(format!("parse boot image QCDT vendor-dt: {err}")))?;
+        let dtb_range = qcdt.single_entry_fdt_range().map_err(|err| {
+            invalid_data(format!("select boot image QCDT vendor-dt entry: {err}"))
+        })?;
+        ("QCDT", qcdt.num_entries(), qcdt.version(), dtb_range)
+    } else if vendor_dt.starts_with(b"DTBH") {
+        let dtbh = Dtbh::parse(&vendor_dt)
+            .map_err(|err| invalid_data(format!("parse boot image DTBH vendor-dt: {err}")))?;
+        let dtb_range = dtbh.single_entry_fdt_range().map_err(|err| {
+            invalid_data(format!("select boot image DTBH vendor-dt entry: {err}"))
+        })?;
+        ("DTBH", dtbh.num_entries(), dtbh.version(), dtb_range)
+    } else {
+        let magic = vendor_dt.get(..4).unwrap_or(&vendor_dt);
+        return Err(invalid_data(format!(
+            "unsupported boot image vendor-dt magic: {magic:?}"
+        )));
+    };
+    tracing::info!(
+        kind = kind,
+        entries = entries,
+        version = version,
+        bytes = dtb_range.len(),
+        "selected boot image vendor-dt DTB"
+    );
+
+    payload_from_slice("boot-dtb", &vendor_dt[dtb_range]).map(Some)
 }
 
 fn extract_section(
@@ -151,6 +210,13 @@ fn extract_section(
         ));
     }
 
+    payload.seek(SeekFrom::Start(0))?;
+    kexec::reopen_payload_readonly(payload)
+}
+
+fn payload_from_slice(name: &str, data: &[u8]) -> io::Result<fs::File> {
+    let mut payload = kexec::create_payload_memfd(name)?;
+    payload.write_all(data)?;
     payload.seek(SeekFrom::Start(0))?;
     kexec::reopen_payload_readonly(payload)
 }
