@@ -498,6 +498,14 @@ impl<'a> CommandContext<'a> {
             .as_file()
     }
 
+    pub(crate) fn staged_len(&self) -> io::Result<u64> {
+        Ok(self
+            .staged
+            .as_ref()
+            .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "no staged data"))?
+            .len())
+    }
+
     pub(crate) fn info(&mut self, message: impl AsRef<[u8]>) -> io::Result<()> {
         self.responder.info(message)
     }

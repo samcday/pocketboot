@@ -10,7 +10,10 @@ const DEV: &str = "/dev";
 pub(super) struct Partition {
     pub(super) kernel_name: String,
     pub(super) partname: Option<String>,
+    pub(super) dev_path: PathBuf,
+    pub(super) devnum: String,
     pub(super) size_bytes: u64,
+    pub(super) read_only: bool,
 }
 
 impl Partition {
@@ -86,6 +89,7 @@ impl Resolver {
     }
 
     fn partitions_for_disk(&self, disk_path: &Path) -> io::Result<Vec<Partition>> {
+        let disk_read_only = read_trimmed(disk_path.join("ro")).as_deref() == Some("1");
         let mut partitions = Vec::new();
         for entry in fs::read_dir(disk_path)? {
             let entry = entry?;
@@ -102,12 +106,21 @@ impl Resolver {
 
             partitions.push(Partition {
                 partname: uevent_value(sysfs_path.join("uevent"), "PARTNAME"),
+                devnum: partition_devnum(&sysfs_path)?,
                 size_bytes: partition_size_bytes(&sysfs_path)?,
+                read_only: disk_read_only
+                    || read_trimmed(sysfs_path.join("ro")).as_deref() == Some("1"),
                 kernel_name,
+                dev_path,
             });
         }
         Ok(partitions)
     }
+}
+
+fn partition_devnum(sysfs_path: &Path) -> io::Result<String> {
+    read_trimmed(sysfs_path.join("dev"))
+        .ok_or_else(|| invalid_data(format!("{} has no dev", sysfs_path.display())))
 }
 
 fn partition_size_bytes(sysfs_path: &Path) -> io::Result<u64> {
@@ -193,6 +206,7 @@ mod tests {
 
         assert_eq!(partition.kernel_name, "mmcblk0p1");
         assert_eq!(partition.size_bytes, 2048 * 512);
+        assert_eq!(partition.dev_path, temp.root.join("dev/mmcblk0p1"));
     }
 
     #[test]
@@ -203,6 +217,7 @@ mod tests {
         let partition = temp.resolver().find("mmcblk0p1").unwrap();
 
         assert_eq!(partition.fastboot_name(), "boot");
+        assert!(!partition.read_only);
     }
 
     #[test]
@@ -257,6 +272,7 @@ mod tests {
             let partition_path = disk_path.join(partition);
             fs::create_dir(&partition_path).unwrap();
             fs::write(partition_path.join("partition"), "1").unwrap();
+            fs::write(partition_path.join("dev"), "179:1").unwrap();
             fs::write(partition_path.join("size"), sectors.to_string()).unwrap();
             fs::write(partition_path.join("ro"), if read_only { "1" } else { "0" }).unwrap();
             if let Some(partname) = partname {

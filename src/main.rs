@@ -166,6 +166,7 @@ fn run() -> Result<()> {
 fn fastboot_commands(gadget: gadget::Gadget, serialno: String) -> fastboot::CommandMap {
     let mut commands = fastboot::commands::boot_commands();
     commands.extend(fastboot::commands::getvar_commands(serialno));
+    commands.extend(fastboot::commands::flash_commands());
     commands.extend(fastboot::commands::diagnostic_commands());
     commands.extend(fastboot::commands::ums_commands(gadget));
     commands.push(fastboot::commands::reboot_command());
