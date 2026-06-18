@@ -15,6 +15,7 @@ mod kexec;
 mod kmsg;
 #[path = "kmsg-forwarder.rs"]
 mod kmsg_forwarder;
+mod power;
 mod reaper;
 mod settle;
 mod ui;

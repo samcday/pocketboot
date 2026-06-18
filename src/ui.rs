@@ -16,23 +16,23 @@ use std::{
 };
 
 use drm::{
+    Device as DrmDevice,
     buffer::{Buffer, DrmFourcc},
     control::{
-        self, connector, crtc, framebuffer, Device as ControlDevice, Event, ModeTypeFlags,
-        PageFlipFlags,
+        self, Device as ControlDevice, Event, ModeTypeFlags, PageFlipFlags, connector, crtc,
+        framebuffer,
     },
-    Device as DrmDevice,
 };
 use slint::platform::{
+    Platform, PlatformError, PointerEventButton, WindowAdapter, WindowEvent,
     software_renderer::{
         MinimalSoftwareWindow, PremultipliedRgbaColor, RepaintBufferType, Rgb565Pixel,
         SoftwareRenderer, TargetPixel,
     },
-    Platform, PlatformError, PointerEventButton, WindowAdapter, WindowEvent,
 };
 use slint::{ComponentHandle, LogicalPosition, PhysicalSize};
 
-use crate::battery;
+use crate::{battery, power};
 
 slint::include_modules!();
 
@@ -40,6 +40,7 @@ const DRI: &str = "/dev/dri";
 const INPUT: &str = "/dev/input";
 const UI_START_TIMEOUT: Duration = Duration::from_secs(2);
 const IDLE_SLEEP: Duration = Duration::from_millis(16);
+const POWER_KEY_HOLD: Duration = Duration::from_millis(2500);
 
 pub(crate) fn spawn(battery: Option<battery::Updates>) -> io::Result<thread::JoinHandle<()>> {
     let handle = thread::Builder::new()
@@ -64,11 +65,21 @@ fn run(battery: Option<battery::Updates>) -> Result<(), String> {
     let main_window = MainWindow::new().map_err(|err| format!("create Slint window: {err}"))?;
     main_window.set_touch_x(kms_display.width as f32 / 2.0);
     main_window.set_touch_y(kms_display.height as f32 / 2.0);
+    main_window.on_power_action(|action| {
+        let result = match action {
+            PowerAction::Shutdown => power::power_off(),
+            PowerAction::Reboot => power::reboot(),
+        };
+        if let Err(err) = result {
+            tracing::error!(action = ?action, error = %err, "power action failed");
+        }
+    });
     main_window
         .show()
         .map_err(|err| format!("show Slint window: {err}"))?;
 
     let mut touch = TouchInput::new();
+    let mut power_key = PowerKeyInput::new();
     let mut battery = battery.map(BatteryUpdates::new);
     let mut pointer_down = false;
     let display_path = kms_display.path.display().to_string();
@@ -115,6 +126,12 @@ fn run(battery: Option<battery::Updates>) -> Result<(), String> {
                         window.dispatch_event(WindowEvent::PointerExited);
                     }
                 }
+            }
+        }
+
+        for event in power_key.poll() {
+            match event {
+                PowerKeyEvent::OpenMenu => main_window.invoke_show_power_menu(),
             }
         }
 
@@ -745,6 +762,176 @@ impl TouchInput {
     }
 }
 
+struct PowerKeyInput {
+    devices: Vec<PowerKeyDevice>,
+    ignored_devices: Vec<PathBuf>,
+    next_scan: Instant,
+}
+
+impl PowerKeyInput {
+    fn new() -> Self {
+        let mut input = Self {
+            devices: Vec::new(),
+            ignored_devices: Vec::new(),
+            next_scan: Instant::now(),
+        };
+        input.rescan();
+        input
+    }
+
+    fn poll(&mut self) -> Vec<PowerKeyEvent> {
+        if Instant::now() >= self.next_scan {
+            self.rescan();
+        }
+
+        let mut events = Vec::new();
+        let mut index = 0;
+        while index < self.devices.len() {
+            match self.devices[index].poll(&mut events) {
+                Ok(()) => index += 1,
+                Err(err) => {
+                    tracing::warn!(path = %self.devices[index].path.display(), error = %err, "dropping power-key input device");
+                    self.devices.swap_remove(index);
+                }
+            }
+        }
+        events
+    }
+
+    fn rescan(&mut self) {
+        self.next_scan = Instant::now() + Duration::from_secs(1);
+        let Ok(entries) = fs::read_dir(INPUT) else {
+            return;
+        };
+
+        let mut present = Vec::new();
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if !path
+                .file_name()
+                .and_then(|name| name.to_str())
+                .is_some_and(|name| name.starts_with("event"))
+            {
+                continue;
+            }
+            present.push(path.clone());
+            if self.devices.iter().any(|device| device.path == path) {
+                continue;
+            }
+            if self.ignored_devices.iter().any(|ignored| *ignored == path) {
+                continue;
+            }
+            match PowerKeyDevice::open(&path) {
+                Ok(device) => {
+                    tracing::info!(path = %path.display(), "opened power-key input device");
+                    self.devices.push(device);
+                }
+                Err(err) => {
+                    tracing::debug!(path = %path.display(), error = %err, "ignoring input device");
+                    self.ignored_devices.push(path);
+                }
+            }
+        }
+
+        self.ignored_devices
+            .retain(|ignored| present.iter().any(|path| path == ignored));
+    }
+}
+
+struct PowerKeyDevice {
+    file: File,
+    path: PathBuf,
+    state: PowerKeyState,
+}
+
+impl PowerKeyDevice {
+    fn open(path: &Path) -> Result<Self, String> {
+        let file = OpenOptions::new()
+            .read(true)
+            .custom_flags(libc::O_NONBLOCK | libc::O_CLOEXEC)
+            .open(path)
+            .map_err(|err| format!("open: {err}"))?;
+        let fd = file.as_raw_fd();
+
+        if !query_key(fd, KEY_POWER).map_err(|err| format!("query KEY_POWER: {err}"))? {
+            return Err("device does not advertise KEY_POWER".to_string());
+        }
+
+        Ok(Self {
+            file,
+            path: path.to_path_buf(),
+            state: PowerKeyState::default(),
+        })
+    }
+
+    fn poll(&mut self, events: &mut Vec<PowerKeyEvent>) -> io::Result<()> {
+        let mut buffer = [0u8; mem::size_of::<InputEvent>() * 32];
+        loop {
+            match self.file.read(&mut buffer) {
+                Ok(0) => break,
+                Ok(bytes) => {
+                    let whole_events = bytes / mem::size_of::<InputEvent>();
+                    for chunk in buffer[..whole_events * mem::size_of::<InputEvent>()]
+                        .chunks_exact(mem::size_of::<InputEvent>())
+                    {
+                        let event =
+                            unsafe { ptr::read_unaligned(chunk.as_ptr().cast::<InputEvent>()) };
+                        self.state.handle(event);
+                    }
+                }
+                Err(err) if err.kind() == io::ErrorKind::WouldBlock => break,
+                Err(err) if err.kind() == io::ErrorKind::Interrupted => continue,
+                Err(err) => return Err(err),
+            }
+        }
+
+        if let Some(event) = self.state.poll() {
+            events.push(event);
+        }
+        Ok(())
+    }
+}
+
+#[derive(Default)]
+struct PowerKeyState {
+    pressed_since: Option<Instant>,
+    reported: bool,
+}
+
+impl PowerKeyState {
+    fn handle(&mut self, event: InputEvent) {
+        if event.type_ != EV_KEY || event.code != KEY_POWER {
+            return;
+        }
+
+        match event.value {
+            0 => {
+                self.pressed_since = None;
+                self.reported = false;
+            }
+            1 => {
+                self.pressed_since = Some(Instant::now());
+                self.reported = false;
+            }
+            _ => {}
+        }
+    }
+
+    fn poll(&mut self) -> Option<PowerKeyEvent> {
+        let pressed_since = self.pressed_since?;
+        if self.reported || pressed_since.elapsed() < POWER_KEY_HOLD {
+            return None;
+        }
+
+        self.reported = true;
+        Some(PowerKeyEvent::OpenMenu)
+    }
+}
+
+enum PowerKeyEvent {
+    OpenMenu,
+}
+
 struct TouchDevice {
     file: File,
     path: PathBuf,
@@ -993,6 +1180,18 @@ fn query_axis(fd: i32, code: u16) -> io::Result<Axis> {
     })
 }
 
+fn query_key(fd: i32, code: u16) -> io::Result<bool> {
+    let mut bits = [0u8; KEY_POWER_BITS_BYTES];
+    ioctl_read(fd, eviocgbit(EV_KEY, bits.len()), &mut bits)?;
+    Ok(test_bit(&bits, code))
+}
+
+fn test_bit(bits: &[u8], bit: u16) -> bool {
+    let index = bit as usize / 8;
+    let mask = 1 << (bit as usize % 8);
+    bits.get(index).is_some_and(|byte| byte & mask != 0)
+}
+
 fn ioctl_read<T>(fd: i32, request: u64, value: &mut T) -> io::Result<()> {
     let rc = unsafe { libc::ioctl(fd, request as _, value as *mut T) };
     if rc == -1 {
@@ -1004,6 +1203,10 @@ fn ioctl_read<T>(fd: i32, request: u64, value: &mut T) -> io::Result<()> {
 
 fn eviocgabs(abs: u16) -> u64 {
     ior(b'E', 0x40 + abs as u8, mem::size_of::<InputAbsInfo>())
+}
+
+fn eviocgbit(type_: u16, size: usize) -> u64 {
+    ior(b'E', 0x20 + type_ as u8, size)
 }
 
 fn ior(type_: u8, number: u8, size: usize) -> u64 {
@@ -1031,6 +1234,8 @@ const EV_SYN: u16 = 0x00;
 const EV_KEY: u16 = 0x01;
 const EV_ABS: u16 = 0x03;
 const SYN_REPORT: u16 = 0x00;
+const KEY_POWER: u16 = 0x74;
+const KEY_POWER_BITS_BYTES: usize = KEY_POWER as usize / 8 + 1;
 const BTN_TOUCH: u16 = 0x14a;
 const ABS_X: u16 = 0x00;
 const ABS_Y: u16 = 0x01;

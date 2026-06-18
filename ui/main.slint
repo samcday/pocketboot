@@ -1,6 +1,7 @@
 import "fonts/FreeSans.ttf";
 
 export enum BatteryStatus { Unknown, Charging, Discharging, NotCharging, Full }
+export enum PowerAction { Shutdown, Reboot }
 
 export component MainWindow inherits Window {
     background: #080b12;
@@ -11,6 +12,105 @@ export component MainWindow inherits Window {
     in-out property <bool> battery-known: false;
     in-out property <int> battery-percent: 0;
     in-out property <BatteryStatus> battery-status: BatteryStatus.Unknown;
+    in-out property <bool> power-menu-open: false;
+    in-out property <int> hold-action: 0;
+    in-out property <float> hold-progress: 0;
+
+    callback power-action(PowerAction);
+
+    public function show-power-menu() {
+        root.power-menu-open = true;
+        root.hold-action = 0;
+        root.hold-progress = 0;
+    }
+
+    function hide-power-menu() {
+        if (root.hold-action == 0) {
+            root.power-menu-open = false;
+            root.hold-progress = 0;
+        }
+    }
+
+    function begin-power-hold(action: int) {
+        root.hold-action = action;
+        root.hold-progress = 0;
+    }
+
+    function cancel-power-hold(action: int) {
+        if (root.hold-action == action) {
+            root.hold-action = 0;
+            root.hold-progress = 0;
+        }
+    }
+
+    function confirm-power-hold() {
+        if (root.hold-action == 1) {
+            root.power-action(PowerAction.Shutdown);
+        }
+        if (root.hold-action == 2) {
+            root.power-action(PowerAction.Reboot);
+        }
+        root.power-menu-open = false;
+        root.hold-action = 0;
+        root.hold-progress = 0;
+    }
+
+    Timer {
+        interval: 50ms;
+        running: root.hold-action != 0;
+        triggered => {
+            root.hold-progress += 0.025;
+            if (root.hold-progress >= 1) {
+                root.confirm-power-hold();
+            }
+        }
+    }
+
+    power-button := Rectangle {
+        width: 96px;
+        height: 76px;
+        x: 28px;
+        y: 32px;
+        background: power-touch.pressed ? #1e293b : #00000000;
+        border-radius: 18px;
+
+        ring := Rectangle {
+            width: 44px;
+            height: 44px;
+            x: (parent.width - self.width) / 2;
+            y: 20px;
+            background: #00000000;
+            border-color: #f8fafc;
+            border-width: 4px;
+            border-radius: 22px;
+        }
+
+        Rectangle {
+            width: 8px;
+            height: 28px;
+            x: (parent.width - self.width) / 2;
+            y: 11px;
+            background: #080b12;
+        }
+
+        Rectangle {
+            width: 6px;
+            height: 30px;
+            x: (parent.width - self.width) / 2;
+            y: 10px;
+            background: #f8fafc;
+            border-radius: 3px;
+        }
+
+        power-touch := TouchArea {
+            width: parent.width;
+            height: parent.height;
+
+            clicked => {
+                root.show-power-menu();
+            }
+        }
+    }
 
     battery := Rectangle {
         visible: root.battery-known;
@@ -87,8 +187,168 @@ export component MainWindow inherits Window {
         vertical-alignment: center;
     }
 
+    Rectangle {
+        visible: root.power-menu-open;
+        width: parent.width;
+        height: parent.height;
+        background: #000000aa;
+
+        TouchArea {
+            width: parent.width;
+            height: parent.height;
+
+            clicked => {
+                root.hide-power-menu();
+            }
+        }
+
+        card := Rectangle {
+            width: root.width > 624px ? 560px : root.width - 64px;
+            height: 474px;
+            x: (parent.width - self.width) / 2;
+            y: (parent.height - self.height) / 2;
+            background: #111827;
+            border-color: #334155;
+            border-width: 2px;
+            border-radius: 28px;
+
+            Text {
+                width: parent.width - 64px;
+                height: 56px;
+                x: 32px;
+                y: 34px;
+                text: "Power";
+                color: #f8fafc;
+                font-size: 42px;
+                font-weight: 700;
+                horizontal-alignment: center;
+                vertical-alignment: center;
+            }
+
+            Text {
+                width: parent.width - 72px;
+                height: 48px;
+                x: 36px;
+                y: 92px;
+                text: "Press and hold an action";
+                color: #94a3b8;
+                font-size: 26px;
+                horizontal-alignment: center;
+                vertical-alignment: center;
+            }
+
+            shutdown := Rectangle {
+                width: parent.width - 72px;
+                height: 116px;
+                x: 36px;
+                y: 166px;
+                background: shutdown-touch.pressed ? #3f1f24 : #1f2937;
+                border-color: root.hold-action == 1 ? #f97373 : #475569;
+                border-width: 2px;
+                border-radius: 22px;
+
+                Rectangle {
+                    width: root.hold-action == 1 ? parent.width * root.hold-progress : 0px;
+                    height: parent.height;
+                    background: #dc262655;
+                    border-radius: parent.border-radius;
+                }
+
+                Text {
+                    width: parent.width;
+                    height: 50px;
+                    y: 19px;
+                    text: "Shutdown";
+                    color: #f8fafc;
+                    font-size: 34px;
+                    font-weight: 700;
+                    horizontal-alignment: center;
+                    vertical-alignment: center;
+                }
+
+                Text {
+                    width: parent.width;
+                    height: 34px;
+                    y: 66px;
+                    text: root.hold-action == 1 ? "Keep holding..." : "Hold for 2 seconds";
+                    color: #cbd5e1;
+                    font-size: 22px;
+                    horizontal-alignment: center;
+                    vertical-alignment: center;
+                }
+
+                shutdown-touch := TouchArea {
+                    width: parent.width;
+                    height: parent.height;
+
+                    changed pressed => {
+                        if (self.pressed) {
+                            root.begin-power-hold(1);
+                        } else {
+                            root.cancel-power-hold(1);
+                        }
+                    }
+                }
+            }
+
+            reboot := Rectangle {
+                width: parent.width - 72px;
+                height: 116px;
+                x: 36px;
+                y: 306px;
+                background: reboot-touch.pressed ? #142c44 : #1f2937;
+                border-color: root.hold-action == 2 ? #38bdf8 : #475569;
+                border-width: 2px;
+                border-radius: 22px;
+
+                Rectangle {
+                    width: root.hold-action == 2 ? parent.width * root.hold-progress : 0px;
+                    height: parent.height;
+                    background: #0284c755;
+                    border-radius: parent.border-radius;
+                }
+
+                Text {
+                    width: parent.width;
+                    height: 50px;
+                    y: 19px;
+                    text: "Reboot";
+                    color: #f8fafc;
+                    font-size: 34px;
+                    font-weight: 700;
+                    horizontal-alignment: center;
+                    vertical-alignment: center;
+                }
+
+                Text {
+                    width: parent.width;
+                    height: 34px;
+                    y: 66px;
+                    text: root.hold-action == 2 ? "Keep holding..." : "Hold for 2 seconds";
+                    color: #cbd5e1;
+                    font-size: 22px;
+                    horizontal-alignment: center;
+                    vertical-alignment: center;
+                }
+
+                reboot-touch := TouchArea {
+                    width: parent.width;
+                    height: parent.height;
+
+                    changed pressed => {
+                        if (self.pressed) {
+                            root.begin-power-hold(2);
+                        } else {
+                            root.cancel-power-hold(2);
+                        }
+                    }
+                }
+            }
+        }
+    }
+
     Text {
         visible: false;
-        text: "0123456789%+";
+        text: "0123456789%+PowerShutdownRebootPressandholdactionsecondsKeepholding...";
     }
 }
