@@ -18,6 +18,7 @@ const DEFAULT_TARGET: &str = "aarch64-unknown-linux-musl";
 const INIT_BINARY: &str = "pocketboot";
 const DEFAULT_INITRD: &str = "pocketboot-initrd.cpio";
 const KERNEL_ARCH: &str = "arm64";
+const DEFAULT_KERNEL_IMAGE: &str = "Image.gz";
 const QEMU_TARGET: &str = "aarch64-virt";
 const QEMU_DISK_SIZE: u64 = 64 * 1024 * 1024;
 const ANDROID_BOOT_MAGIC: &[u8; 8] = b"ANDROID!";
@@ -609,7 +610,6 @@ fn bootimg(args: BootImgArgs) -> Result<()> {
         .join("kernel")
         .join(&args.device.vendor)
         .join(&args.device.stem);
-    let image = out_dir.join("arch/arm64/boot/Image.gz");
     let dtb = out_dir
         .join("arch/arm64/boot/dts")
         .join(&args.device.vendor)
@@ -620,11 +620,12 @@ fn bootimg(args: BootImgArgs) -> Result<()> {
         .join(format!("{}.toml", args.device.stem));
     let output = args.output.unwrap_or_else(|| out_dir.join("boot.img"));
 
-    ensure_file(&image, "kernel image")?;
-    ensure_file(&dtb, "device tree blob")?;
     ensure_file(&config_path, "boot image config")?;
 
     let config = load_bootimg_config(&config_path)?;
+    let image = bootimg_kernel_image(&config, &config_path, &out_dir)?;
+    ensure_file(&image, "kernel image")?;
+    ensure_file(&dtb, "device tree blob")?;
     write_bootimg(&config, &config_path, &image, &dtb, &output)?;
 
     println!("wrote {}", output.display());
@@ -639,6 +640,8 @@ fn bootimg(args: BootImgArgs) -> Result<()> {
 struct BootImgConfig {
     header_version: u32,
     page_size: u32,
+    #[serde(default = "default_kernel_image")]
+    kernel_image: String,
     base: u64,
     kernel_offset: u64,
     ramdisk_offset: u64,
@@ -696,10 +699,31 @@ fn default_dtbh_subtype() -> u32 {
     DTBH_SUBTYPE_CODE
 }
 
+fn default_kernel_image() -> String {
+    DEFAULT_KERNEL_IMAGE.to_string()
+}
+
 fn load_bootimg_config(path: &Path) -> Result<BootImgConfig> {
     let contents =
         fs::read_to_string(path).map_err(|err| format!("read {}: {err}", path.display()))?;
     toml::from_str(&contents).map_err(|err| format!("parse {}: {err}", path.display()))
+}
+
+fn bootimg_kernel_image(
+    config: &BootImgConfig,
+    config_path: &Path,
+    out_dir: &Path,
+) -> Result<PathBuf> {
+    let mut components = Path::new(&config.kernel_image).components();
+    match (components.next(), components.next()) {
+        (Some(std::path::Component::Normal(_)), None) => {
+            Ok(out_dir.join("arch/arm64/boot").join(&config.kernel_image))
+        }
+        _ => Err(format!(
+            "{}: kernel_image must be a file name under arch/arm64/boot",
+            config_path.display()
+        )),
+    }
 }
 
 fn write_bootimg(
@@ -1862,13 +1886,13 @@ fn print_cpio_usage() {
 
 fn print_kernel_usage() {
     println!(
-        "usage: cargo xtask kernel [--initrd PATH] <vendor/device> <kernel-tree>\n\nexample: cargo xtask kernel qcom/msm8916-samsung-a5u-eur ./linux\n\nwhen --initrd is omitted, target/{DEFAULT_INITRD} is rebuilt automatically\noutputs: target/kernel/<vendor>/<device>/arch/arm64/boot/Image.gz and the inferred DTB"
+        "usage: cargo xtask kernel [--initrd PATH] <vendor/device> <kernel-tree>\n\nexample: cargo xtask kernel qcom/msm8916-samsung-a5u-eur ./linux\n\nwhen --initrd is omitted, target/{DEFAULT_INITRD} is rebuilt automatically\noutputs: target/kernel/<vendor>/<device>/arch/arm64/boot/Image.gz, the uncompressed Image prerequisite, and the inferred DTB"
     );
 }
 
 fn print_bootimg_usage() {
     println!(
-        "usage: cargo xtask bootimg <vendor/device> [--output PATH]\n\nexample: cargo xtask bootimg exynos/exynos7870-j7xelte\n\nrequires: target/kernel/<vendor>/<device>/arch/arm64/boot/Image.gz and the inferred DTB\nsupports: Android v2 DTB sections, legacy QCDT and Samsung DTBH vendor DT payloads\ndefault output: target/kernel/<vendor>/<device>/boot.img"
+        "usage: cargo xtask bootimg <vendor/device> [--output PATH]\n\nexample: cargo xtask bootimg exynos/exynos7870-j7xelte\n\nrequires: target/kernel/<vendor>/<device>/arch/arm64/boot/<kernel_image> and the inferred DTB\nkernel_image: configured by configs/bootimg/<vendor>/<device>.toml, defaults to {DEFAULT_KERNEL_IMAGE}\nsupports: Android v2 DTB sections, legacy QCDT and Samsung DTBH vendor DT payloads\ndefault output: target/kernel/<vendor>/<device>/boot.img"
     );
 }
 
@@ -1957,6 +1981,7 @@ mod tests {
         assert_eq!(config.header_version, 0);
         assert_eq!(config.page_size, 2048);
         assert_eq!(config.base, 0x80000000);
+        assert_eq!(config.kernel_image, "Image");
         assert_eq!(config.ramdisk_size, 1);
         assert!(config.append_seandroid_enforce);
         assert_eq!(qcdt.entries.len(), 1);
@@ -1976,6 +2001,7 @@ mod tests {
         assert_eq!(config.header_version, 0);
         assert_eq!(config.page_size, 2048);
         assert_eq!(config.base, 0x10000000);
+        assert_eq!(config.kernel_image, DEFAULT_KERNEL_IMAGE);
         assert!(config.qcdt.is_none());
         let dtbh = config.dtbh.unwrap();
         assert_eq!(dtbh.platform, 0x50a6);

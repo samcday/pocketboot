@@ -2,6 +2,7 @@
 
 header_version = 0
 page_size = 2048
+kernel_image = "Image"
 base = 0x80000000
 
 kernel_offset = 0x00008000

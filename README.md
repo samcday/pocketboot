@@ -59,7 +59,8 @@ cargo xtask kernel exynos/exynos7870-j7xelte ~/tmp/linux-pocketboot-exynos7870
 ```
 
 The kernel build uses `target/kernel/<vendor>/<device>` as `O=`, embeds a
-pocketboot initramfs, and builds `Image.gz` plus the inferred DTB. By default it
+pocketboot initramfs, and builds `Image.gz` plus the inferred DTB. This also
+leaves the uncompressed `Image` prerequisite in the build output. By default it
 builds a fresh initramfs; pass `--initrd PATH` to embed an existing cpio archive.
 
 Once the kernel is built, package those artifacts as an Android boot image:
@@ -73,8 +74,9 @@ cargo xtask bootimg exynos/exynos7870-j7xelte
 Boot image packaging is device-specific and configured by
 `configs/bootimg/<vendor>/<device>.toml`. The command requires an existing
 kernel build and writes `target/kernel/<vendor>/<device>/boot.img` by default.
-Android boot header v2 DTB sections, legacy QCDT vendor DT payloads and Samsung
-DTBH vendor DT payloads are supported.
+`kernel_image` selects the artifact under `arch/arm64/boot` to package and
+defaults to `Image.gz`. Android boot header v2 DTB sections, legacy QCDT vendor
+DT payloads and Samsung DTBH vendor DT payloads are supported.
 
 Planned features:
 
