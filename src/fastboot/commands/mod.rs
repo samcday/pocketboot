@@ -3,6 +3,9 @@ use crate::fastboot::{Command, CommandMap};
 mod boot;
 mod cat;
 mod dmesg;
+mod flash;
+mod getvar;
+mod partitions;
 mod reboot;
 mod shell;
 mod ums;
@@ -22,6 +25,14 @@ pub(crate) fn diagnostic_commands() -> CommandMap {
         Command::prefix("oem shell:", shell::handle),
         Command::exact("oem shell-staged", shell::handle_staged),
     ]
+}
+
+pub(crate) fn getvar_commands(serialno: String) -> CommandMap {
+    getvar::FastbootGetvar::new(serialno).commands()
+}
+
+pub(crate) fn flash_commands() -> CommandMap {
+    vec![Command::prefix("flash:", flash::handle)]
 }
 
 pub(crate) fn reboot_command() -> Command {
