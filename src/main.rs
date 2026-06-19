@@ -18,6 +18,8 @@ mod kmsg;
 #[path = "kmsg-forwarder.rs"]
 mod kmsg_forwarder;
 mod power;
+#[cfg(feature = "qemu")]
+mod qemu;
 mod reaper;
 mod settle;
 mod ui;
@@ -82,6 +84,10 @@ fn run() -> Result<()> {
             commands: fastboot_commands(gadget.clone(), serialno, cmdline.clone()),
         })
         .map_err(|err| format!("spawn fastboot gadget thread: {err}"))?;
+    #[cfg(feature = "qemu")]
+    if let Err(err) = qemu::spawn() {
+        tracing::warn!(error = ?err, "failed to spawn QEMU USB/IP service");
+    }
     kmsg_forwarder::spawn();
 
     let settled = settle::wait_for_local_flash(Duration::from_secs(5));

@@ -9,7 +9,7 @@ use crate::Result;
 
 use super::{
     KERNEL_ARCH,
-    cpio::{DEFAULT_TARGET, build_initrd},
+    cpio::{DEFAULT_TARGET, FeatureSet, build_initrd},
     ensure_file, kernel_tree, make_command, parallel_jobs, run_command, target_dir, workspace_root,
 };
 
@@ -54,6 +54,7 @@ impl QemuArgs {
         let kernel_tree = kernel_tree.ok_or_else(|| {
             "usage: cargo xtask qemu [--build-only] <kernel-tree> [-- QEMU-ARG...]".to_string()
         })?;
+
         Ok(Self {
             kernel_tree,
             build_only,
@@ -81,7 +82,14 @@ fn qemu(args: QemuArgs) -> Result<()> {
     let out_dir = target_dir.join("kernel").join("qemu").join(QEMU_TARGET);
     fs::create_dir_all(&out_dir).map_err(|err| format!("create {}: {err}", out_dir.display()))?;
 
-    let initrd = build_initrd(&workspace_root, DEFAULT_TARGET, None, true)?;
+    let features = FeatureSet::qemu();
+    let initrd = build_initrd(
+        &workspace_root,
+        DEFAULT_TARGET,
+        Some(target_dir.join("qemu").join("pocketboot-initrd.cpio")),
+        true,
+        &features,
+    )?;
     println!("initrd {}", initrd.display());
 
     let image = build_qemu_kernel(&workspace_root, &kernel_tree, &out_dir)?;
@@ -167,6 +175,11 @@ fn run_qemu(
     let append =
         "console=ttyAMA0 earlycon=pl011,mmio32,0x09000000 loglevel=7 panic=1 pocketboot.log=info";
 
+    println!("USB/IP guest server will be forwarded to 127.0.0.1:3240");
+    println!(
+        "host attach: sudo modprobe vhci-hcd && sudo usbip attach -r 127.0.0.1 -d usbip-vudc.0"
+    );
+
     let mut command = Command::new(qemu);
     command
         .current_dir(workspace_root)
@@ -189,6 +202,8 @@ fn run_qemu(
         .args(["-append", append, "-drive"])
         .arg(drive)
         .args(["-device", "virtio-blk-device,drive=pocketboot"])
+        .args(["-netdev", "user,id=net0,hostfwd=tcp:127.0.0.1:3240-:3240"])
+        .args(["-device", "virtio-net-device,netdev=net0"])
         .args(extra_args);
     run_command(command, "qemu")
 }

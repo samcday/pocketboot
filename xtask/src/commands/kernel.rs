@@ -4,7 +4,7 @@ use crate::Result;
 
 use super::{
     KERNEL_ARCH, KernelDevice, canonical_file,
-    cpio::{DEFAULT_INITRD, DEFAULT_TARGET, build_initrd},
+    cpio::{DEFAULT_INITRD, DEFAULT_TARGET, FeatureSet, build_initrd},
     ensure_file, kconfig_string, kernel_tree, make_command, parallel_jobs, run_command, target_dir,
     workspace_root,
 };
@@ -102,7 +102,13 @@ fn kernel(args: KernelArgs) -> Result<()> {
     let initrd = match args.initrd {
         Some(initrd) => canonical_file(&initrd, "initrd cpio")?,
         None => {
-            let initrd = build_initrd(&workspace_root, DEFAULT_TARGET, None, true)?;
+            let initrd = build_initrd(
+                &workspace_root,
+                DEFAULT_TARGET,
+                None,
+                true,
+                &FeatureSet::default(),
+            )?;
             println!("wrote {}", initrd.display());
             initrd
         }

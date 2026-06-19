@@ -19,6 +19,10 @@ slint = { version = "1.16.1", default-features = false, features = ["compat-1-2"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", default-features = false, features = ["fmt", "registry", "std"] }
 
+[features]
+default = []
+qemu = []
+
 [build-dependencies]
 slint-build = "1.16.1"
 

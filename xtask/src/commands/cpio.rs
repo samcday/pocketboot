@@ -28,6 +28,45 @@ struct CpioArgs {
     target: String,
     output: Option<PathBuf>,
     busybox: bool,
+    features: FeatureSet,
+}
+
+#[derive(Clone, Debug, Default)]
+pub(super) struct FeatureSet {
+    values: Vec<String>,
+}
+
+impl FeatureSet {
+    pub(super) fn qemu() -> Self {
+        Self {
+            values: vec!["qemu".to_string()],
+        }
+    }
+
+    fn add(&mut self, value: &str) -> Result<()> {
+        for feature in value.split(|ch: char| ch == ',' || ch.is_ascii_whitespace()) {
+            if feature.is_empty() {
+                continue;
+            }
+            validate_feature(feature)?;
+            if !self.values.iter().any(|existing| existing == feature) {
+                self.values.push(feature.to_string());
+            }
+        }
+        Ok(())
+    }
+
+    fn is_empty(&self) -> bool {
+        self.values.is_empty()
+    }
+
+    fn contains(&self, feature: &str) -> bool {
+        self.values.iter().any(|value| value == feature)
+    }
+
+    fn cargo_value(&self) -> String {
+        self.values.join(",")
+    }
 }
 
 impl CpioArgs {
@@ -35,6 +74,7 @@ impl CpioArgs {
         let mut target = DEFAULT_TARGET.to_string();
         let mut output = None;
         let mut busybox = true;
+        let mut features = FeatureSet::default();
         let mut index = 0;
 
         while index < args.len() {
@@ -55,11 +95,21 @@ impl CpioArgs {
                     ));
                 }
                 "--no-busybox" => busybox = false,
+                "--features" => {
+                    index += 1;
+                    features.add(
+                        args.get(index)
+                            .ok_or_else(|| "--features requires a value".to_string())?,
+                    )?;
+                }
                 value if value.starts_with("--target=") => {
                     target = value["--target=".len()..].to_string();
                 }
                 value if value.starts_with("--output=") => {
                     output = Some(PathBuf::from(&value["--output=".len()..]));
+                }
+                value if value.starts_with("--features=") => {
+                    features.add(&value["--features=".len()..])?;
                 }
                 value if value.starts_with('-') => {
                     return Err(format!("unknown cpio option: {value}"));
@@ -78,6 +128,7 @@ impl CpioArgs {
             target,
             output,
             busybox,
+            features,
         })
     }
 }
@@ -96,7 +147,13 @@ pub(crate) fn run(args: Vec<String>) -> Result<()> {
 
 fn cpio(args: CpioArgs) -> Result<()> {
     let workspace_root = workspace_root()?;
-    let output = build_initrd(&workspace_root, &args.target, args.output, args.busybox)?;
+    let output = build_initrd(
+        &workspace_root,
+        &args.target,
+        args.output,
+        args.busybox,
+        &args.features,
+    )?;
     println!("wrote {}", output.display());
     Ok(())
 }
@@ -106,8 +163,9 @@ pub(super) fn build_initrd(
     target: &str,
     output: Option<PathBuf>,
     include_busybox: bool,
+    features: &FeatureSet,
 ) -> Result<PathBuf> {
-    build_release(workspace_root, target)?;
+    build_release(workspace_root, target, features)?;
 
     let target_dir = target_dir(workspace_root);
     let init = target_dir.join(target).join("release").join(INIT_BINARY);
@@ -124,17 +182,28 @@ pub(super) fn build_initrd(
     }
 
     let busybox = include_busybox
-        .then(|| build_busybox(&target_dir, target))
+        .then(|| build_busybox(&target_dir, target, features))
         .transpose()?;
     write_initrd(&init, busybox.as_ref(), &output)?;
     Ok(output)
 }
 
-fn build_release(workspace_root: &Path, target: &str) -> Result<()> {
+fn build_release(workspace_root: &Path, target: &str, features: &FeatureSet) -> Result<()> {
     let cargo = env::var_os("CARGO").unwrap_or_else(|| "cargo".into());
-    let status = Command::new(cargo)
-        .current_dir(workspace_root)
-        .args(["build", "--release", "--target", target, "-p", INIT_BINARY])
+    let mut command = Command::new(cargo);
+    command.current_dir(workspace_root).args([
+        "build",
+        "--release",
+        "--target",
+        target,
+        "-p",
+        INIT_BINARY,
+    ]);
+    if !features.is_empty() {
+        command.arg("--features").arg(features.cargo_value());
+    }
+
+    let status = command
         .status()
         .map_err(|err| format!("spawn cargo build: {err}"))?;
     if !status.success() {
@@ -148,7 +217,7 @@ struct BusyBoxInstall {
     binary: PathBuf,
 }
 
-fn build_busybox(target_dir: &Path, target: &str) -> Result<BusyBoxInstall> {
+fn build_busybox(target_dir: &Path, target: &str, features: &FeatureSet) -> Result<BusyBoxInstall> {
     let root = target_dir.join("busybox");
     let archive = root.join(format!("busybox-{BUSYBOX_VERSION}.tar.bz2"));
     let source_parent = root.join("src");
@@ -161,9 +230,15 @@ fn build_busybox(target_dir: &Path, target: &str) -> Result<BusyBoxInstall> {
 
     fs::create_dir_all(&build).map_err(|err| format!("create {}: {err}", build.display()))?;
     ensure_busybox_toolchain(&build, target)?;
-    run_busybox_make(&source, &build, target, &["allnoconfig"])?;
-    configure_busybox(&build.join(".config"))?;
-    run_busybox_make(&source, &build, target, &["oldconfig"])?;
+    run_busybox_make_quiet(
+        &source,
+        &build,
+        target,
+        &["allnoconfig"],
+        "make busybox allnoconfig",
+    )?;
+    configure_busybox(&build.join(".config"), features)?;
+    run_busybox_oldconfig(&source, &build, target)?;
     run_busybox_make(
         &source,
         &build,
@@ -270,7 +345,7 @@ fn ensure_busybox_source(archive: &Path, source_parent: &Path, source: &Path) ->
     }
 }
 
-fn configure_busybox(config: &Path) -> Result<()> {
+fn configure_busybox(config: &Path, features: &FeatureSet) -> Result<()> {
     const ENABLED: &[&str] = &[
         "STATIC",
         "FEATURE_INSTALLER",
@@ -393,6 +468,11 @@ fn configure_busybox(config: &Path) -> Result<()> {
     for name in ENABLED {
         set_kconfig_bool(&mut contents, name, true);
     }
+    if features.contains("qemu") {
+        for name in ["IFCONFIG", "FEATURE_IFCONFIG_STATUS"] {
+            set_kconfig_bool(&mut contents, name, true);
+        }
+    }
     for name in DISABLED {
         set_kconfig_bool(&mut contents, name, false);
     }
@@ -469,12 +549,89 @@ fn set_kconfig_int(contents: &mut String, name: &str, value: u32) {
     contents.push('\n');
 }
 
+fn validate_feature(feature: &str) -> Result<()> {
+    if feature
+        .chars()
+        .all(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '-' | '_' | '/'))
+    {
+        Ok(())
+    } else {
+        Err(format!("invalid feature name: {feature}"))
+    }
+}
+
 fn run_busybox_make(source: &Path, build: &Path, target: &str, args: &[&str]) -> Result<()> {
+    let mut command = busybox_make_command(source, build, target);
+    command.stdin(Stdio::null());
+    command.args(args);
+    run_command(command, "make busybox")
+}
+
+fn run_busybox_make_quiet(
+    source: &Path,
+    build: &Path,
+    target: &str,
+    args: &[&str],
+    action: &str,
+) -> Result<()> {
+    let mut command = busybox_make_command(source, build, target);
+    command
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .args(args);
+    let output = command
+        .output()
+        .map_err(|err| format!("spawn {action}: {err}"))?;
+    if output.status.success() {
+        Ok(())
+    } else {
+        Err(command_output_error(action, &output))
+    }
+}
+
+fn run_busybox_oldconfig(source: &Path, build: &Path, target: &str) -> Result<()> {
+    let mut command = busybox_make_command(source, build, target);
+    command
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .arg("oldconfig");
+
+    let mut child = command
+        .spawn()
+        .map_err(|err| format!("spawn make busybox oldconfig: {err}"))?;
+    if let Some(mut stdin) = child.stdin.take() {
+        if let Err(err) = stdin.write_all(&[b'\n'; 4096]) {
+            if err.kind() != std::io::ErrorKind::BrokenPipe {
+                return Err(format!("write busybox oldconfig defaults: {err}"));
+            }
+        }
+    }
+    let output = child
+        .wait_with_output()
+        .map_err(|err| format!("wait for busybox oldconfig: {err}"))?;
+    if output.status.success() {
+        Ok(())
+    } else {
+        Err(command_output_error("make busybox oldconfig", &output))
+    }
+}
+
+fn command_output_error(action: &str, output: &std::process::Output) -> String {
+    format!(
+        "{action} failed with {}\nstdout:\n{}\nstderr:\n{}",
+        output.status,
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    )
+}
+
+fn busybox_make_command(source: &Path, build: &Path, target: &str) -> Command {
     let mut command = Command::new(env::var_os("MAKE").unwrap_or_else(|| "make".into()));
     command
         .current_dir(source)
         .env("CROSS_COMPILE", busybox_cross_compile(target))
-        .stdin(Stdio::null())
         .arg(format!("O={}", build.display()))
         .arg({
             let mut value = OsString::from("CC=");
@@ -488,8 +645,7 @@ fn run_busybox_make(source: &Path, build: &Path, target: &str, args: &[&str]) ->
             value
         });
     }
-    command.args(args);
-    run_command(command, "make busybox")
+    command
 }
 
 fn ensure_busybox_toolchain(build: &Path, target: &str) -> Result<()> {
@@ -787,6 +943,6 @@ fn cpio_name(path: &Path) -> Result<String> {
 
 fn print_usage() {
     println!(
-        "usage: cargo xtask cpio [--target TRIPLE] [--output PATH] [--no-busybox]\n\ndefault target: {DEFAULT_TARGET}\ndefault output: target/{DEFAULT_INITRD}\nbusybox: official {BUSYBOX_VERSION} release, built statically unless --no-busybox is used"
+        "usage: cargo xtask cpio [--target TRIPLE] [--features FEATURES] [--output PATH] [--no-busybox]\n\ndefault target: {DEFAULT_TARGET}\ndefault output: target/{DEFAULT_INITRD}\nbusybox: official {BUSYBOX_VERSION} release, built statically unless --no-busybox is used"
     );
 }

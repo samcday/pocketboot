@@ -78,6 +78,24 @@ kernel build and writes `target/kernel/<vendor>/<device>/boot.img` by default.
 defaults to `Image.gz`. Android boot header v2 DTB sections, legacy QCDT vendor
 DT payloads and Samsung DTBH vendor DT payloads are supported.
 
+To boot under QEMU, run:
+
+```sh
+cargo xtask qemu ./linux
+```
+
+The QEMU initrd is built with the `qemu` Cargo feature, starts a USB/IP vUDC
+server in the guest, and forwards that server to `127.0.0.1:3240` on the host.
+In another shell, attach the guest USB gadget to the host before using
+`fastboot` or `adb`:
+
+```sh
+sudo modprobe vhci-hcd
+sudo usbip attach -r 127.0.0.1 -d usbip-vudc.0
+fastboot -i 0x1d6b devices
+adb devices
+```
+
 Planned features:
 
  * Touch-enabled boot menu
