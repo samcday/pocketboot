@@ -4,7 +4,10 @@ use std::{
     os::fd::{AsRawFd, FromRawFd},
 };
 
+use flate2::read::GzDecoder;
+
 const LINUX_REBOOT_CMD_KEXEC: libc::c_int = 0x45584543;
+const GZIP_MAGIC: [u8; 2] = [0x1f, 0x8b];
 #[cfg(target_arch = "aarch64")]
 const PAGE_SIZE: u64 = 4096;
 
@@ -38,7 +41,7 @@ impl KexecImage {
     }
 
     pub(crate) fn load(&self) -> io::Result<()> {
-        let kernel = read_payload(&self.kernel)?;
+        let kernel = maybe_decompress_kernel(read_payload(&self.kernel)?)?;
         let initrd = self.initrd.as_ref().map(read_payload).transpose()?;
         let dtb = match &self.dtb {
             Some(dtb) => {
@@ -92,6 +95,28 @@ fn read_payload(file: &File) -> io::Result<Vec<u8>> {
     Ok(data)
 }
 
+fn maybe_decompress_kernel(kernel: Vec<u8>) -> io::Result<Vec<u8>> {
+    if !kernel.starts_with(&GZIP_MAGIC) {
+        return Ok(kernel);
+    }
+
+    let compressed_len = kernel.len();
+    let mut decoder = GzDecoder::new(kernel.as_slice());
+    let mut decompressed = Vec::new();
+    decoder.read_to_end(&mut decompressed).map_err(|err| {
+        io::Error::new(
+            err.kind(),
+            format!("decompress gzipped kernel payload: {err}"),
+        )
+    })?;
+    tracing::info!(
+        compressed_bytes = compressed_len,
+        bytes = decompressed.len(),
+        "decompressed gzipped kernel payload"
+    );
+    Ok(decompressed)
+}
+
 fn read_current_dtb() -> io::Result<Vec<u8>> {
     fs::read("/sys/firmware/fdt").map_err(|err| {
         io::Error::new(
@@ -99,6 +124,30 @@ fn read_current_dtb() -> io::Result<Vec<u8>> {
             format!("no DTB supplied and /sys/firmware/fdt could not be read: {err}"),
         )
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use flate2::{Compression, write::GzEncoder};
+    use std::io::Write;
+
+    #[test]
+    fn decompresses_gzipped_kernel_payload() {
+        let payload = b"raw arm64 image bytes";
+        let mut encoder = GzEncoder::new(Vec::new(), Compression::default());
+        encoder.write_all(payload).unwrap();
+        let compressed = encoder.finish().unwrap();
+
+        assert_eq!(maybe_decompress_kernel(compressed).unwrap(), payload);
+    }
+
+    #[test]
+    fn leaves_plain_kernel_payload_unchanged() {
+        let payload = b"not gzipped".to_vec();
+
+        assert_eq!(maybe_decompress_kernel(payload.clone()).unwrap(), payload);
+    }
 }
 
 #[cfg(target_arch = "aarch64")]
