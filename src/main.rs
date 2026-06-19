@@ -33,37 +33,21 @@ const FDT_SERIALNO_PATHS: [&str; 1] = [
     "/sys/firmware/devicetree/base/serial-number",
 ];
 const DEFAULT_SERIALNO: &str = "0001";
-fn main() {
-    let code = match run() {
-        Ok(()) => 0,
-        Err(err) => {
-            kmsg::init_tracing();
-            tracing::error!(error = %err, "fatal error");
-            1
-        }
-    };
 
-    std::process::exit(code);
-}
-
-fn run() -> Result<()> {
-    kmsg::init_tracing();
-    tracing::info!("starting up");
-
+fn main() -> Result<()> {
     if unsafe { libc::getpid() } != 1 {
         return Err("pocketboot must run as PID 1 (/init)".to_string());
     }
 
     mount_core_vfs()?;
-    tracing::debug!("mounted core VFS");
 
-    let cmdline = match cmdline::KernelCommandLine::read(PROC_CMDLINE) {
-        Ok(cmdline) => cmdline,
-        Err(err) => {
-            tracing::warn!(error = ?err, "failed to read kernel command line");
-            cmdline::KernelCommandLine::default()
-        }
-    };
+    let cmdline = cmdline::KernelCommandLine::read(PROC_CMDLINE).unwrap_or_else(|err| {
+        println!("pocketboot: failed to read kernel command line: {}", err);
+        cmdline::KernelCommandLine::default()
+    });
+
+    kmsg::init_tracing(&cmdline);
+    tracing::info!("starting up");
 
     let serialno = detect_serial(&cmdline);
     tracing::info!(serialno = %serialno, "selected device serialno");

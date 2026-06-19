@@ -6,17 +6,25 @@ use std::{
 };
 
 use tracing_subscriber::{filter::LevelFilter, fmt::MakeWriter, prelude::*};
+use crate::cmdline::KernelCommandLine;
 
 const KMSG: &str = "/dev/kmsg";
 
 static TRACING: Once = Once::new();
 
-const CMDLINE: &str = "/proc/cmdline";
-const LOG_PARAM: &str = "pocketboot.log=";
+const CMDLINE_PARAM: &str = "pocketboot.log";
 
-pub(crate) fn init_tracing() {
+pub(crate) fn init_tracing(cmdline: &KernelCommandLine) {
     TRACING.call_once(|| {
-        let level = configured_level();
+        let level = match cmdline.value(CMDLINE_PARAM).unwrap_or("warn") {
+            "trace" => LevelFilter::TRACE,
+            "debug" => LevelFilter::DEBUG,
+            "info" => LevelFilter::INFO,
+            "warn" | "warning" => LevelFilter::WARN,
+            "error" => LevelFilter::ERROR,
+            "off" => LevelFilter::OFF,
+            _ => LevelFilter::INFO,
+        };
         let layer = tracing_subscriber::fmt::layer()
             .without_time()
             .with_level(true)
@@ -28,32 +36,6 @@ pub(crate) fn init_tracing() {
             .with(layer)
             .try_init();
     });
-}
-
-fn configured_level() -> LevelFilter {
-    let Some(value) = cmdline_log_level() else {
-        return LevelFilter::WARN;
-    };
-
-    match value.as_str() {
-        "trace" => LevelFilter::TRACE,
-        "debug" => LevelFilter::DEBUG,
-        "info" => LevelFilter::INFO,
-        "warn" | "warning" => LevelFilter::WARN,
-        "error" => LevelFilter::ERROR,
-        "off" => LevelFilter::OFF,
-        _ => LevelFilter::INFO,
-    }
-}
-
-fn cmdline_log_level() -> Option<String> {
-    let cmdline = std::fs::read_to_string(CMDLINE).ok()?;
-    Some(
-        cmdline
-            .split_whitespace()
-            .find_map(|arg| arg.strip_prefix(LOG_PARAM))?
-            .to_ascii_lowercase(),
-    )
 }
 
 struct KmsgMakeWriter;
