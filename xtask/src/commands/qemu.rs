@@ -7,12 +7,9 @@ use std::{
 
 use crate::Result;
 
-use super::{
-    FeatureSet, KERNEL_ARCH,
-    cpio::{DEFAULT_TARGET, build_initrd},
-    ensure_file, kernel_tree, make_command, parallel_jobs, run_command, target_dir, workspace_root,
-};
+use super::{ensure_file, kernel, kernel_tree, run_command, target_dir, workspace_root};
 
+const QEMU_DEVICE: &str = "qemu/aarch64-virt";
 const QEMU_TARGET: &str = "aarch64-virt";
 const QEMU_DISK_SIZE: u64 = 64 * 1024 * 1024;
 
@@ -79,64 +76,19 @@ fn qemu(args: QemuArgs) -> Result<()> {
     let workspace_root = workspace_root()?;
     let kernel_tree = kernel_tree(&args.kernel_tree)?;
     let target_dir = target_dir(&workspace_root);
-    let out_dir = target_dir.join("kernel").join("qemu").join(QEMU_TARGET);
-    fs::create_dir_all(&out_dir).map_err(|err| format!("create {}: {err}", out_dir.display()))?;
-
-    let features = FeatureSet::qemu();
-    let initrd = build_initrd(
-        &workspace_root,
-        DEFAULT_TARGET,
-        Some(target_dir.join("qemu").join("pocketboot-initrd.cpio")),
-        true,
-        &features,
-    )?;
-    println!("initrd {}", initrd.display());
-
-    let image = build_qemu_kernel(&workspace_root, &kernel_tree, &out_dir)?;
+    let build = kernel::build_device_kernel_id(&workspace_root, &kernel_tree, QEMU_DEVICE, None)?;
     let disk = qemu_disk(&target_dir)?;
 
-    println!("image {}", image.display());
+    println!("initrd {}", build.initrd.display());
+    println!("image {}", build.image.display());
     println!("disk {}", disk.display());
-    println!("config {}", out_dir.join(".config").display());
+    println!("config {}", build.config.display());
 
     if args.build_only {
         return Ok(());
     }
 
-    run_qemu(&workspace_root, &image, &initrd, &disk, &args.qemu_args)
-}
-
-fn build_qemu_kernel(workspace_root: &Path, kernel_tree: &Path, out_dir: &Path) -> Result<PathBuf> {
-    let common_config = workspace_root.join("configs/pocketboot.config");
-    let qemu_config = workspace_root
-        .join("configs/qemu")
-        .join(format!("{QEMU_TARGET}.config"));
-    ensure_file(&common_config, "common pocketboot config")?;
-    ensure_file(&qemu_config, "QEMU config")?;
-
-    let merge_config = kernel_tree.join("scripts/kconfig/merge_config.sh");
-    ensure_file(&merge_config, "merge_config.sh")?;
-    let mut merge = Command::new(&merge_config);
-    merge
-        .current_dir(kernel_tree)
-        .env("ARCH", KERNEL_ARCH)
-        .args(["-s", "-n", "-O"])
-        .arg(out_dir)
-        .arg(&common_config)
-        .arg(&qemu_config);
-    run_command(merge, "merge QEMU kernel config")?;
-
-    let mut olddefconfig = make_command(kernel_tree, out_dir);
-    olddefconfig.arg("olddefconfig");
-    run_command(olddefconfig, "make olddefconfig")?;
-
-    let mut build = make_command(kernel_tree, out_dir);
-    build.arg(format!("-j{}", parallel_jobs())).arg("Image");
-    run_command(build, "make QEMU kernel image")?;
-
-    let image = out_dir.join("arch/arm64/boot/Image");
-    ensure_file(&image, "QEMU kernel image")?;
-    Ok(image)
+    run_qemu(&workspace_root, &build.image, &disk, &args.qemu_args)
 }
 
 fn qemu_disk(target_dir: &Path) -> Result<PathBuf> {
@@ -163,13 +115,7 @@ fn qemu_disk(target_dir: &Path) -> Result<PathBuf> {
     Ok(disk)
 }
 
-fn run_qemu(
-    workspace_root: &Path,
-    image: &Path,
-    initrd: &Path,
-    disk: &Path,
-    extra_args: &[String],
-) -> Result<()> {
+fn run_qemu(workspace_root: &Path, image: &Path, disk: &Path, extra_args: &[String]) -> Result<()> {
     let qemu = env::var_os("QEMU").unwrap_or_else(|| "qemu-system-aarch64".into());
     let drive = format!("if=none,id=pocketboot,format=raw,file={}", disk.display());
     let append =
@@ -197,8 +143,6 @@ fn run_qemu(
             "-kernel",
         ])
         .arg(image)
-        .arg("-initrd")
-        .arg(initrd)
         .args(["-append", append, "-drive"])
         .arg(drive)
         .args(["-device", "virtio-blk-device,drive=pocketboot"])
@@ -210,6 +154,6 @@ fn run_qemu(
 
 fn print_usage() {
     println!(
-        "usage: cargo xtask qemu [--build-only] <kernel-tree> [-- QEMU-ARG...]\n\nexample: cargo xtask qemu ./linux\n\nbuilds: target/kernel/qemu/{QEMU_TARGET}/arch/arm64/boot/Image\nruns: qemu-system-aarch64 -machine virt -nographic"
+        "usage: cargo xtask qemu [--build-only] <kernel-tree> [-- QEMU-ARG...]\n\nexample: cargo xtask qemu ./linux\n\nbuilds: target/kernel/qemu/{QEMU_TARGET}/arch/arm64/boot/Image with an embedded initramfs\nruns: qemu-system-aarch64 -machine virt -nographic"
     );
 }

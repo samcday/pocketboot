@@ -61,9 +61,10 @@ cargo xtask kernel exynos/exynos7870-j7xelte ~/tmp/linux-pocketboot-exynos7870
 ```
 
 The kernel build uses `target/kernel/<vendor>/<device>` as `O=`, embeds a
-pocketboot initramfs, and builds `Image.gz` plus the inferred DTB. This also
-leaves the uncompressed `Image` prerequisite in the build output. By default it
-builds a fresh initramfs; pass `--initrd PATH` to embed an existing cpio archive.
+per-device pocketboot initramfs from `target/cpio/<vendor>/<device>`, and builds
+`Image.gz` plus the inferred DTB by default. This also leaves the uncompressed
+`Image` prerequisite in the build output. Pass `--initrd PATH` to embed an
+existing cpio archive.
 
 Once the kernel is built, package those artifacts as an Android boot image:
 
@@ -86,10 +87,10 @@ To boot under QEMU, run:
 cargo xtask qemu ./linux
 ```
 
-The QEMU initrd is built with the `qemu` Cargo feature, starts a USB/IP vUDC
-server in the guest, and forwards that server to `127.0.0.1:3240` on the host.
-In another shell, attach the guest USB gadget to the host before using
-`fastboot` or `adb`:
+This builds the `qemu/aarch64-virt` kernel target with its per-device embedded
+initramfs. The guest starts a USB/IP vUDC server and forwards that server to
+`127.0.0.1:3240` on the host. In another shell, attach the guest USB gadget to
+the host before using `fastboot` or `adb`:
 
 ```sh
 sudo modprobe vhci-hcd

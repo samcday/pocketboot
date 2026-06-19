@@ -29,12 +29,6 @@ pub(super) struct FeatureSet {
 }
 
 impl FeatureSet {
-    pub(super) fn qemu() -> Self {
-        Self {
-            values: vec!["qemu".to_string()],
-        }
-    }
-
     pub(super) fn add(&mut self, value: &str) -> Result<()> {
         for feature in value.split(|ch: char| ch == ',' || ch.is_ascii_whitespace()) {
             if feature.is_empty() {

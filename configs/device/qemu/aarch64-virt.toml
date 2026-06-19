@@ -1,0 +1,6 @@
+[kernel]
+image = "Image"
+dtb = false
+
+[cpio]
+features = ["qemu"]

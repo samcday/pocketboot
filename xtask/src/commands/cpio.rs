@@ -172,7 +172,8 @@ fn build_release(workspace_root: &Path, target: &str, features: &FeatureSet) -> 
 }
 
 fn write_initrd(init: &Path, busybox: Option<&BusyBoxInstall>, output: &Path) -> Result<()> {
-    let mut writer = NewcWriter::create(output)?;
+    let tmp = output.with_extension("cpio.tmp");
+    let mut writer = NewcWriter::create(&tmp)?;
     writer.dir("dev", 0o755)?;
     writer.char_dev("dev/console", 0o600, 5, 1)?;
     writer.char_dev("dev/kmsg", 0o600, 1, 11)?;
@@ -193,7 +194,25 @@ fn write_initrd(init: &Path, busybox: Option<&BusyBoxInstall>, output: &Path) ->
         );
     }
     writer.file("init", init, 0o755)?;
-    writer.finish()
+    writer.finish()?;
+
+    if same_contents(&tmp, output)? {
+        fs::remove_file(&tmp).map_err(|err| format!("remove {}: {err}", tmp.display()))?;
+    } else {
+        fs::rename(&tmp, output)
+            .map_err(|err| format!("rename {} to {}: {err}", tmp.display(), output.display()))?;
+    }
+    Ok(())
+}
+
+fn same_contents(left: &Path, right: &Path) -> Result<bool> {
+    let left = fs::read(left).map_err(|err| format!("read {}: {err}", left.display()))?;
+    let right = match fs::read(right) {
+        Ok(right) => right,
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => return Ok(false),
+        Err(err) => return Err(format!("read {}: {err}", right.display())),
+    };
+    Ok(left == right)
 }
 
 struct NewcWriter {
