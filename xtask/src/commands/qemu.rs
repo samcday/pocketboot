@@ -8,8 +8,8 @@ use std::{
 use crate::Result;
 
 use super::{
-    KERNEL_ARCH,
-    cpio::{DEFAULT_TARGET, FeatureSet, build_initrd},
+    FeatureSet, KERNEL_ARCH,
+    cpio::{DEFAULT_TARGET, build_initrd},
     ensure_file, kernel_tree, make_command, parallel_jobs, run_command, target_dir, workspace_root,
 };
 

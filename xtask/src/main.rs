@@ -17,6 +17,7 @@ fn main() -> ExitCode {
 fn run() -> Result<()> {
     let mut args = env::args().skip(1);
     match args.next().as_deref() {
+        Some("busybox") => commands::busybox::run(args.collect()),
         Some("cpio") => commands::cpio::run(args.collect()),
         Some("kernel") => commands::kernel::run(args.collect()),
         Some("bootimg") => commands::bootimg::run(args.collect()),

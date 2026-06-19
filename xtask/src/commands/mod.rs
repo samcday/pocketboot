@@ -1,4 +1,5 @@
 pub(crate) mod bootimg;
+pub(crate) mod busybox;
 pub(crate) mod cpio;
 pub(crate) mod kernel;
 pub(crate) mod qemu;
@@ -18,8 +19,61 @@ const KERNEL_ARCH: &str = "arm64";
 
 pub(crate) fn print_usage() {
     println!(
-        "usage: cargo xtask <command>\n\ncommands:\n  cpio      build pocketboot and create an initrd cpio\n  kernel    build a pocketboot kernel image for one device\n  bootimg   package an already-built pocketboot kernel as boot.img\n  qemu      build and boot pocketboot under qemu-system-aarch64"
+        "usage: cargo xtask <command>\n\ncommands:\n  busybox   build BusyBox for initrd use\n  cpio      build pocketboot and create an initrd cpio\n  kernel    build a pocketboot kernel image for one device\n  bootimg   package an already-built pocketboot kernel as boot.img\n  qemu      build and boot pocketboot under qemu-system-aarch64"
     );
+}
+
+#[derive(Clone, Debug, Default)]
+pub(super) struct FeatureSet {
+    values: Vec<String>,
+}
+
+impl FeatureSet {
+    pub(super) fn qemu() -> Self {
+        Self {
+            values: vec!["qemu".to_string()],
+        }
+    }
+
+    pub(super) fn add(&mut self, value: &str) -> Result<()> {
+        for feature in value.split(|ch: char| ch == ',' || ch.is_ascii_whitespace()) {
+            if feature.is_empty() {
+                continue;
+            }
+            validate_feature(feature)?;
+            if !self.values.iter().any(|existing| existing == feature) {
+                self.values.push(feature.to_string());
+            }
+        }
+        Ok(())
+    }
+
+    pub(super) fn is_empty(&self) -> bool {
+        self.values.is_empty()
+    }
+
+    pub(super) fn contains(&self, feature: &str) -> bool {
+        self.values.iter().any(|value| value == feature)
+    }
+
+    pub(super) fn cargo_value(&self) -> String {
+        self.values.join(",")
+    }
+
+    pub(super) fn values(&self) -> &[String] {
+        &self.values
+    }
+}
+
+fn validate_feature(feature: &str) -> Result<()> {
+    if feature
+        .chars()
+        .all(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '-' | '_' | '/'))
+    {
+        Ok(())
+    } else {
+        Err(format!("invalid feature name: {feature}"))
+    }
 }
 
 #[derive(Debug)]

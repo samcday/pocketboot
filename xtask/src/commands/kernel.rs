@@ -3,8 +3,8 @@ use std::{fs, path::PathBuf, process::Command};
 use crate::Result;
 
 use super::{
-    KERNEL_ARCH, KernelDevice, canonical_file,
-    cpio::{DEFAULT_INITRD, DEFAULT_TARGET, FeatureSet, build_initrd},
+    FeatureSet, KERNEL_ARCH, KernelDevice, canonical_file,
+    cpio::{DEFAULT_INITRD, DEFAULT_TARGET, build_initrd},
     ensure_file, kconfig_string, kernel_tree, make_command, parallel_jobs, run_command, target_dir,
     workspace_root,
 };
