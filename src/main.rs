@@ -9,6 +9,7 @@ use std::{
 mod ab_slots;
 mod adb;
 mod battery;
+mod boot_state;
 mod bootflow;
 mod cmdline;
 mod fastboot;
@@ -48,6 +49,19 @@ fn main() -> Result<()> {
 
     kmsg::init_tracing(&cmdline);
     tracing::info!("starting up");
+
+    let boot_state = boot_state::detect();
+    let boot_state_source = boot_state.source.as_ref();
+    tracing::info!(
+        reboot_mode = ?boot_state.reboot_mode,
+        hard_reset = ?boot_state.hard_reset,
+        power_key = ?boot_state.power_key,
+        charger = ?boot_state.charger,
+        warm_reset = ?boot_state.warm_reset,
+        source_backend = boot_state_source.map(|source| source.backend).unwrap_or("none"),
+        source_detail = boot_state_source.map(|source| source.detail.as_str()).unwrap_or(""),
+        "detected boot state"
+    );
 
     let serialno = detect_serial(&cmdline);
     tracing::info!(serialno = %serialno, "selected device serialno");
