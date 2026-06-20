@@ -1,5 +1,6 @@
 use std::{
     cmp::Ordering,
+    collections::HashMap,
     ffi::CString,
     fs::{self, File, OpenOptions},
     io::{self, Seek, SeekFrom},
@@ -24,6 +25,7 @@ const MBR_PARTITION_TABLE_OFFSET: usize = 0x1be;
 const MBR_PARTITION_ENTRY_SIZE: usize = 16;
 const MBR_PRIMARY_PARTITIONS: usize = 4;
 const GPT_PROTECTIVE_MBR_TYPE: u8 = 0xee;
+const MBR_XBOOTLDR_TYPE: u8 = 0xea;
 const DEFAULT_LOGICAL_BLOCK_SIZE: u64 = 512;
 const MS_NOSYMFOLLOW: libc::c_ulong = 256;
 const USERDATA_PARTNAME: &str = "userdata";
@@ -34,6 +36,27 @@ const LO_FLAGS_READ_ONLY: u32 = 1;
 const LO_FLAGS_AUTOCLEAR: u32 = 4;
 const LO_NAME_SIZE: usize = 64;
 const LO_KEY_SIZE: usize = 32;
+
+const DEFAULT_BLS_DIR: &str = "loader/entries";
+const GRUB_CFG_PATHS: [&str; 3] = [
+    "grub2/grub.cfg",
+    "EFI/fedora/grub.cfg",
+    "efi/EFI/fedora/grub.cfg",
+];
+const GRUB_ENV_PATHS: [&str; 3] = [
+    "grub2/grubenv",
+    "EFI/fedora/grubenv",
+    "efi/EFI/fedora/grubenv",
+];
+const GRUB_VARIABLE_KEYS: [&str; 6] = [
+    "blsdir",
+    "kernelopts",
+    "next_entry",
+    "saved_entry",
+    "tuned_initrd",
+    "tuned_params",
+];
+const GRUB_OPTIONAL_EMPTY_VARIABLES: [&str; 3] = ["grub_users", "tuned_initrd", "tuned_params"];
 
 const ESP_GUID: Guid = Guid([
     0x28, 0x73, 0x2a, 0xc1, 0x1f, 0xf8, 0xd2, 0x11, 0xba, 0x4b, 0x00, 0xa0, 0xc9, 0x3e, 0xc9, 0x3b,
@@ -52,6 +75,7 @@ pub(crate) struct BootEntry {
     pub(crate) role: BootPartitionRole,
     pub(crate) disk: String,
     pub(crate) partition: String,
+    pub(crate) preferred: bool,
     linux: PathBuf,
     initrds: Vec<PathBuf>,
     dtb: Option<PathBuf>,
@@ -136,7 +160,8 @@ pub(crate) fn discover() -> io::Result<Vec<BootEntry>> {
                     fstype = mount.fstype,
                     "mounted boot partition candidate"
                 );
-                entries.extend(scan_bls_entries(&partition, &mount));
+                let context = BlsContext::from_boot_root(&mount.root);
+                entries.extend(scan_bls_entries(&partition, &mount, &context));
                 entries.extend(scan_extlinux_entries(&partition, &mount));
             }
             Err(err) => {
@@ -198,6 +223,67 @@ struct MountedPartition {
     fstype: &'static str,
 }
 
+#[derive(Clone, Debug, Default)]
+struct BlsContext {
+    variables: HashMap<String, String>,
+}
+
+impl BlsContext {
+    fn from_boot_root(root: &Path) -> Self {
+        let mut context = Self::default();
+        for relative in GRUB_CFG_PATHS {
+            context.load_assignments(root, relative, parse_grub_set_assignments);
+        }
+        for relative in GRUB_ENV_PATHS {
+            context.load_assignments(root, relative, parse_grubenv_assignments);
+        }
+        context
+    }
+
+    fn load_assignments(
+        &mut self,
+        root: &Path,
+        relative: &str,
+        parse: fn(&str) -> Vec<(String, String)>,
+    ) {
+        let path = root.join(relative);
+        let Ok(text) = fs::read_to_string(&path) else {
+            return;
+        };
+        for (key, value) in parse(&text) {
+            if !is_grub_variable_key(&key) {
+                continue;
+            }
+            let value = self.expand(&value);
+            self.variables.insert(key, value);
+        }
+        tracing::debug!(path = %path.display(), "loaded GRUB boot variables");
+    }
+
+    fn entries_dir(&self, root: &Path) -> io::Result<PathBuf> {
+        let blsdir = self
+            .variables
+            .get("blsdir")
+            .map(String::as_str)
+            .filter(|value| !value.is_empty())
+            .unwrap_or(DEFAULT_BLS_DIR);
+        resolve_boot_path(root, &self.expand(blsdir))
+    }
+
+    fn preferred_entry(&self) -> Option<&str> {
+        self.variables
+            .get("next_entry")
+            .filter(|value| !value.is_empty())
+            .or_else(|| self.variables.get("saved_entry"))
+            .map(String::as_str)
+            .filter(|value| !value.is_empty())
+    }
+
+    fn expand(&self, value: &str) -> String {
+        expand_grub_vars(value, &self.variables)
+    }
+}
+
 fn discover_boot_partitions() -> io::Result<Vec<BootPartitionCandidate>> {
     let mut candidates = Vec::new();
     for disk in local_disk_candidates()? {
@@ -205,6 +291,12 @@ fn discover_boot_partitions() -> io::Result<Vec<BootPartitionCandidate>> {
             Ok(partitions) => candidates.extend(partitions),
             Err(err) => {
                 tracing::debug!(disk = %disk.name, error = ?err, "disk is not usable GPT boot media");
+            }
+        }
+        match mbr_boot_partitions(&disk) {
+            Ok(partitions) => candidates.extend(partitions),
+            Err(err) => {
+                tracing::debug!(disk = %disk.name, error = ?err, "disk is not usable MBR boot media");
             }
         }
         match nested_boot_partitions(&disk) {
@@ -375,6 +467,92 @@ fn gpt_boot_partitions(disk: &DiskCandidate) -> io::Result<Vec<BootPartitionCand
     }
 
     Ok(candidates)
+}
+
+fn mbr_boot_partitions(disk: &DiskCandidate) -> io::Result<Vec<BootPartitionCandidate>> {
+    let file = File::open(&disk.dev_path).map_err(|err| {
+        io::Error::new(
+            err.kind(),
+            format!("open {}: {err}", disk.dev_path.display()),
+        )
+    })?;
+    let mut mbr = [0; 512];
+    read_exact_at(&file, &mut mbr, 0)?;
+    let entries = parse_mbr_boot_entries(&mbr, disk.sectors_512)?;
+
+    let mut candidates = Vec::new();
+    for entry in entries {
+        let Some(partition) = partition_name_for_partno(&disk.sysfs_path, entry.partno)? else {
+            tracing::debug!(
+                disk = %disk.name,
+                partno = entry.partno,
+                role = BootPartitionRole::Xbootldr.label(),
+                "kernel partition device is missing for MBR boot partition"
+            );
+            continue;
+        };
+
+        candidates.push(BootPartitionCandidate {
+            dev_path: Path::new(DEV).join(&partition),
+            disk: disk.name.clone(),
+            partition,
+            partno: entry.partno,
+            role: BootPartitionRole::Xbootldr,
+            removable: disk.removable,
+            _loop_device: None,
+        });
+    }
+
+    Ok(candidates)
+}
+
+#[derive(Clone, Copy, Debug)]
+struct MbrBootEntry {
+    partno: u32,
+}
+
+fn parse_mbr_boot_entries(raw: &[u8], disk_sectors_512: u64) -> io::Result<Vec<MbrBootEntry>> {
+    if raw.len() < 512 || raw[510..512] != MBR_SIGNATURE {
+        return Err(invalid_data("missing MBR signature"));
+    }
+
+    let mut entries = Vec::new();
+    for index in 0..MBR_PRIMARY_PARTITIONS {
+        let offset = MBR_PARTITION_TABLE_OFFSET + index * MBR_PARTITION_ENTRY_SIZE;
+        let entry = &raw[offset..offset + MBR_PARTITION_ENTRY_SIZE];
+        if entry[4] != MBR_XBOOTLDR_TYPE {
+            continue;
+        }
+
+        let start_lba = u32::from_le_bytes([entry[8], entry[9], entry[10], entry[11]]) as u64;
+        let sector_count = u32::from_le_bytes([entry[12], entry[13], entry[14], entry[15]]) as u64;
+        if start_lba == 0 || sector_count == 0 {
+            tracing::debug!(
+                partno = index + 1,
+                "skipping empty MBR boot partition entry"
+            );
+            continue;
+        }
+        let end_lba = start_lba
+            .checked_add(sector_count - 1)
+            .ok_or_else(|| invalid_data("MBR boot partition end LBA overflows"))?;
+        if disk_sectors_512 != 0 && end_lba >= disk_sectors_512 {
+            tracing::debug!(
+                partno = index + 1,
+                start_lba,
+                sector_count,
+                disk_sectors_512,
+                "skipping MBR boot partition entry outside disk"
+            );
+            continue;
+        }
+
+        entries.push(MbrBootEntry {
+            partno: (index + 1) as u32,
+        });
+    }
+
+    Ok(entries)
 }
 
 #[derive(Clone, Debug)]
@@ -784,8 +962,13 @@ fn mount_partition(candidate: &BootPartitionCandidate) -> io::Result<MountedPart
     ));
     fs::create_dir_all(&root)?;
 
+    let fstypes: &[&'static str] = match candidate.role {
+        BootPartitionRole::Esp => &["vfat"],
+        BootPartitionRole::Xbootldr | BootPartitionRole::Nested => &["ext4", "ext2", "vfat"],
+    };
+
     let mut last_error = None;
-    for fstype in ["vfat", "ext4", "ext2"] {
+    for &fstype in fstypes {
         match mount_fs(&candidate.dev_path, &root, fstype) {
             Ok(()) => return Ok(MountedPartition { root, fstype }),
             Err(err) => {
@@ -832,8 +1015,19 @@ fn mount_fs(source: &Path, target: &Path, fstype: &'static str) -> io::Result<()
 fn scan_bls_entries(
     partition: &BootPartitionCandidate,
     mount: &MountedPartition,
+    context: &BlsContext,
 ) -> Vec<BootEntry> {
-    let entries_dir = mount.root.join("loader/entries");
+    let entries_dir = match context.entries_dir(&mount.root) {
+        Ok(entries_dir) => entries_dir,
+        Err(err) => {
+            tracing::warn!(
+                mount = %mount.root.display(),
+                error = ?err,
+                "invalid BLS entries directory"
+            );
+            return Vec::new();
+        }
+    };
     let Ok(entries) = fs::read_dir(&entries_dir) else {
         tracing::debug!(path = %entries_dir.display(), "BLS entries directory not found");
         return Vec::new();
@@ -849,7 +1043,7 @@ fn scan_bls_entries(
             continue;
         }
 
-        match parse_bls_file(partition, &mount.root, &path) {
+        match parse_bls_file(partition, &mount.root, &path, context) {
             Ok(Some(boot_entry)) => boot_entries.push(boot_entry),
             Ok(None) => {}
             Err(err) => {
@@ -956,6 +1150,7 @@ fn extlinux_boot_entry(
         role: partition.role,
         disk: partition.disk.clone(),
         partition: partition.partition.clone(),
+        preferred: is_default,
         linux,
         initrds,
         dtb,
@@ -1069,6 +1264,7 @@ fn parse_bls_file(
     partition: &BootPartitionCandidate,
     root: &Path,
     source: &Path,
+    context: &BlsContext,
 ) -> io::Result<Option<BootEntry>> {
     let text = fs::read_to_string(source).map_err(|err| {
         io::Error::new(
@@ -1091,15 +1287,20 @@ fn parse_bls_file(
         tracing::debug!(path = %source.display(), "skipping BLS entry without linux payload");
         return Ok(None);
     };
-    let linux = resolve_boot_path(root, linux)?;
+    let linux = context.expand(linux);
+    let linux = resolve_boot_path(root, &linux)?;
     if !linux.is_file() {
         tracing::warn!(path = %source.display(), linux = %linux.display(), "BLS linux payload is missing");
         return Ok(None);
     }
 
     let mut initrds = Vec::new();
-    for initrd in &bls.initrds {
-        let path = resolve_boot_path(root, initrd)?;
+    for initrd in bls
+        .initrds
+        .iter()
+        .flat_map(|value| split_bls_words(&context.expand(value)))
+    {
+        let path = resolve_boot_path(root, &initrd)?;
         if !path.is_file() {
             tracing::warn!(source = %source.display(), initrd = %path.display(), "BLS initrd payload is missing");
             return Ok(None);
@@ -1111,6 +1312,15 @@ fn parse_bls_file(
         .file_name()
         .map(|name| name.to_string_lossy().into_owned())
         .unwrap_or_else(|| source.display().to_string());
+    let preferred_entry = context.preferred_entry();
+    let preferred =
+        preferred_entry.is_some_and(|preferred| boot_entry_id_matches(&filename, preferred));
+    let options = bls
+        .options
+        .iter()
+        .map(|value| context.expand(value).trim().to_string())
+        .filter(|value| !value.is_empty())
+        .collect();
 
     Ok(Some(BootEntry {
         id: filename,
@@ -1121,11 +1331,12 @@ fn parse_bls_file(
         role: partition.role,
         disk: partition.disk.clone(),
         partition: partition.partition.clone(),
+        preferred,
         linux,
         initrds,
         dtb: None,
-        options: bls.options,
-        boot_order: 0,
+        options,
+        boot_order: u32::from(preferred_entry.is_some() && !preferred),
     }))
 }
 
@@ -1172,6 +1383,194 @@ impl BlsSnippet {
         }
         snippet
     }
+}
+
+fn parse_grubenv_assignments(text: &str) -> Vec<(String, String)> {
+    text.lines()
+        .filter_map(|line| {
+            let line = line.trim();
+            if line.is_empty() || line.starts_with('#') {
+                return None;
+            }
+            let (key, value) = line.split_once('=')?;
+            let key = key.trim();
+            if !is_grub_identifier(key) {
+                return None;
+            }
+            Some((key.to_string(), value.trim().to_string()))
+        })
+        .collect()
+}
+
+fn parse_grub_set_assignments(text: &str) -> Vec<(String, String)> {
+    text.lines()
+        .filter_map(|line| {
+            let line = line.trim();
+            let rest = line.strip_prefix("set")?;
+            if !rest.starts_with(char::is_whitespace) {
+                return None;
+            }
+            parse_key_value_assignment(rest.trim())
+        })
+        .collect()
+}
+
+fn parse_key_value_assignment(line: &str) -> Option<(String, String)> {
+    if line.is_empty() || line.starts_with('#') {
+        return None;
+    }
+
+    let (key, value) = line.split_once('=')?;
+    let key = key.trim();
+    if !is_grub_identifier(key) {
+        return None;
+    }
+    Some((key.to_string(), parse_grub_value(value.trim())))
+}
+
+fn parse_grub_value(value: &str) -> String {
+    if value.is_empty() {
+        return String::new();
+    }
+
+    let mut chars = value.chars();
+    let Some(quote @ ('\'' | '"')) = chars.next() else {
+        return value
+            .split_whitespace()
+            .next()
+            .unwrap_or_default()
+            .to_string();
+    };
+
+    let mut parsed = String::new();
+    let mut escaped = false;
+    for ch in chars {
+        if escaped {
+            parsed.push(ch);
+            escaped = false;
+            continue;
+        }
+        if ch == '\\' {
+            escaped = true;
+            continue;
+        }
+        if ch == quote {
+            break;
+        }
+        parsed.push(ch);
+    }
+    parsed
+}
+
+fn is_grub_variable_key(key: &str) -> bool {
+    GRUB_VARIABLE_KEYS.contains(&key)
+}
+
+fn is_grub_identifier(value: &str) -> bool {
+    let mut bytes = value.bytes();
+    let Some(first) = bytes.next() else {
+        return false;
+    };
+    (first.is_ascii_alphabetic() || first == b'_')
+        && bytes.all(|byte| byte.is_ascii_alphanumeric() || byte == b'_')
+}
+
+fn expand_grub_vars(value: &str, variables: &HashMap<String, String>) -> String {
+    let mut expanded = String::with_capacity(value.len());
+    let mut chars = value.char_indices().peekable();
+    while let Some((_, ch)) = chars.next() {
+        if ch != '$' {
+            expanded.push(ch);
+            continue;
+        }
+
+        let Some((var_start, next)) = chars.peek().copied() else {
+            expanded.push('$');
+            continue;
+        };
+        if next == '{' {
+            chars.next();
+            let name_start = var_start + next.len_utf8();
+            let mut name_end = None;
+            while let Some((index, ch)) = chars.peek().copied() {
+                if ch == '}' {
+                    name_end = Some(index);
+                    chars.next();
+                    break;
+                }
+                chars.next();
+            }
+            let Some(name_end) = name_end else {
+                expanded.push_str(&value[var_start - 1..]);
+                break;
+            };
+            let name = &value[name_start..name_end];
+            push_grub_variable(
+                &mut expanded,
+                value,
+                var_start - 1,
+                name_end + 1,
+                name,
+                variables,
+            );
+            continue;
+        }
+
+        if !(next.is_ascii_alphabetic() || next == '_') {
+            expanded.push('$');
+            continue;
+        }
+        let name_start = var_start;
+        let mut name_end = var_start + next.len_utf8();
+        chars.next();
+        while let Some((index, ch)) = chars.peek().copied() {
+            if !(ch.is_ascii_alphanumeric() || ch == '_') {
+                break;
+            }
+            name_end = index + ch.len_utf8();
+            chars.next();
+        }
+        let name = &value[name_start..name_end];
+        push_grub_variable(
+            &mut expanded,
+            value,
+            name_start - 1,
+            name_end,
+            name,
+            variables,
+        );
+    }
+    expanded
+}
+
+fn push_grub_variable(
+    output: &mut String,
+    original: &str,
+    token_start: usize,
+    token_end: usize,
+    name: &str,
+    variables: &HashMap<String, String>,
+) {
+    if let Some(value) = variables.get(name) {
+        output.push_str(value);
+    } else if !GRUB_OPTIONAL_EMPTY_VARIABLES.contains(&name) {
+        output.push_str(&original[token_start..token_end]);
+    }
+}
+
+fn split_bls_words(value: &str) -> Vec<String> {
+    value
+        .split_whitespace()
+        .filter(|value| !value.is_empty())
+        .map(str::to_string)
+        .collect()
+}
+
+fn boot_entry_id_matches(filename: &str, preferred: &str) -> bool {
+    filename == preferred
+        || filename
+            .strip_suffix(".conf")
+            .is_some_and(|stem| stem == preferred)
 }
 
 fn architecture_matches(value: Option<&str>) -> bool {
@@ -1224,6 +1623,7 @@ fn compare_boot_entries(left: &BootEntry, right: &BootEntry) -> Ordering {
     left.role
         .priority()
         .cmp(&right.role.priority())
+        .then_with(|| right.preferred.cmp(&left.preferred))
         .then_with(|| left.disk.cmp(&right.disk))
         .then_with(|| left.partition.cmp(&right.partition))
         .then_with(|| left.boot_order.cmp(&right.boot_order))
@@ -1380,6 +1780,21 @@ mod tests {
     }
 
     #[test]
+    fn parses_mbr_xbootldr_partition() {
+        let mut mbr = [0u8; 512];
+        mbr[510..512].copy_from_slice(&MBR_SIGNATURE);
+        let entry = MBR_PARTITION_TABLE_OFFSET + MBR_PARTITION_ENTRY_SIZE;
+        mbr[entry + 4] = MBR_XBOOTLDR_TYPE;
+        mbr[entry + 8..entry + 12].copy_from_slice(&2048u32.to_le_bytes());
+        mbr[entry + 12..entry + 16].copy_from_slice(&4096u32.to_le_bytes());
+
+        let entries = parse_mbr_boot_entries(&mbr, 8192).unwrap();
+
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].partno, 2);
+    }
+
+    #[test]
     fn parses_extlinux_entry() {
         let config = ExtlinuxConfig::parse(
             "timeout 1\ndefault postmarketOS\nmenu title boot prev kernel\n\nlabel postmarketOS\n\tmenu label postmarketOS edge\n\tkernel /vmlinuz\n\tfdt /board.dtb\n\tinitrd /initramfs\n\tappend quiet splash\n",
@@ -1439,6 +1854,84 @@ mod tests {
     }
 
     #[test]
+    fn grubenv_parser_reads_plain_assignments() {
+        let values = parse_grubenv_assignments(
+            "# GRUB Environment Block\nsaved_entry=fedora-1\nkernelopts=root=UUID=abc ro quiet\nmenu_auto_hide=1\n###\n",
+        );
+
+        assert!(
+            values
+                .iter()
+                .any(|(key, value)| key == "saved_entry" && value == "fedora-1")
+        );
+        assert!(
+            values
+                .iter()
+                .any(|(key, value)| key == "kernelopts" && value == "root=UUID=abc ro quiet")
+        );
+    }
+
+    #[test]
+    fn grub_set_parser_reads_quoted_values() {
+        let values = parse_grub_set_assignments(
+            "set tuned_initrd=\"\"\nif [ -z \"${kernelopts}\" ]; then\n  set kernelopts=\"root=UUID=abc ro quiet\"\nfi\n",
+        );
+
+        assert!(
+            values
+                .iter()
+                .any(|(key, value)| key == "tuned_initrd" && value.is_empty())
+        );
+        assert!(
+            values
+                .iter()
+                .any(|(key, value)| key == "kernelopts" && value == "root=UUID=abc ro quiet")
+        );
+    }
+
+    #[test]
+    fn expands_grub_vars_and_preserves_unknown_options() {
+        let mut variables = HashMap::new();
+        variables.insert("kernelopts".to_string(), "root=UUID=abc ro".to_string());
+
+        assert_eq!(
+            expand_grub_vars("$kernelopts $tuned_params $unknown", &variables),
+            "root=UUID=abc ro  $unknown"
+        );
+    }
+
+    #[test]
+    fn splits_expanded_initrd_words() {
+        assert_eq!(
+            split_bls_words("/initramfs.img  /tuned.img"),
+            ["/initramfs.img", "/tuned.img"]
+        );
+    }
+
+    #[test]
+    fn saved_entry_matches_bls_stem() {
+        assert!(boot_entry_id_matches(
+            "fb0ef46ea7c8465cb1cad9c0db16b643-7.1.0.conf",
+            "fb0ef46ea7c8465cb1cad9c0db16b643-7.1.0"
+        ));
+        assert!(boot_entry_id_matches("entry.conf", "entry.conf"));
+        assert!(!boot_entry_id_matches("entry.conf", "other"));
+    }
+
+    #[test]
+    fn saved_entry_wins_when_next_entry_is_empty() {
+        let mut context = BlsContext::default();
+        context
+            .variables
+            .insert("next_entry".to_string(), String::new());
+        context
+            .variables
+            .insert("saved_entry".to_string(), "fedora-1".to_string());
+
+        assert_eq!(context.preferred_entry(), Some("fedora-1"));
+    }
+
+    #[test]
     fn resolves_partition_absolute_paths_under_root() {
         let path = resolve_boot_path(Path::new("/mnt/boot"), "/loader/entries/../bad");
 
@@ -1475,6 +1968,7 @@ mod tests {
             role: BootPartitionRole::Nested,
             disk: "sda".to_string(),
             partition: "sda28p1".to_string(),
+            preferred: false,
             linux: PathBuf::from("/boot/vmlinuz"),
             initrds: Vec::new(),
             dtb: None,

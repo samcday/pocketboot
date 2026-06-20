@@ -148,6 +148,7 @@ fn main() -> Result<()> {
                         disk = %entry.disk,
                         partition = %entry.partition,
                         source = %entry.source.display(),
+                        preferred = entry.preferred,
                         directly_bootable = entry.is_directly_bootable(),
                         "boot entry"
                     );
