@@ -1,0 +1,19 @@
+name = "DragonBoard 410c"
+
+[kconfig]
+# Buttons
+INPUT = true
+INPUT_EVDEV = true
+INPUT_KEYBOARD = true
+KEYBOARD_GPIO = true
+
+# User LEDs
+NEW_LEDS = true
+LEDS_CLASS = true
+LEDS_GPIO = true
+LEDS_TRIGGERS = true
+LEDS_TRIGGER_HEARTBEAT = true
+
+# USB ID GPIO and onboard USB3503 hub
+EXTCON_USB_GPIO = true
+USB_HSIC_USB3503 = true

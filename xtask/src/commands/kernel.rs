@@ -11,6 +11,7 @@ use crate::Result;
 
 use super::{
     FeatureSet, KERNEL_ARCH, KernelDevice, canonical_file,
+    config::{self, CpioConfig, KernelConfig},
     cpio::{DEFAULT_INITRD, DEFAULT_TARGET, build_initrd},
     ensure_file, kconfig_string, kernel_tree, make_command, parallel_jobs, run_command, target_dir,
     workspace_root,
@@ -58,29 +59,6 @@ struct KernelConfigFile {
 }
 
 const KERNEL_CONFIG_RECIPE_VERSION: u32 = 1;
-
-#[derive(Debug, Default, Deserialize)]
-struct DeviceMetadata {
-    #[serde(default)]
-    kernel: KernelMetadata,
-    #[serde(default)]
-    cpio: CpioMetadata,
-}
-
-#[derive(Debug, Default, Deserialize)]
-struct KernelMetadata {
-    image: Option<String>,
-    image_path: Option<PathBuf>,
-    dtb: Option<bool>,
-}
-
-#[derive(Debug, Default, Deserialize)]
-struct CpioMetadata {
-    target: Option<String>,
-    busybox: Option<bool>,
-    #[serde(default)]
-    features: Vec<String>,
-}
 
 impl KernelArgs {
     fn parse(args: Vec<String>) -> Result<Self> {
@@ -175,39 +153,36 @@ fn build_device_kernel(
     initrd: Option<PathBuf>,
 ) -> Result<KernelBuild> {
     let target_dir = target_dir(workspace_root);
-    let metadata = device_metadata(workspace_root, device)?;
-    let target = kernel_target(&metadata.kernel)?;
+    let config = config::load_device_config(workspace_root, device)?;
+    let target = kernel_target(&config.kernel)?;
     let out_dir = target_dir
         .join("kernel")
         .join(&device.vendor)
         .join(&device.stem);
     fs::create_dir_all(&out_dir).map_err(|err| format!("create {}: {err}", out_dir.display()))?;
 
-    let common_config = workspace_root.join("configs/pocketboot.config");
-    let soc_config = workspace_root
-        .join("configs/soc")
-        .join(&device.vendor)
-        .join(format!("{}.config", device.soc));
-    let device_config = workspace_root
-        .join("configs/device")
-        .join(&device.vendor)
-        .join(format!("{}.config", device.stem));
     let dts_source = kernel_tree
         .join("arch/arm64/boot/dts")
         .join(&device.vendor)
         .join(format!("{}.dts", device.stem));
 
-    ensure_file(&common_config, "common pocketboot config")?;
-    ensure_file(&soc_config, "SoC config")?;
-    ensure_file(&device_config, "device config")?;
     if target.build_dtb {
         ensure_file(&dts_source, "device tree source")?;
     }
 
     let initrd = match initrd {
         Some(initrd) => canonical_file(&initrd, "initrd cpio")?,
-        None => build_device_initrd(workspace_root, &target_dir, device, &metadata.cpio)?,
+        None => build_device_initrd(
+            workspace_root,
+            &target_dir,
+            device,
+            &config.cpio,
+            &config.features,
+        )?,
     };
+
+    let pocketboot_config = out_dir.join("pocketboot.config");
+    write_if_changed(&pocketboot_config, config.kconfig_contents()?.as_bytes())?;
 
     let initramfs_config = out_dir.join("pocketboot-initramfs.config");
     write_if_changed(
@@ -217,12 +192,7 @@ fn build_device_kernel(
 
     let merge_config = kernel_tree.join("scripts/kconfig/merge_config.sh");
     ensure_file(&merge_config, "merge_config.sh")?;
-    let config_fragments = [
-        common_config.as_path(),
-        soc_config.as_path(),
-        device_config.as_path(),
-        initramfs_config.as_path(),
-    ];
+    let config_fragments = [pocketboot_config.as_path(), initramfs_config.as_path()];
     ensure_kernel_config(kernel_tree, &out_dir, &merge_config, &config_fragments)?;
 
     let dtb_target = target
@@ -262,22 +232,7 @@ fn build_device_kernel(
     })
 }
 
-fn device_metadata(workspace_root: &Path, device: &KernelDevice) -> Result<DeviceMetadata> {
-    let path = workspace_root
-        .join("configs/device")
-        .join(&device.vendor)
-        .join(format!("{}.toml", device.stem));
-    let contents = match fs::read_to_string(&path) {
-        Ok(contents) => contents,
-        Err(err) if err.kind() == std::io::ErrorKind::NotFound => {
-            return Ok(DeviceMetadata::default());
-        }
-        Err(err) => return Err(format!("read {}: {err}", path.display())),
-    };
-    toml::from_str(&contents).map_err(|err| format!("parse {}: {err}", path.display()))
-}
-
-fn kernel_target(config: &KernelMetadata) -> Result<KernelTarget> {
+fn kernel_target(config: &KernelConfig) -> Result<KernelTarget> {
     let image_make_target = config
         .image
         .clone()
@@ -301,16 +256,12 @@ fn build_device_initrd(
     workspace_root: &Path,
     target_dir: &Path,
     device: &KernelDevice,
-    config: &CpioMetadata,
+    config: &CpioConfig,
+    features: &FeatureSet,
 ) -> Result<PathBuf> {
     let target = config.target.as_deref().unwrap_or(DEFAULT_TARGET);
     if target.is_empty() {
         return Err("cpio target must not be empty".to_string());
-    }
-
-    let mut features = FeatureSet::default();
-    for feature in &config.features {
-        features.add(feature)?;
     }
 
     build_initrd(
@@ -323,8 +274,8 @@ fn build_device_initrd(
                 .join(&device.stem)
                 .join(DEFAULT_INITRD),
         ),
-        config.busybox.unwrap_or(true),
-        &features,
+        features.contains("busybox"),
+        features,
     )
 }
 
@@ -432,6 +383,6 @@ fn path_stamp_value(path: &Path) -> String {
 
 fn print_usage() {
     println!(
-        "usage: cargo xtask kernel [--initrd PATH] <vendor/device> <kernel-tree>\n\nexample: cargo xtask kernel qcom/msm8916-samsung-a5u-eur ./linux\n\nwhen --initrd is omitted, target/cpio/<vendor>/<device>/{DEFAULT_INITRD} is rebuilt automatically\noutputs: target/kernel/<vendor>/<device>/arch/arm64/boot/Image.gz and the inferred DTB by default; optional configs/device/<vendor>/<device>.toml can tailor kernel artifacts and cpio features"
+        "usage: cargo xtask kernel [--initrd PATH] <vendor/device> <kernel-tree>\n\nexample: cargo xtask kernel qcom/msm8916-samsung-a5u-eur ./linux\n\nwhen --initrd is omitted, target/cpio/<vendor>/<device>/{DEFAULT_INITRD} is rebuilt automatically\noutputs: target/kernel/<vendor>/<device>/arch/arm64/boot/Image.gz and the inferred DTB by default; configs/pocketboot.toml, configs/soc/<vendor>/<soc>.toml and configs/device/<vendor>/<device>.toml tailor kernel artifacts, cpio settings, features and Kconfig"
     );
 }

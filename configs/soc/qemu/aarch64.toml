@@ -1,0 +1,11 @@
+name = "QEMU arm64 machine family"
+
+[kconfig]
+# Serial console used by `qemu-system-aarch64 -machine virt -nographic`.
+ARM_AMBA = true
+SERIAL_AMBA_PL011 = true
+SERIAL_AMBA_PL011_CONSOLE = true
+
+# Virtio MMIO transport used by the arm64 `virt` machine.
+VIRTIO_MENU = true
+VIRTIO_MMIO = true

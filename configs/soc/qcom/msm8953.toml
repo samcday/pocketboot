@@ -1,0 +1,68 @@
+name = "Qualcomm MSM8953/APQ8053"
+
+[kconfig]
+# Platform sizing
+ARCH_QCOM = true
+NR_CPUS = 8
+
+# Core Qualcomm firmware/resource plumbing
+PM = true
+QCOM_SCM = true
+QCOM_SMEM = true
+QCOM_SOCINFO = true
+HWSPINLOCK = true
+HWSPINLOCK_QCOM = true
+MAILBOX = true
+QCOM_APCS_IPC = true
+RPMSG_QCOM_SMD = true
+QCOM_SMD_RPM = true
+QCOM_CLK_SMD_RPM = true
+QCOM_RPMPD = true
+INTERCONNECT = true
+INTERCONNECT_QCOM = true
+INTERCONNECT_QCOM_MSM8953 = true
+
+# Clocks, resets, pinctrl, GPIO and PMIC access
+COMMON_CLK_QCOM = true
+MSM_GCC_8953 = true
+PINCTRL_MSM = true
+PINCTRL_MSM8953 = true
+SPMI = true
+SPMI_MSM_PMIC_ARB = true
+MFD_SPMI_PMIC = true
+PINCTRL_QCOM_SPMI_PMIC = true
+REGULATOR = true
+REGULATOR_QCOM_SMD_RPM = true
+POWER_RESET_MSM = true
+POWER_RESET_QCOM_PON = true
+PM_DEVFREQ = true
+
+# BLSP UART/I2C/SPI buses
+TTY = true
+SERIAL_MSM = true
+SERIAL_MSM_CONSOLE = true
+I2C = true
+I2C_QUP = true
+SPI = true
+SPI_QUP = true
+DMADEVICES = true
+QCOM_BAM_DMA = true
+
+# eMMC/SD storage
+BLOCK = true
+MMC = true
+MMC_BLOCK = true
+MMC_SDHCI = true
+MMC_SDHCI_PLTFM = true
+MMC_SDHCI_MSM = true
+
+# USB HS PHY and DWC3 gadget controller
+USB_SUPPORT = true
+USB = true
+USB_GADGET = true
+USB_DWC3 = true
+USB_DWC3_GADGET = true
+USB_DWC3_QCOM = true
+USB_ROLE_SWITCH = true
+GENERIC_PHY = true
+PHY_QCOM_QUSB2 = true

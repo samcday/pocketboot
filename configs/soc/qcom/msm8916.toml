@@ -1,0 +1,67 @@
+name = "Qualcomm MSM8916/APQ8016"
+
+[kconfig]
+# Platform sizing
+ARCH_QCOM = true
+NR_CPUS = 4
+
+# Core Qualcomm firmware/resource plumbing
+PM = true
+QCOM_SCM = true
+QCOM_SMEM = true
+QCOM_SOCINFO = true
+HWSPINLOCK = true
+HWSPINLOCK_QCOM = true
+MAILBOX = true
+QCOM_APCS_IPC = true
+RPMSG_QCOM_SMD = true
+QCOM_SMD_RPM = true
+QCOM_CLK_SMD_RPM = true
+QCOM_RPMPD = true
+
+# Clocks, resets, pinctrl, GPIO and PMIC access
+COMMON_CLK_QCOM = true
+MSM_GCC_8916 = true
+PINCTRL_MSM = true
+PINCTRL_MSM8916 = true
+GPIO_SHARED_PROXY = true
+SPMI = true
+SPMI_MSM_PMIC_ARB = true
+MFD_SPMI_PMIC = true
+PINCTRL_QCOM_SPMI_PMIC = true
+REGULATOR = true
+REGULATOR_QCOM_SMD_RPM = true
+POWER_RESET_MSM = true
+POWER_RESET_QCOM_PON = true
+PM_DEVFREQ = true
+
+# BLSP UART/I2C/SPI buses
+TTY = true
+SERIAL_MSM = true
+SERIAL_MSM_CONSOLE = true
+I2C = true
+I2C_QUP = true
+SPI = true
+SPI_QUP = true
+DMADEVICES = true
+QCOM_BAM_DMA = true
+
+# eMMC/SD storage
+BLOCK = true
+MMC = true
+MMC_BLOCK = true
+MMC_SDHCI = true
+MMC_SDHCI_PLTFM = true
+MMC_SDHCI_MSM = true
+
+# USB HS controller/PHY. Gadget functions belong in userland config.
+USB_SUPPORT = true
+USB = true
+USB_EHCI_HCD = true
+USB_GADGET = true
+USB_CHIPIDEA = true
+USB_CHIPIDEA_UDC = true
+USB_CHIPIDEA_HOST = true
+USB_CHIPIDEA_MSM = true
+GENERIC_PHY = true
+PHY_QCOM_USB_HS = true

@@ -1,0 +1,38 @@
+name = "Samsung Galaxy J7 (2016)"
+
+[kconfig]
+# Buttons, touchscreen and vibrator
+INPUT = true
+INPUT_EVDEV = true
+INPUT_KEYBOARD = true
+INPUT_MISC = true
+INPUT_TOUCHSCREEN = true
+KEYBOARD_GPIO = true
+TOUCHSCREEN_MELFAS_MIP4 = true
+INPUT_REGULATOR_HAPTIC = true
+
+# Board GPIO-controlled rails and S2MPU05 PMIC regulators
+REGULATOR = true
+REGULATOR_FIXED_VOLTAGE = true
+MFD_SEC_I2C = true
+REGULATOR_S2MPS11 = true
+
+# S2MU005 fuel gauge
+POWER_SUPPLY = true
+BATTERY_S2MU005 = true
+
+[bootimg]
+header_version = 0
+page_size = 2048
+base = 0x10000000
+kernel_offset = 0x00008000
+ramdisk_offset = 0x01000000
+second_offset = 0x00000000
+tags_offset = 0x00000100
+dtb_offset = 0x00000000
+cmdline = ""
+
+[bootimg.dtbh]
+entries = [
+    { chip = 7870, hw_rev = 0, hw_rev_end = 255 },
+]

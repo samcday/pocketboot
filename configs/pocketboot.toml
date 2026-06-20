@@ -1,0 +1,97 @@
+name = "pocketboot baseline"
+
+[features]
+busybox = true
+
+[kconfig]
+# Minimal kernel baseline
+EXPERT = true
+SLUB = true
+RUST = true
+NET = true
+UNIX = true
+
+# BusyBox initramfs/initrd
+BLK_DEV_INITRD = true
+RD_GZIP = true
+BINFMT_ELF = true
+BINFMT_SCRIPT = true
+
+# Kexec handoff
+RELOCATABLE = true
+RANDOMIZE_BASE = false
+KEXEC_FILE = false
+KEXEC = true
+CRASH_DUMP = false
+MEMFD_CREATE = true
+SUSPEND = true
+HOTPLUG_CPU = true
+
+# Debug shell/runtime support
+MULTIUSER = true
+FUTEX = true
+EPOLL = true
+SIGNALFD = true
+TIMERFD = true
+POSIX_TIMERS = true
+DEBUG_FS = true
+
+# Usual early userspace mounts
+PROC_FS = true
+SYSFS = true
+SHMEM = true
+TMPFS = true
+DEVTMPFS = true
+DEVTMPFS_MOUNT = true
+CONFIGFS_FS = true
+
+# USB gadget
+USB_SUPPORT = true
+USB = true
+USB_GADGET = true
+USB_CONFIGFS = true
+USB_CONFIGFS_ACM = true
+USB_CONFIGFS_MASS_STORAGE = true
+
+# fastboot
+USB_CONFIGFS_F_FS = true
+AIO = true
+EVENTFD = true
+
+# Console core
+PRINTK = true
+PRINTK_TIME = true
+TTY = true
+VT = true
+VT_CONSOLE = true
+UNIX98_PTYS = true
+
+# Bring-up diagnostics
+BUG = true
+DEBUG_BUGVERBOSE = true
+KALLSYMS = true
+STACKTRACE = true
+
+# magic sysrq for quick reboots over UART
+MAGIC_SYSRQ = true
+MAGIC_SYSRQ_SERIAL = true
+MAGIC_SYSRQ_DEFAULT_ENABLE = { hex = 0x80 }
+
+# Device-tree simple-framebuffer handoff
+OF = true
+
+# Modern simple-framebuffer driver path
+DRM = true
+DRM_SIMPLEDRM = true
+DRM_PANIC = true
+DRM_PANIC_SCREEN_QR_CODE = true
+DRM_PANIC_SCREEN = { string = "qr_code" }
+
+# filesystem support for bootflows
+MSDOS_PARTITION = true
+EFI_PARTITION = true
+FAT_FS = true
+VFAT_FS = true
+NLS_CODEPAGE_437 = true
+NLS_ISO8859_1 = true
+NLS_UTF8 = true

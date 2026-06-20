@@ -1,5 +1,6 @@
 pub(crate) mod bootimg;
 pub(crate) mod busybox;
+mod config;
 pub(crate) mod cpio;
 pub(crate) mod kernel;
 pub(crate) mod qemu;

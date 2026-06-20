@@ -1,0 +1,37 @@
+name = "OnePlus 6T (fajita)"
+
+[kconfig]
+# Buttons, alert slider, hall sensor and touchscreen
+INPUT = true
+INPUT_EVDEV = true
+INPUT_KEYBOARD = true
+INPUT_MISC = true
+INPUT_TOUCHSCREEN = true
+KEYBOARD_GPIO = true
+INPUT_PM8941_PWRKEY = true
+RMI4_CORE = true
+RMI4_I2C = true
+RMI4_F12 = true
+
+# Board GPIO-controlled rails
+REGULATOR_FIXED_VOLTAGE = true
+
+# Battery, fuel gauge and PMI8998 charger
+POWER_SUPPLY = true
+BATTERY_BQ27XXX = true
+BATTERY_BQ27XXX_I2C = true
+IIO = true
+QCOM_SPMI_RRADC = true
+QCOM_SPMI_ADC5 = true
+CHARGER_QCOM_SMB2 = true
+
+[bootimg]
+header_version = 2
+page_size = 4096
+base = 0x0
+kernel_offset = 0x00008000
+ramdisk_offset = 0x01000000
+second_offset = 0x00f00000
+tags_offset = 0x00000100
+dtb_offset = 0x01f00000
+cmdline = ""

@@ -106,12 +106,16 @@ pub(crate) fn run(args: Vec<String>) -> Result<()> {
 
 fn cpio(args: CpioArgs) -> Result<()> {
     let workspace_root = workspace_root()?;
+    let mut features = args.features;
+    if args.busybox {
+        features.add("busybox")?;
+    }
     let output = build_initrd(
         &workspace_root,
         &args.target,
         args.output,
         args.busybox,
-        &args.features,
+        &features,
     )?;
     println!("wrote {}", output.display());
     Ok(())

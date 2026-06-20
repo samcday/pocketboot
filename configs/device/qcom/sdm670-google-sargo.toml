@@ -1,0 +1,26 @@
+name = "Google Pixel 3a (sargo)"
+
+[kconfig]
+# Buttons and touchscreen input
+INPUT = true
+INPUT_EVDEV = true
+INPUT_KEYBOARD = true
+INPUT_MISC = true
+KEYBOARD_GPIO = true
+RMI4_CORE = true
+RMI4_I2C = true
+RMI4_F12 = true
+
+# Haptics
+INPUT_DRV2624_HAPTICS = true
+
+[bootimg]
+header_version = 2
+page_size = 4096
+base = 0x0
+kernel_offset = 0x00008000
+ramdisk_offset = 0x01000000
+second_offset = 0x00f00000
+tags_offset = 0x00000100
+dtb_offset = 0x01100000
+cmdline = ""

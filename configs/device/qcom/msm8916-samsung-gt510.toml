@@ -1,0 +1,45 @@
+name = "Samsung Galaxy Tab A 9.7 (2015)"
+
+[kconfig]
+# Buttons, Hall sensor and touchscreen
+INPUT = true
+INPUT_EVDEV = true
+INPUT_KEYBOARD = true
+INPUT_MISC = true
+INPUT_TOUCHSCREEN = true
+KEYBOARD_GPIO = true
+INPUT_PM8941_PWRKEY = true
+TOUCHSCREEN_ATMEL_MXT = true
+
+# Board GPIO-controlled rails
+REGULATOR_FIXED_VOLTAGE = true
+
+# PM8916 USB cable detection
+EXTCON = true
+EXTCON_QCOM_SPMI_MISC = true
+
+# MAX77849-compatible fuel gauge
+BATTERY_MAX17042 = true
+
+# Vibrator on the GCC GP2 clock PWM
+PWM = true
+PWM_CLK = true
+INPUT_PWM_VIBRA = true
+
+[bootimg]
+header_version = 0
+page_size = 2048
+base = 0x80000000
+kernel_offset = 0x00008000
+ramdisk_offset = 0x01000000
+second_offset = 0x00f00000
+tags_offset = 0x00000100
+dtb_offset = 0x0
+ramdisk_size = 1
+append_seandroid_enforce = true
+cmdline = ""
+
+[bootimg.qcdt]
+entries = [
+    { msm_id = [247, 0], board_id = [0xF708FF01, 7] },
+]

@@ -1,6 +1,32 @@
+name = "QEMU aarch64 virt"
+
+[features]
+qemu = true
+
 [kernel]
 image = "Image"
 dtb = false
 
-[cpio]
-features = ["qemu"]
+[kconfig.qemu]
+# Virtio block device for a small local test disk.
+BLOCK = true
+BLK_DEV = true
+VIRTIO_BLK = true
+
+# Virtio networking used to reach the guest USB/IP vUDC server.
+INET = true
+NETDEVICES = true
+NET_CORE = true
+VIRTIO_NET = true
+
+# USB/IP virtual device controller for exporting the configfs gadget to the host.
+USBIP_CORE = true
+USBIP_VUDC = true
+
+# Useful virtual devices for UI and diagnostics as the test target grows.
+VIRTIO_CONSOLE = true
+INPUT = true
+INPUT_EVDEV = true
+VIRTIO_INPUT = true
+DRM_VIRTIO_GPU = true
+DRM_VIRTIO_GPU_KMS = true

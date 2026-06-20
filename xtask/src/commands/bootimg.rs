@@ -5,20 +5,20 @@ use std::{
 };
 
 use abootimg_oxide::{HeaderV0, HeaderV0Versioned, OsVersionPatch};
-use serde::Deserialize;
 use sha1::{Digest, Sha1};
 
 use crate::Result;
 
-use super::{KernelDevice, ensure_file, target_dir, workspace_root};
+use super::{
+    KernelDevice,
+    config::{self, BootImgConfig, DEFAULT_BOOTIMG_KERNEL_IMAGE, DtbhConfig, QcdtConfig},
+    ensure_file, target_dir, workspace_root,
+};
 
-const DEFAULT_KERNEL_IMAGE: &str = "Image.gz";
 const ANDROID_BOOT_MAGIC: &[u8; 8] = b"ANDROID!";
 const SEANDROID_ENFORCE: &[u8] = b"SEANDROIDENFORCE";
 const DTBH_MAGIC: &[u8; 4] = b"DTBH";
 const DTBH_VERSION: u32 = 2;
-const DTBH_PLATFORM_CODE: u32 = 0x50a6;
-const DTBH_SUBTYPE_CODE: u32 = 0x217584da;
 const DTBH_RECORD_SPACE: u32 = 0x20;
 
 #[derive(Debug)]
@@ -89,99 +89,25 @@ fn bootimg(args: BootImgArgs) -> Result<()> {
         .join("arch/arm64/boot/dts")
         .join(&args.device.vendor)
         .join(format!("{}.dtb", args.device.stem));
-    let config_path = workspace_root
-        .join("configs/bootimg")
-        .join(&args.device.vendor)
-        .join(format!("{}.toml", args.device.stem));
     let output = args.output.unwrap_or_else(|| out_dir.join("boot.img"));
 
-    ensure_file(&config_path, "boot image config")?;
-
-    let config = load_bootimg_config(&config_path)?;
-    let image = bootimg_kernel_image(&config, &config_path, &out_dir)?;
+    let device_config = config::load_device_config(&workspace_root, &args.device)?;
+    let config = device_config.bootimg.as_ref().ok_or_else(|| {
+        format!(
+            "missing [bootimg] table in {}",
+            device_config.device_path.display()
+        )
+    })?;
+    let image = bootimg_kernel_image(config, &device_config.device_path, &out_dir)?;
     ensure_file(&image, "kernel image")?;
     ensure_file(&dtb, "device tree blob")?;
-    write_bootimg(&config, &config_path, &image, &dtb, &output)?;
+    write_bootimg(config, &device_config.device_path, &image, &dtb, &output)?;
 
     println!("wrote {}", output.display());
     println!("image {}", image.display());
     println!("dtb {}", dtb.display());
-    println!("config {}", config_path.display());
+    println!("config {}", device_config.device_path.display());
     Ok(())
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(deny_unknown_fields)]
-struct BootImgConfig {
-    header_version: u32,
-    page_size: u32,
-    #[serde(default = "default_kernel_image")]
-    kernel_image: String,
-    base: u64,
-    kernel_offset: u64,
-    ramdisk_offset: u64,
-    second_offset: u64,
-    tags_offset: u64,
-    dtb_offset: u64,
-    #[serde(default)]
-    board: String,
-    #[serde(default)]
-    cmdline: String,
-    #[serde(default)]
-    ramdisk_size: u32,
-    #[serde(default)]
-    append_seandroid_enforce: bool,
-    qcdt: Option<QcdtConfig>,
-    dtbh: Option<DtbhConfig>,
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(deny_unknown_fields)]
-struct QcdtConfig {
-    entries: Vec<QcdtEntry>,
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(deny_unknown_fields)]
-struct QcdtEntry {
-    msm_id: [u32; 2],
-    board_id: [u32; 2],
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(deny_unknown_fields)]
-struct DtbhConfig {
-    #[serde(default = "default_dtbh_platform")]
-    platform: u32,
-    #[serde(default = "default_dtbh_subtype")]
-    subtype: u32,
-    entries: Vec<DtbhEntry>,
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(deny_unknown_fields)]
-struct DtbhEntry {
-    chip: u32,
-    hw_rev: u32,
-    hw_rev_end: u32,
-}
-
-fn default_dtbh_platform() -> u32 {
-    DTBH_PLATFORM_CODE
-}
-
-fn default_dtbh_subtype() -> u32 {
-    DTBH_SUBTYPE_CODE
-}
-
-fn default_kernel_image() -> String {
-    DEFAULT_KERNEL_IMAGE.to_string()
-}
-
-fn load_bootimg_config(path: &Path) -> Result<BootImgConfig> {
-    let contents =
-        fs::read_to_string(path).map_err(|err| format!("read {}: {err}", path.display()))?;
-    toml::from_str(&contents).map_err(|err| format!("parse {}: {err}", path.display()))
 }
 
 fn bootimg_kernel_image(
@@ -615,12 +541,13 @@ fn fixed_bytes<const N: usize>(value: &str, field: &str, context: &Path) -> Resu
 
 fn print_usage() {
     println!(
-        "usage: cargo xtask bootimg <vendor/device> [--output PATH]\n\nexample: cargo xtask bootimg exynos/exynos7870-j7xelte\n\nrequires: target/kernel/<vendor>/<device>/arch/arm64/boot/<kernel_image> and the inferred DTB\nkernel_image: configured by configs/bootimg/<vendor>/<device>.toml, defaults to {DEFAULT_KERNEL_IMAGE}\nsupports: Android v2 DTB sections, legacy QCDT and Samsung DTBH vendor DT payloads\ndefault output: target/kernel/<vendor>/<device>/boot.img"
+        "usage: cargo xtask bootimg <vendor/device> [--output PATH]\n\nexample: cargo xtask bootimg exynos/exynos7870-j7xelte\n\nrequires: target/kernel/<vendor>/<device>/arch/arm64/boot/<kernel_image> and the inferred DTB\nkernel_image: configured by [bootimg] in configs/device/<vendor>/<device>.toml, defaults to {DEFAULT_BOOTIMG_KERNEL_IMAGE}\nsupports: Android v2 DTB sections, legacy QCDT and Samsung DTBH vendor DT payloads\ndefault output: target/kernel/<vendor>/<device>/boot.img"
     );
 }
 
 #[cfg(test)]
 mod tests {
+    use super::super::config::{DtbhEntry, QcdtEntry};
     use super::*;
 
     #[test]
@@ -655,8 +582,8 @@ mod tests {
     fn dtbh_records_point_to_page_aligned_dtb() {
         let dtbh = build_dtbh(
             &DtbhConfig {
-                platform: default_dtbh_platform(),
-                subtype: default_dtbh_subtype(),
+                platform: 0x50a6,
+                subtype: 0x217584da,
                 entries: vec![DtbhEntry {
                     chip: 7870,
                     hw_rev: 0,
@@ -687,12 +614,7 @@ mod tests {
 
     #[test]
     fn samsung_a5u_eur_config_is_legacy_qcdt() {
-        let config = load_bootimg_config(
-            &super::super::workspace_root()
-                .unwrap()
-                .join("configs/bootimg/qcom/msm8916-samsung-a5u-eur.toml"),
-        )
-        .unwrap();
+        let config = device_bootimg_config("qcom/msm8916-samsung-a5u-eur");
 
         let qcdt = config.qcdt.unwrap();
         assert_eq!(config.header_version, 0);
@@ -708,17 +630,12 @@ mod tests {
 
     #[test]
     fn samsung_j7xelte_config_is_legacy_dtbh() {
-        let config = load_bootimg_config(
-            &super::super::workspace_root()
-                .unwrap()
-                .join("configs/bootimg/exynos/exynos7870-j7xelte.toml"),
-        )
-        .unwrap();
+        let config = device_bootimg_config("exynos/exynos7870-j7xelte");
 
         assert_eq!(config.header_version, 0);
         assert_eq!(config.page_size, 2048);
         assert_eq!(config.base, 0x10000000);
-        assert_eq!(config.kernel_image, DEFAULT_KERNEL_IMAGE);
+        assert_eq!(config.kernel_image, DEFAULT_BOOTIMG_KERNEL_IMAGE);
         assert!(config.qcdt.is_none());
         let dtbh = config.dtbh.unwrap();
         assert_eq!(dtbh.platform, 0x50a6);
@@ -731,5 +648,14 @@ mod tests {
 
     fn u32_at(data: &[u8], offset: usize) -> u32 {
         u32::from_le_bytes(data[offset..offset + 4].try_into().unwrap())
+    }
+
+    fn device_bootimg_config(device_id: &str) -> BootImgConfig {
+        let workspace_root = super::super::workspace_root().unwrap();
+        let device = super::super::KernelDevice::parse(device_id).unwrap();
+        super::super::config::load_device_config(&workspace_root, &device)
+            .unwrap()
+            .bootimg
+            .unwrap()
     }
 }

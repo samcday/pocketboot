@@ -64,7 +64,9 @@ The kernel build uses `target/kernel/<vendor>/<device>` as `O=`, embeds a
 per-device pocketboot initramfs from `target/cpio/<vendor>/<device>`, and builds
 `Image.gz` plus the inferred DTB by default. This also leaves the uncompressed
 `Image` prerequisite in the build output. Pass `--initrd PATH` to embed an
-existing cpio archive.
+existing cpio archive. Kernel configuration is assembled from
+`configs/pocketboot.toml`, `configs/soc/<vendor>/<soc>.toml` and
+`configs/device/<vendor>/<device>.toml`.
 
 Once the kernel is built, package those artifacts as an Android boot image:
 
@@ -74,8 +76,8 @@ cargo xtask bootimg qcom/msm8916-samsung-a5u-eur
 cargo xtask bootimg exynos/exynos7870-j7xelte
 ```
 
-Boot image packaging is device-specific and configured by
-`configs/bootimg/<vendor>/<device>.toml`. The command requires an existing
+Boot image packaging is device-specific and configured by the `[bootimg]` table
+in `configs/device/<vendor>/<device>.toml`. The command requires an existing
 kernel build and writes `target/kernel/<vendor>/<device>/boot.img` by default.
 `kernel_image` selects the artifact under `arch/arm64/boot` to package and
 defaults to `Image.gz`. Android boot header v2 DTB sections, legacy QCDT vendor

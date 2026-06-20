@@ -1,0 +1,29 @@
+name = "Xiaomi Mi A2 Lite (daisy)"
+
+[kconfig]
+# Buttons and touchscreen
+INPUT = true
+INPUT_EVDEV = true
+INPUT_KEYBOARD = true
+INPUT_MISC = true
+INPUT_TOUCHSCREEN = true
+KEYBOARD_GPIO = true
+INPUT_PM8941_PWRKEY = true
+TOUCHSCREEN_EDT_FT5X06 = true
+
+# Bitbanged sensor bus and LSM6DSL IMU
+I2C_GPIO = true
+IIO = true
+IIO_ST_LSM6DSX = true
+IIO_ST_LSM6DSX_I2C = true
+
+# Board GPIO-controlled rails and PMIC WLED backlight
+REGULATOR_FIXED_VOLTAGE = true
+BACKLIGHT_CLASS_DEVICE = true
+BACKLIGHT_QCOM_WLED = true
+
+# Battery, charger and USB connector state
+POWER_SUPPLY = true
+EXTCON = true
+BATTERY_PMI8994_FG = true
+CHARGER_QCOM_SMBCHG = true
