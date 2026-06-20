@@ -1,4 +1,4 @@
-use std::io;
+use std::{fs, io};
 
 use crate::{
     ab_slots::{Slot, Slots},
@@ -8,6 +8,7 @@ use crate::{
 use super::partitions;
 
 const COMMAND_PREFIX: &str = "getvar:";
+const FDT_BASE_COMPATIBLE: &str = "/sys/firmware/devicetree/base/compatible";
 const FASTBOOT_VERSION: &str = "0.4";
 const PRODUCT: &str = "pocketboot";
 
@@ -101,7 +102,7 @@ impl FastbootGetvar {
     }
 
     fn fixed_variables(&self) -> Vec<(&'static str, String)> {
-        vec![
+        let mut variables = vec![
             ("version", FASTBOOT_VERSION.to_string()),
             ("version-bootloader", PRODUCT.to_string()),
             ("product", PRODUCT.to_string()),
@@ -110,7 +111,11 @@ impl FastbootGetvar {
             ("unlocked", "yes".to_string()),
             ("is-userspace", "yes".to_string()),
             ("max-download-size", format!("0x{MAX_DOWNLOAD_SIZE:08x}")),
-        ]
+        ];
+        if let Some(compatible) = fdt_base_compatible() {
+            variables.push(("compatible", compatible));
+        }
+        variables
     }
 
     fn slot_value(&self, variable: &str) -> io::Result<Option<String>> {
@@ -196,6 +201,18 @@ fn slot_bool(value: Option<bool>) -> String {
         .to_string()
 }
 
+fn fdt_base_compatible() -> Option<String> {
+    let bytes = fs::read(FDT_BASE_COMPATIBLE).ok()?;
+    parse_fdt_base_compatible(&bytes).map(str::to_string)
+}
+
+fn parse_fdt_base_compatible(bytes: &[u8]) -> Option<&str> {
+    bytes
+        .split(|byte| *byte == b'\0')
+        .find(|value| !value.is_empty())
+        .and_then(|value| std::str::from_utf8(value).ok())
+}
+
 fn parse_variable(command: &str) -> io::Result<&str> {
     let variable = command
         .strip_prefix(COMMAND_PREFIX)
@@ -250,5 +267,23 @@ mod tests {
             getvar.fixed_value("max-download-size").as_deref(),
             Some("0x10000000")
         );
+    }
+
+    #[test]
+    fn parses_fdt_base_compatible() {
+        assert_eq!(
+            parse_fdt_base_compatible(b"oneplus,fajita\0qcom,sdm845\0"),
+            Some("oneplus,fajita")
+        );
+    }
+
+    #[test]
+    fn ignores_empty_fdt_base_compatible() {
+        assert_eq!(parse_fdt_base_compatible(b"\0"), None);
+    }
+
+    #[test]
+    fn ignores_invalid_fdt_base_compatible() {
+        assert_eq!(parse_fdt_base_compatible(b"\xff\0qcom,sdm845\0"), None);
     }
 }
