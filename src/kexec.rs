@@ -4,7 +4,10 @@ use std::{
     os::fd::{AsRawFd, FromRawFd},
 };
 
+use flate2::read::MultiGzDecoder;
+
 const LINUX_REBOOT_CMD_KEXEC: libc::c_int = 0x45584543;
+const GZIP_MAGIC: [u8; 2] = [0x1f, 0x8b];
 #[cfg(target_arch = "aarch64")]
 const PAGE_SIZE: u64 = 4096;
 
@@ -71,6 +74,30 @@ pub(crate) fn reopen_payload_readonly(file: File) -> io::Result<File> {
     let readonly = File::open(path)?;
     drop(file);
     Ok(readonly)
+}
+
+pub(crate) fn prepare_kernel_payload(mut kernel: File) -> io::Result<File> {
+    if !is_gzip_payload(&mut kernel)? {
+        return Ok(kernel);
+    }
+
+    tracing::info!("decompressing gzip kernel image");
+    let mut decoder = MultiGzDecoder::new(kernel);
+    let mut payload = create_payload_memfd("kernel-uncompressed")?;
+    let copied = io::copy(&mut decoder, &mut payload).map_err(|err| {
+        io::Error::new(err.kind(), format!("decompress gzip kernel image: {err}"))
+    })?;
+    tracing::info!(bytes = copied, "decompressed gzip kernel image");
+
+    payload.seek(SeekFrom::Start(0))?;
+    reopen_payload_readonly(payload)
+}
+
+fn is_gzip_payload(payload: &mut File) -> io::Result<bool> {
+    let mut magic = [0; GZIP_MAGIC.len()];
+    let read = payload.read(&mut magic)?;
+    payload.seek(SeekFrom::Start(0))?;
+    Ok(read == magic.len() && magic == GZIP_MAGIC)
 }
 
 pub(crate) fn exec_loaded_image() -> io::Result<()> {
@@ -581,6 +608,66 @@ __pb_tramp_end:
 
     fn invalid_data<T>(message: impl Into<String>) -> io::Result<T> {
         Err(io::Error::new(io::ErrorKind::InvalidData, message.into()))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use flate2::{Compression, write::GzEncoder};
+    use std::io::Write;
+
+    #[test]
+    fn raw_kernel_payload_passes_through() {
+        let raw = b"raw arm64 Image payload";
+        let payload = payload_file("test-raw-kernel", raw);
+
+        let prepared = prepare_kernel_payload(payload).unwrap();
+
+        assert_eq!(read_file(&prepared), raw);
+    }
+
+    #[test]
+    fn gzip_kernel_payload_decompresses() {
+        let raw = b"decompressed arm64 Image payload";
+        let payload = payload_file("test-gzip-kernel", &gzip(raw));
+
+        let prepared = prepare_kernel_payload(payload).unwrap();
+
+        assert_eq!(read_file(&prepared), raw);
+    }
+
+    #[test]
+    fn corrupt_gzip_kernel_payload_fails() {
+        let payload = payload_file("test-corrupt-gzip-kernel", b"\x1f\x8bnot really gzip");
+
+        let err = prepare_kernel_payload(payload).unwrap_err();
+
+        assert!(
+            err.to_string().contains("decompress gzip kernel image"),
+            "unexpected error: {err}"
+        );
+    }
+
+    fn payload_file(name: &str, data: &[u8]) -> File {
+        let mut file = create_payload_memfd(name).unwrap();
+        file.write_all(data).unwrap();
+        file.seek(SeekFrom::Start(0)).unwrap();
+        reopen_payload_readonly(file).unwrap()
+    }
+
+    fn read_file(file: &File) -> Vec<u8> {
+        let mut file = file.try_clone().unwrap();
+        file.seek(SeekFrom::Start(0)).unwrap();
+        let mut data = Vec::new();
+        file.read_to_end(&mut data).unwrap();
+        data
+    }
+
+    fn gzip(data: &[u8]) -> Vec<u8> {
+        let mut encoder = GzEncoder::new(Vec::new(), Compression::default());
+        encoder.write_all(data).unwrap();
+        encoder.finish().unwrap()
     }
 }
 

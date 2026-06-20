@@ -127,9 +127,9 @@ fn main() -> Result<()> {
     let boot_entries = match bootflow::discover() {
         Ok(entries) => {
             if entries.is_empty() {
-                tracing::warn!("no BLS boot entries discovered");
+                tracing::warn!("no boot entries discovered");
             } else {
-                tracing::info!(count = entries.len(), "BLS boot entries discovered");
+                tracing::info!(count = entries.len(), "boot entries discovered");
                 for (index, entry) in entries.iter().enumerate() {
                     tracing::info!(
                         index,
@@ -142,14 +142,14 @@ fn main() -> Result<()> {
                         partition = %entry.partition,
                         source = %entry.source.display(),
                         directly_bootable = entry.is_directly_bootable(),
-                        "BLS boot entry"
+                        "boot entry"
                     );
                 }
             }
             entries
         }
         Err(err) => {
-            tracing::warn!(error = ?err, "BLS bootflow discovery failed");
+            tracing::warn!(error = ?err, "bootflow discovery failed");
             Vec::new()
         }
     };
@@ -163,14 +163,14 @@ fn main() -> Result<()> {
         .iter()
         .find(|entry| entry.is_directly_bootable())
     {
-        tracing::info!(id = %entry.id, source = %entry.source.display(), "booting discovered BLS entry");
+        tracing::info!(id = %entry.id, source = %entry.source.display(), "booting discovered entry");
         entry
             .load()
-            .map_err(|err| format!("load discovered BLS entry {}: {err}", entry.id))?;
+            .map_err(|err| format!("load discovered boot entry {}: {err}", entry.id))?;
         kexec::exec_loaded_image()
-            .map_err(|err| format!("execute discovered BLS entry {}: {err}", entry.id))?;
+            .map_err(|err| format!("execute discovered boot entry {}: {err}", entry.id))?;
     } else if !boot_entries.is_empty() {
-        tracing::warn!("BLS entries were discovered, but none are directly bootable yet");
+        tracing::warn!("boot entries were discovered, but none are directly bootable yet");
     }
     Ok(())
 }

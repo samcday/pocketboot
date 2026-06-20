@@ -95,3 +95,8 @@ VFAT_FS = true
 NLS_CODEPAGE_437 = true
 NLS_ISO8859_1 = true
 NLS_UTF8 = true
+BLK_DEV = true
+BLK_DEV_LOOP = true
+EXT4_FS = true
+EXT4_USE_FOR_EXT2 = true
+

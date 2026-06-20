@@ -1,9 +1,10 @@
 use std::{
     cmp::Ordering,
     ffi::CString,
-    fs::{self, File},
+    fs::{self, File, OpenOptions},
     io::{self, Seek, SeekFrom},
-    os::unix::fs::FileExt,
+    mem,
+    os::{fd::AsRawFd, unix::fs::FileExt},
     path::{Component, Path, PathBuf},
 };
 
@@ -11,7 +12,9 @@ use crate::kexec::{self, KexecImage};
 
 const SYS_BLOCK: &str = "/sys/block";
 const DEV: &str = "/dev";
+const DEV_LOOP_CONTROL: &str = "/dev/loop-control";
 const BOOT_MOUNT_ROOT: &str = "/run/pocketboot/boot";
+const EXTLINUX_CONFIG_PATHS: [&str; 2] = ["extlinux/extlinux.conf", "boot/extlinux/extlinux.conf"];
 const GPT_SIGNATURE: &[u8; 8] = b"EFI PART";
 const GPT_MIN_HEADER_SIZE: usize = 92;
 const GPT_MIN_ENTRY_SIZE: usize = 128;
@@ -23,6 +26,14 @@ const MBR_PRIMARY_PARTITIONS: usize = 4;
 const GPT_PROTECTIVE_MBR_TYPE: u8 = 0xee;
 const DEFAULT_LOGICAL_BLOCK_SIZE: u64 = 512;
 const MS_NOSYMFOLLOW: libc::c_ulong = 256;
+const USERDATA_PARTNAME: &str = "userdata";
+const MBR_LINUX_PARTITION_TYPE: u8 = 0x83;
+const LOOP_CTL_GET_FREE: libc::Ioctl = 0x4c82;
+const LOOP_CONFIGURE: libc::Ioctl = 0x4c0a;
+const LO_FLAGS_READ_ONLY: u32 = 1;
+const LO_FLAGS_AUTOCLEAR: u32 = 4;
+const LO_NAME_SIZE: usize = 64;
+const LO_KEY_SIZE: usize = 32;
 
 const ESP_GUID: Guid = Guid([
     0x28, 0x73, 0x2a, 0xc1, 0x1f, 0xf8, 0xd2, 0x11, 0xba, 0x4b, 0x00, 0xa0, 0xc9, 0x3e, 0xc9, 0x3b,
@@ -43,7 +54,9 @@ pub(crate) struct BootEntry {
     pub(crate) partition: String,
     linux: PathBuf,
     initrds: Vec<PathBuf>,
+    dtb: Option<PathBuf>,
     options: Vec<String>,
+    boot_order: u32,
 }
 
 impl BootEntry {
@@ -65,8 +78,18 @@ impl BootEntry {
                 format!("open kernel {}: {err}", self.linux.display()),
             )
         })?;
+        let kernel = kexec::prepare_kernel_payload(kernel)?;
         let initrd = open_initrd_payload(&self.initrds)?;
-        let image = KexecImage::new(kernel, initrd, None, &self.cmdline())?;
+        let dtb = self
+            .dtb
+            .as_ref()
+            .map(|path| {
+                File::open(path).map_err(|err| {
+                    io::Error::new(err.kind(), format!("open DTB {}: {err}", path.display()))
+                })
+            })
+            .transpose()?;
+        let image = KexecImage::new(kernel, initrd, dtb, &self.cmdline())?;
         image.load()
     }
 }
@@ -75,6 +98,7 @@ impl BootEntry {
 pub(crate) enum BootPartitionRole {
     Xbootldr,
     Esp,
+    Nested,
 }
 
 impl BootPartitionRole {
@@ -82,6 +106,7 @@ impl BootPartitionRole {
         match self {
             Self::Xbootldr => 0,
             Self::Esp => 1,
+            Self::Nested => 2,
         }
     }
 
@@ -89,6 +114,7 @@ impl BootPartitionRole {
         match self {
             Self::Xbootldr => "xbootldr",
             Self::Esp => "esp",
+            Self::Nested => "nested",
         }
     }
 }
@@ -111,6 +137,7 @@ pub(crate) fn discover() -> io::Result<Vec<BootEntry>> {
                     "mounted boot partition candidate"
                 );
                 entries.extend(scan_bls_entries(&partition, &mount));
+                entries.extend(scan_extlinux_entries(&partition, &mount));
             }
             Err(err) => {
                 tracing::warn!(
@@ -136,7 +163,7 @@ fn open_initrd_payload(initrds: &[PathBuf]) -> io::Result<Option<File>> {
             io::Error::new(err.kind(), format!("open initrd {}: {err}", path.display()))
         }),
         paths => {
-            let mut payload = kexec::create_payload_memfd("bls-initrd")?;
+            let mut payload = kexec::create_payload_memfd("boot-initrd")?;
             for path in paths {
                 let mut initrd = File::open(path).map_err(|err| {
                     io::Error::new(err.kind(), format!("open initrd {}: {err}", path.display()))
@@ -154,7 +181,7 @@ fn open_initrd_payload(initrds: &[PathBuf]) -> io::Result<Option<File>> {
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Debug)]
 struct BootPartitionCandidate {
     disk: String,
     partition: String,
@@ -162,6 +189,7 @@ struct BootPartitionCandidate {
     role: BootPartitionRole,
     dev_path: PathBuf,
     removable: bool,
+    _loop_device: Option<File>,
 }
 
 #[derive(Clone, Debug)]
@@ -177,6 +205,12 @@ fn discover_boot_partitions() -> io::Result<Vec<BootPartitionCandidate>> {
             Ok(partitions) => candidates.extend(partitions),
             Err(err) => {
                 tracing::debug!(disk = %disk.name, error = ?err, "disk is not usable GPT boot media");
+            }
+        }
+        match nested_boot_partitions(&disk) {
+            Ok(partitions) => candidates.extend(partitions),
+            Err(err) => {
+                tracing::debug!(disk = %disk.name, error = ?err, "disk has no usable nested boot media");
             }
         }
     }
@@ -336,10 +370,274 @@ fn gpt_boot_partitions(disk: &DiskCandidate) -> io::Result<Vec<BootPartitionCand
             partno: entry.partno,
             role,
             removable: disk.removable,
+            _loop_device: None,
         });
     }
 
     Ok(candidates)
+}
+
+#[derive(Clone, Debug)]
+struct OuterPartitionCandidate {
+    disk: String,
+    partition: String,
+    partno: u32,
+    dev_path: PathBuf,
+    size_bytes: u64,
+    removable: bool,
+}
+
+fn nested_boot_partitions(disk: &DiskCandidate) -> io::Result<Vec<BootPartitionCandidate>> {
+    let mut candidates = Vec::new();
+    for outer in userdata_partitions(disk)? {
+        match nested_partitions_for_outer(&outer) {
+            Ok(partitions) => candidates.extend(partitions),
+            Err(err) => {
+                tracing::debug!(
+                    disk = %outer.disk,
+                    partition = %outer.partition,
+                    path = %outer.dev_path.display(),
+                    error = ?err,
+                    "userdata partition has no usable nested boot partition"
+                );
+            }
+        }
+    }
+    Ok(candidates)
+}
+
+fn userdata_partitions(disk: &DiskCandidate) -> io::Result<Vec<OuterPartitionCandidate>> {
+    let mut partitions = Vec::new();
+    for entry in fs::read_dir(&disk.sysfs_path)? {
+        let entry = entry?;
+        let sysfs_path = entry.path();
+        if !sysfs_path.join("partition").exists() {
+            continue;
+        }
+        if uevent_value(sysfs_path.join("uevent"), "PARTNAME").as_deref() != Some(USERDATA_PARTNAME)
+        {
+            continue;
+        }
+
+        let partition = entry.file_name().to_string_lossy().into_owned();
+        let dev_path = Path::new(DEV).join(&partition);
+        if !dev_path.exists() {
+            continue;
+        }
+
+        let sectors_512 = read_trimmed(sysfs_path.join("size"))
+            .and_then(|value| value.parse::<u64>().ok())
+            .unwrap_or(0);
+        let size_bytes = sectors_512
+            .checked_mul(512)
+            .ok_or_else(|| invalid_data(format!("partition {partition} byte size overflows")))?;
+        let partno = read_trimmed(sysfs_path.join("partition"))
+            .and_then(|value| value.parse::<u32>().ok())
+            .unwrap_or(0);
+
+        partitions.push(OuterPartitionCandidate {
+            disk: disk.name.clone(),
+            partition,
+            partno,
+            dev_path,
+            size_bytes,
+            removable: disk.removable,
+        });
+    }
+    partitions.sort_by(|left, right| left.partno.cmp(&right.partno));
+    Ok(partitions)
+}
+
+fn nested_partitions_for_outer(
+    outer: &OuterPartitionCandidate,
+) -> io::Result<Vec<BootPartitionCandidate>> {
+    let mut file = File::open(&outer.dev_path).map_err(|err| {
+        io::Error::new(
+            err.kind(),
+            format!("open {}: {err}", outer.dev_path.display()),
+        )
+    })?;
+    let mbr = mbrman::MBR::read_from(&mut file, DEFAULT_LOGICAL_BLOCK_SIZE as u32)
+        .map_err(|err| invalid_data(format!("read nested MBR: {err}")))?;
+    validate_mbr_extents(&mbr, outer.size_bytes / DEFAULT_LOGICAL_BLOCK_SIZE)?;
+
+    let mut candidates = Vec::new();
+    for (index, entry) in mbr
+        .iter()
+        .filter(|(index, _)| *index <= MBR_PRIMARY_PARTITIONS)
+    {
+        if !is_nested_boot_entry(entry) {
+            continue;
+        }
+
+        let offset = u64::from(entry.starting_lba)
+            .checked_mul(DEFAULT_LOGICAL_BLOCK_SIZE)
+            .ok_or_else(|| invalid_data("nested partition byte offset overflows"))?;
+        let size = u64::from(entry.sectors)
+            .checked_mul(DEFAULT_LOGICAL_BLOCK_SIZE)
+            .ok_or_else(|| invalid_data("nested partition byte size overflows"))?;
+        let mapping = create_loop_mapping(&outer.dev_path, offset, size).map_err(|err| {
+            io::Error::new(
+                err.kind(),
+                format!(
+                    "map nested partition {}p{index} at offset {offset}: {err}",
+                    outer.partition
+                ),
+            )
+        })?;
+        tracing::info!(
+            disk = %outer.disk,
+            outer_partition = %outer.partition,
+            inner_partno = index,
+            offset,
+            size,
+            loop_path = %mapping.path.display(),
+            "mapped nested boot partition candidate"
+        );
+
+        candidates.push(BootPartitionCandidate {
+            disk: outer.disk.clone(),
+            partition: format!("{}p{index}", outer.partition),
+            partno: index as u32,
+            role: BootPartitionRole::Nested,
+            dev_path: mapping.path,
+            removable: outer.removable,
+            _loop_device: Some(mapping.file),
+        });
+    }
+    Ok(candidates)
+}
+
+fn is_nested_boot_entry(entry: &mbrman::MBRPartitionEntry) -> bool {
+    entry.is_active()
+        && entry.sys == MBR_LINUX_PARTITION_TYPE
+        && entry.starting_lba > 0
+        && entry.sectors > 0
+}
+
+fn validate_mbr_extents(mbr: &mbrman::MBR, total_sectors: u64) -> io::Result<()> {
+    let mut extents = Vec::new();
+    for (index, entry) in mbr.iter().filter(|(_, entry)| entry.is_used()) {
+        let start = u64::from(entry.starting_lba);
+        let end = start
+            .checked_add(u64::from(entry.sectors))
+            .ok_or_else(|| invalid_data(format!("nested MBR partition {index} end overflows")))?;
+        if entry.sectors == 0 || end > total_sectors {
+            return Err(invalid_data(format!(
+                "nested MBR partition {index} exceeds containing partition"
+            )));
+        }
+        extents.push((index, start, end));
+    }
+
+    extents.sort_by_key(|(_, start, _)| *start);
+    for pair in extents.windows(2) {
+        let (left_index, _, left_end) = pair[0];
+        let (right_index, right_start, _) = pair[1];
+        if left_end > right_start {
+            return Err(invalid_data(format!(
+                "nested MBR partitions {left_index} and {right_index} overlap"
+            )));
+        }
+    }
+    Ok(())
+}
+
+#[derive(Debug)]
+struct LoopMapping {
+    path: PathBuf,
+    file: File,
+}
+
+#[repr(C)]
+struct LoopInfo64 {
+    lo_device: u64,
+    lo_inode: u64,
+    lo_rdevice: u64,
+    lo_offset: u64,
+    lo_sizelimit: u64,
+    lo_number: u32,
+    lo_encrypt_type: u32,
+    lo_encrypt_key_size: u32,
+    lo_flags: u32,
+    lo_file_name: [u8; LO_NAME_SIZE],
+    lo_crypt_name: [u8; LO_NAME_SIZE],
+    lo_encrypt_key: [u8; LO_KEY_SIZE],
+    lo_init: [u64; 2],
+}
+
+#[repr(C)]
+struct LoopConfig {
+    fd: u32,
+    block_size: u32,
+    info: LoopInfo64,
+    __reserved: [u64; 8],
+}
+
+fn create_loop_mapping(
+    backing_path: &Path,
+    offset: u64,
+    sizelimit: u64,
+) -> io::Result<LoopMapping> {
+    let control = File::open(DEV_LOOP_CONTROL)
+        .map_err(|err| io::Error::new(err.kind(), format!("open {DEV_LOOP_CONTROL}: {err}")))?;
+    let number = ioctl_loop_ctl_get_free(&control)?;
+    let loop_path = PathBuf::from(format!("{DEV}/loop{number}"));
+    let loop_file = OpenOptions::new()
+        .read(true)
+        .open(&loop_path)
+        .map_err(|err| {
+            io::Error::new(err.kind(), format!("open {}: {err}", loop_path.display()))
+        })?;
+    let backing_file = File::open(backing_path).map_err(|err| {
+        io::Error::new(
+            err.kind(),
+            format!("open loop backing {}: {err}", backing_path.display()),
+        )
+    })?;
+
+    let mut info = unsafe { mem::zeroed::<LoopInfo64>() };
+    info.lo_offset = offset;
+    info.lo_sizelimit = sizelimit;
+    info.lo_flags = LO_FLAGS_READ_ONLY | LO_FLAGS_AUTOCLEAR;
+    set_loop_file_name(&mut info, backing_path);
+    let config = LoopConfig {
+        fd: u32::try_from(backing_file.as_raw_fd())
+            .map_err(|_| invalid_data("loop backing fd is negative"))?,
+        block_size: DEFAULT_LOGICAL_BLOCK_SIZE as u32,
+        info,
+        __reserved: [0; 8],
+    };
+    ioctl_loop_configure(&loop_file, &config)?;
+
+    Ok(LoopMapping {
+        path: loop_path,
+        file: loop_file,
+    })
+}
+
+fn set_loop_file_name(info: &mut LoopInfo64, path: &Path) {
+    let bytes = path.as_os_str().as_encoded_bytes();
+    let len = bytes.len().min(info.lo_file_name.len().saturating_sub(1));
+    info.lo_file_name[..len].copy_from_slice(&bytes[..len]);
+}
+
+fn ioctl_loop_ctl_get_free(control: &File) -> io::Result<i32> {
+    let rc = unsafe { libc::ioctl(control.as_raw_fd(), LOOP_CTL_GET_FREE) };
+    if rc < 0 {
+        Err(io::Error::last_os_error())
+    } else {
+        Ok(rc)
+    }
+}
+
+fn ioctl_loop_configure(loop_file: &File, config: &LoopConfig) -> io::Result<()> {
+    let rc = unsafe { libc::ioctl(loop_file.as_raw_fd(), LOOP_CONFIGURE, config) };
+    if rc < 0 {
+        Err(io::Error::last_os_error())
+    } else {
+        Ok(())
+    }
 }
 
 fn validate_protective_mbr(file: &File) -> io::Result<()> {
@@ -487,10 +785,22 @@ fn mount_partition(candidate: &BootPartitionCandidate) -> io::Result<MountedPart
     fs::create_dir_all(&root)?;
 
     let mut last_error = None;
-    for fstype in ["vfat", "ext4"] {
+    for fstype in ["vfat", "ext4", "ext2"] {
         match mount_fs(&candidate.dev_path, &root, fstype) {
             Ok(()) => return Ok(MountedPartition { root, fstype }),
-            Err(err) => last_error = Some(err),
+            Err(err) => {
+                tracing::debug!(
+                    disk = %candidate.disk,
+                    partition = %candidate.partition,
+                    role = candidate.role.label(),
+                    path = %candidate.dev_path.display(),
+                    mount = %root.display(),
+                    fstype,
+                    error = ?err,
+                    "failed to mount boot partition candidate as filesystem"
+                );
+                last_error = Some(err);
+            }
         }
     }
 
@@ -516,12 +826,7 @@ fn mount_fs(source: &Path, target: &Path, fstype: &'static str) -> io::Result<()
         return Ok(());
     }
 
-    let err = io::Error::last_os_error();
-    if err.raw_os_error() == Some(libc::EBUSY) {
-        Ok(())
-    } else {
-        Err(err)
-    }
+    Err(io::Error::last_os_error())
 }
 
 fn scan_bls_entries(
@@ -553,6 +858,211 @@ fn scan_bls_entries(
         }
     }
     boot_entries
+}
+
+fn scan_extlinux_entries(
+    partition: &BootPartitionCandidate,
+    mount: &MountedPartition,
+) -> Vec<BootEntry> {
+    let mut boot_entries = Vec::new();
+    for config_path in EXTLINUX_CONFIG_PATHS {
+        let path = mount.root.join(config_path);
+        if !path.is_file() {
+            tracing::debug!(path = %path.display(), "extlinux config not found");
+            continue;
+        }
+
+        match parse_extlinux_file(partition, &mount.root, &path) {
+            Ok(entries) => boot_entries.extend(entries),
+            Err(err) => {
+                tracing::warn!(path = %path.display(), error = ?err, "failed to parse extlinux config")
+            }
+        }
+    }
+    boot_entries
+}
+
+fn parse_extlinux_file(
+    partition: &BootPartitionCandidate,
+    root: &Path,
+    source: &Path,
+) -> io::Result<Vec<BootEntry>> {
+    let text = fs::read_to_string(source).map_err(|err| {
+        io::Error::new(
+            err.kind(),
+            format!("read extlinux config {}: {err}", source.display()),
+        )
+    })?;
+    let config = ExtlinuxConfig::parse(&text);
+    let mut entries = Vec::new();
+    for entry in config.entries {
+        match extlinux_boot_entry(partition, root, source, &config.default, entry) {
+            Ok(Some(entry)) => entries.push(entry),
+            Ok(None) => {}
+            Err(err) => {
+                tracing::warn!(path = %source.display(), error = ?err, "failed to build extlinux entry")
+            }
+        }
+    }
+    Ok(entries)
+}
+
+fn extlinux_boot_entry(
+    partition: &BootPartitionCandidate,
+    root: &Path,
+    source: &Path,
+    default: &Option<String>,
+    entry: ExtlinuxEntry,
+) -> io::Result<Option<BootEntry>> {
+    let Some(kernel) = entry.kernel.as_deref().filter(|value| !value.is_empty()) else {
+        tracing::debug!(path = %source.display(), label = %entry.label, "skipping extlinux entry without kernel payload");
+        return Ok(None);
+    };
+    let linux = resolve_boot_path(root, kernel)?;
+    if !linux.is_file() {
+        tracing::warn!(source = %source.display(), label = %entry.label, linux = %linux.display(), "extlinux kernel payload is missing");
+        return Ok(None);
+    }
+
+    let mut initrds = Vec::new();
+    for initrd in &entry.initrds {
+        let path = resolve_boot_path(root, initrd)?;
+        if !path.is_file() {
+            tracing::warn!(source = %source.display(), label = %entry.label, initrd = %path.display(), "extlinux initrd payload is missing");
+            return Ok(None);
+        }
+        initrds.push(path);
+    }
+
+    let dtb = entry
+        .fdt
+        .as_deref()
+        .map(|fdt| resolve_boot_path(root, fdt))
+        .transpose()?;
+    if let Some(dtb) = &dtb {
+        if !dtb.is_file() {
+            tracing::warn!(source = %source.display(), label = %entry.label, dtb = %dtb.display(), "extlinux DTB payload is missing");
+            return Ok(None);
+        }
+    }
+
+    let is_default = default.as_deref() == Some(entry.label.as_str());
+    Ok(Some(BootEntry {
+        id: format!("extlinux:{}", entry.label),
+        title: entry.menu_label.or_else(|| Some(entry.label.clone())),
+        version: None,
+        architecture: None,
+        source: source.to_path_buf(),
+        role: partition.role,
+        disk: partition.disk.clone(),
+        partition: partition.partition.clone(),
+        linux,
+        initrds,
+        dtb,
+        options: entry.append,
+        boot_order: if is_default { 0 } else { 1 },
+    }))
+}
+
+#[derive(Debug, Default)]
+struct ExtlinuxConfig {
+    default: Option<String>,
+    entries: Vec<ExtlinuxEntry>,
+}
+
+#[derive(Debug, Default)]
+struct ExtlinuxEntry {
+    label: String,
+    menu_label: Option<String>,
+    kernel: Option<String>,
+    fdt: Option<String>,
+    initrds: Vec<String>,
+    append: Vec<String>,
+}
+
+impl ExtlinuxConfig {
+    fn parse(text: &str) -> Self {
+        let mut config = Self::default();
+        let mut current = None;
+
+        for line in text.lines() {
+            let line = line.trim();
+            if line.is_empty() || line.starts_with('#') {
+                continue;
+            }
+
+            let (key, value) = split_key_value(line);
+            let key = key.to_ascii_lowercase();
+            match key.as_str() {
+                "default" => {
+                    if !value.is_empty() {
+                        config.default = Some(value.to_string());
+                    }
+                }
+                "label" => {
+                    if let Some(entry) = current.take() {
+                        config.entries.push(entry);
+                    }
+                    current = (!value.is_empty()).then(|| ExtlinuxEntry {
+                        label: value.to_string(),
+                        ..Default::default()
+                    });
+                }
+                "kernel" | "linux" => {
+                    if let Some(entry) = &mut current {
+                        entry.kernel = Some(value.to_string());
+                    }
+                }
+                "fdt" | "devicetree" => {
+                    if let Some(entry) = &mut current {
+                        entry.fdt = Some(value.to_string());
+                    }
+                }
+                "initrd" => {
+                    if let Some(entry) = &mut current {
+                        entry.initrds.extend(split_initrd_values(value));
+                    }
+                }
+                "append" => {
+                    if let Some(entry) = &mut current {
+                        if !value.is_empty() && value != "-" {
+                            entry.append.push(value.to_string());
+                        }
+                    }
+                }
+                "menu" => {
+                    if let Some(entry) = &mut current {
+                        let (subkey, subvalue) = split_key_value(value);
+                        if subkey.eq_ignore_ascii_case("label") && !subvalue.is_empty() {
+                            entry.menu_label = Some(subvalue.to_string());
+                        }
+                    }
+                }
+                _ => {}
+            }
+        }
+
+        if let Some(entry) = current {
+            config.entries.push(entry);
+        }
+        config
+    }
+}
+
+fn split_key_value(line: &str) -> (&str, &str) {
+    if let Some(split) = line.find(char::is_whitespace) {
+        (&line[..split], line[split..].trim())
+    } else {
+        (line, "")
+    }
+}
+
+fn split_initrd_values(value: &str) -> impl Iterator<Item = String> + '_ {
+    value
+        .split(',')
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(str::to_string)
 }
 
 fn parse_bls_file(
@@ -613,7 +1123,9 @@ fn parse_bls_file(
         partition: partition.partition.clone(),
         linux,
         initrds,
+        dtb: None,
         options: bls.options,
+        boot_order: 0,
     }))
 }
 
@@ -675,7 +1187,7 @@ fn architecture_matches(value: Option<&str>) -> bool {
 fn resolve_boot_path(root: &Path, value: &str) -> io::Result<PathBuf> {
     let value = value.trim();
     if value.is_empty() {
-        return Err(invalid_data("empty BLS path"));
+        return Err(invalid_data("empty boot path"));
     }
 
     let mut relative = PathBuf::new();
@@ -685,12 +1197,12 @@ fn resolve_boot_path(root: &Path, value: &str) -> io::Result<PathBuf> {
             Component::CurDir => {}
             Component::RootDir => {}
             Component::ParentDir | Component::Prefix(_) => {
-                return Err(invalid_data(format!("unsafe BLS path {value:?}")));
+                return Err(invalid_data(format!("unsafe boot path {value:?}")));
             }
         }
     }
     if relative.as_os_str().is_empty() {
-        return Err(invalid_data(format!("empty BLS path {value:?}")));
+        return Err(invalid_data(format!("empty boot path {value:?}")));
     }
 
     Ok(root.join(relative))
@@ -714,6 +1226,7 @@ fn compare_boot_entries(left: &BootEntry, right: &BootEntry) -> Ordering {
         .cmp(&right.role.priority())
         .then_with(|| left.disk.cmp(&right.disk))
         .then_with(|| left.partition.cmp(&right.partition))
+        .then_with(|| left.boot_order.cmp(&right.boot_order))
         .then_with(|| right.id.cmp(&left.id))
         .then_with(|| left.source.cmp(&right.source))
 }
@@ -820,6 +1333,14 @@ fn read_trimmed(path: impl AsRef<Path>) -> Option<String> {
         .filter(|value| !value.is_empty())
 }
 
+fn uevent_value(path: impl AsRef<Path>, key: &str) -> Option<String> {
+    let contents = fs::read_to_string(path).ok()?;
+    contents.lines().find_map(|line| {
+        let (line_key, value) = line.split_once('=')?;
+        (line_key == key).then(|| value.to_string())
+    })
+}
+
 fn cstring_path(path: &Path) -> io::Result<CString> {
     CString::new(path.as_os_str().as_encoded_bytes()).map_err(|_| {
         io::Error::new(
@@ -836,6 +1357,7 @@ fn invalid_data(message: impl Into<String>) -> io::Error {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::io::Cursor;
 
     #[test]
     fn parses_minimal_bls_entry() {
@@ -855,6 +1377,65 @@ mod tests {
         let snippet = BlsSnippet::parse("linux /vmlinuz\nuki /EFI/Linux/test.efi\nfoo bar\n");
 
         assert_eq!(snippet.linux.as_deref(), Some("/vmlinuz"));
+    }
+
+    #[test]
+    fn parses_extlinux_entry() {
+        let config = ExtlinuxConfig::parse(
+            "timeout 1\ndefault postmarketOS\nmenu title boot prev kernel\n\nlabel postmarketOS\n\tmenu label postmarketOS edge\n\tkernel /vmlinuz\n\tfdt /board.dtb\n\tinitrd /initramfs\n\tappend quiet splash\n",
+        );
+
+        assert_eq!(config.default.as_deref(), Some("postmarketOS"));
+        assert_eq!(config.entries.len(), 1);
+        let entry = &config.entries[0];
+        assert_eq!(entry.label, "postmarketOS");
+        assert_eq!(entry.menu_label.as_deref(), Some("postmarketOS edge"));
+        assert_eq!(entry.kernel.as_deref(), Some("/vmlinuz"));
+        assert_eq!(entry.fdt.as_deref(), Some("/board.dtb"));
+        assert_eq!(entry.initrds, ["/initramfs"]);
+        assert_eq!(entry.append, ["quiet splash"]);
+    }
+
+    #[test]
+    fn parses_extlinux_comma_separated_initrds() {
+        let config = ExtlinuxConfig::parse("label test\ninitrd /one.img,/two.img\n");
+
+        assert_eq!(config.entries[0].initrds, ["/one.img", "/two.img"]);
+    }
+
+    #[test]
+    fn boot_entry_order_prefers_extlinux_default() {
+        let default = boot_entry_for_order("extlinux:default", 0);
+        let fallback = boot_entry_for_order("extlinux:fallback", 1);
+
+        assert_eq!(compare_boot_entries(&default, &fallback), Ordering::Less);
+    }
+
+    #[test]
+    fn filters_nested_mbr_boot_entries() {
+        let active_linux = mbr_entry(mbrman::BOOT_ACTIVE, 0x83, 2048, 1024);
+        let inactive_linux = mbr_entry(mbrman::BOOT_INACTIVE, 0x83, 2048, 1024);
+        let active_fat = mbr_entry(mbrman::BOOT_ACTIVE, 0x0c, 2048, 1024);
+
+        assert!(is_nested_boot_entry(&active_linux));
+        assert!(!is_nested_boot_entry(&inactive_linux));
+        assert!(!is_nested_boot_entry(&active_fat));
+    }
+
+    #[test]
+    fn validates_nested_mbr_extents() {
+        let mbr = test_mbr(&[(1, 1, 4), (2, 5, 4)]);
+
+        validate_mbr_extents(&mbr, 16).unwrap();
+    }
+
+    #[test]
+    fn rejects_overlapping_nested_mbr_extents() {
+        let mbr = test_mbr(&[(1, 1, 4), (2, 4, 4)]);
+
+        let err = validate_mbr_extents(&mbr, 16).unwrap_err();
+
+        assert!(err.to_string().contains("overlap"));
     }
 
     #[test]
@@ -882,5 +1463,43 @@ mod tests {
     #[test]
     fn crc32_matches_gpt_known_value() {
         assert_eq!(crc32_ieee(b"123456789"), 0xcbf4_3926);
+    }
+
+    fn boot_entry_for_order(id: &str, boot_order: u32) -> BootEntry {
+        BootEntry {
+            id: id.to_string(),
+            title: None,
+            version: None,
+            architecture: None,
+            source: PathBuf::from("/boot/extlinux/extlinux.conf"),
+            role: BootPartitionRole::Nested,
+            disk: "sda".to_string(),
+            partition: "sda28p1".to_string(),
+            linux: PathBuf::from("/boot/vmlinuz"),
+            initrds: Vec::new(),
+            dtb: None,
+            options: Vec::new(),
+            boot_order,
+        }
+    }
+
+    fn mbr_entry(boot: u8, sys: u8, starting_lba: u32, sectors: u32) -> mbrman::MBRPartitionEntry {
+        mbrman::MBRPartitionEntry {
+            boot,
+            first_chs: mbrman::CHS::empty(),
+            sys,
+            last_chs: mbrman::CHS::empty(),
+            starting_lba,
+            sectors,
+        }
+    }
+
+    fn test_mbr(entries: &[(usize, u32, u32)]) -> mbrman::MBR {
+        let mut image = Cursor::new(vec![0; 64 * 512]);
+        let mut mbr = mbrman::MBR::new_from(&mut image, 512, [0x12, 0x34, 0x56, 0x78]).unwrap();
+        for (index, starting_lba, sectors) in entries {
+            mbr[*index] = mbr_entry(mbrman::BOOT_INACTIVE, 0x83, *starting_lba, *sectors);
+        }
+        mbr
     }
 }
