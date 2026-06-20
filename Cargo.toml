@@ -15,6 +15,7 @@ flate2 = "1"
 gadgetry-most-foul = "0.1.1"
 libc = "0.2.177"
 mbrman = "0.6.1"
+ruzstd = "0.8.3"
 rustix = { version = "1", features = ["termios"] }
 slint = { version = "1.16.1", default-features = false, features = ["compat-1-2", "libm", "renderer-software", "unsafe-single-threaded"] }
 tracing = "0.1"

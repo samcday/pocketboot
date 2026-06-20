@@ -18,12 +18,14 @@ mod kexec;
 mod kmsg;
 #[path = "kmsg-forwarder.rs"]
 mod kmsg_forwarder;
+mod pe;
 mod power;
 #[cfg(feature = "qemu")]
 mod qemu;
 mod reaper;
 mod settle;
 mod ui;
+mod zboot;
 
 type Result<T> = std::result::Result<T, String>;
 
@@ -36,7 +38,14 @@ const FDT_SERIALNO_PATHS: [&str; 1] = [
 ];
 const DEFAULT_SERIALNO: &str = "0001";
 
-fn main() -> Result<()> {
+fn main() {
+    if let Err(err) = run() {
+        println!("pocketboot error: {}", err);
+        thread::sleep(Duration::from_secs(1));
+    }
+}
+
+fn run() -> Result<()> {
     if unsafe { libc::getpid() } != 1 {
         return Err("pocketboot must run as PID 1 (/init)".to_string());
     }

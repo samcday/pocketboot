@@ -4,10 +4,17 @@ use std::{
     os::fd::{AsRawFd, FromRawFd},
 };
 
-use flate2::read::MultiGzDecoder;
+use flate2::read::{GzDecoder, MultiGzDecoder};
+use ruzstd::decoding::StreamingDecoder;
+
+use crate::{pe, zboot};
 
 const LINUX_REBOOT_CMD_KEXEC: libc::c_int = 0x45584543;
 const GZIP_MAGIC: [u8; 2] = [0x1f, 0x8b];
+const ARM64_IMAGE_MAGIC_OFFSET: usize = 56;
+const ARM64_IMAGE_MAGIC_BYTES: &[u8; 4] = b"ARM\x64";
+const ARM64_IMAGE_MIN_SIZE: usize = 64;
+const ARM64_PAGE_SIZE: u64 = 4096;
 #[cfg(target_arch = "aarch64")]
 const PAGE_SIZE: u64 = 4096;
 
@@ -77,27 +84,14 @@ pub(crate) fn reopen_payload_readonly(file: File) -> io::Result<File> {
 }
 
 pub(crate) fn prepare_kernel_payload(mut kernel: File) -> io::Result<File> {
-    if !is_gzip_payload(&mut kernel)? {
+    let mut payload = Vec::new();
+    kernel.read_to_end(&mut payload)?;
+    kernel.seek(SeekFrom::Start(0))?;
+
+    let Some(prepared) = prepare_kernel_payload_bytes(&payload)? else {
         return Ok(kernel);
-    }
-
-    tracing::info!("decompressing gzip kernel image");
-    let mut decoder = MultiGzDecoder::new(kernel);
-    let mut payload = create_payload_memfd("kernel-uncompressed")?;
-    let copied = io::copy(&mut decoder, &mut payload).map_err(|err| {
-        io::Error::new(err.kind(), format!("decompress gzip kernel image: {err}"))
-    })?;
-    tracing::info!(bytes = copied, "decompressed gzip kernel image");
-
-    payload.seek(SeekFrom::Start(0))?;
-    reopen_payload_readonly(payload)
-}
-
-fn is_gzip_payload(payload: &mut File) -> io::Result<bool> {
-    let mut magic = [0; GZIP_MAGIC.len()];
-    let read = payload.read(&mut magic)?;
-    payload.seek(SeekFrom::Start(0))?;
-    Ok(read == magic.len() && magic == GZIP_MAGIC)
+    };
+    memfd_payload("kernel-prepared", &prepared)
 }
 
 pub(crate) fn exec_loaded_image() -> io::Result<()> {
@@ -117,6 +111,176 @@ fn read_payload(file: &File) -> io::Result<Vec<u8>> {
     let mut data = Vec::new();
     file.read_to_end(&mut data)?;
     Ok(data)
+}
+
+fn memfd_payload(name: &str, data: &[u8]) -> io::Result<File> {
+    let mut payload = create_payload_memfd(name)?;
+    io::Write::write_all(&mut payload, data)?;
+    payload.seek(SeekFrom::Start(0))?;
+    reopen_payload_readonly(payload)
+}
+
+fn prepare_kernel_payload_bytes(payload: &[u8]) -> io::Result<Option<Vec<u8>>> {
+    if payload.starts_with(&GZIP_MAGIC) {
+        return decompress_toplevel_gzip(payload).map(Some);
+    }
+
+    let Some(pe) = pe::Image::parse(payload)? else {
+        return Ok(None);
+    };
+
+    if pe.machine() != pe::IMAGE_FILE_MACHINE_ARM64 {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            format!("PE/COFF image is not ARM64: machine=0x{:04x}", pe.machine()),
+        ));
+    }
+
+    extract_pe_arm64_kernel(&pe).map(Some)
+}
+
+fn decompress_toplevel_gzip(payload: &[u8]) -> io::Result<Vec<u8>> {
+    tracing::info!("decompressing gzip kernel image");
+    let mut decoder = MultiGzDecoder::new(payload);
+    let mut decompressed = Vec::new();
+    decoder.read_to_end(&mut decompressed).map_err(|err| {
+        io::Error::new(err.kind(), format!("decompress gzip kernel image: {err}"))
+    })?;
+    tracing::info!(bytes = decompressed.len(), "decompressed gzip kernel image");
+    Ok(decompressed)
+}
+
+fn extract_pe_arm64_kernel(pe: &pe::Image<'_>) -> io::Result<Vec<u8>> {
+    if let Some(zboot) = zboot::Image::parse(pe.data())? {
+        let image = decompress_zboot_payload(&zboot)?;
+        if !is_raw_arm64_image(&image) {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                "zboot payload did not decompress to a raw arm64 Image",
+            ));
+        }
+        tracing::info!(
+            compression = zboot.compression_name(),
+            offset = zboot.payload_offset(),
+            compressed_bytes = zboot.payload().len(),
+            bytes = image.len(),
+            "extracted Linux EFI zboot arm64 Image"
+        );
+        return Ok(image);
+    }
+
+    for section in pe.sections() {
+        if let Some((offset, image)) = find_raw_arm64_image(section.data()) {
+            tracing::info!(
+                section = %section.name(),
+                offset = section.raw_offset() + offset,
+                bytes = image.len(),
+                "extracted raw arm64 Image from PE/COFF kernel"
+            );
+            return Ok(image.to_vec());
+        }
+    }
+
+    for section in pe.sections() {
+        if let Some((offset, image)) = find_gzipped_arm64_image(section.data())? {
+            tracing::info!(
+                section = %section.name(),
+                offset = section.raw_offset() + offset,
+                bytes = image.len(),
+                "extracted gzipped arm64 Image from PE/COFF kernel"
+            );
+            return Ok(image);
+        }
+    }
+
+    Err(io::Error::new(
+        io::ErrorKind::InvalidData,
+        "PE/COFF ARM64 kernel does not contain a supported zboot, raw, or gzipped arm64 Image payload",
+    ))
+}
+
+fn decompress_zboot_payload(image: &zboot::Image<'_>) -> io::Result<Vec<u8>> {
+    match image.compression() {
+        zboot::Compression::Gzip => decompress_embedded_gzip(image.payload()).map_err(|err| {
+            io::Error::new(err.kind(), format!("decompress gzip zboot payload: {err}"))
+        }),
+        zboot::Compression::Zstd => decompress_zstd(image.payload()),
+        zboot::Compression::Unsupported => Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            format!(
+                "unsupported zboot compression type {}",
+                image.compression_name()
+            ),
+        )),
+    }
+}
+
+fn decompress_zstd(payload: &[u8]) -> io::Result<Vec<u8>> {
+    let mut source = payload;
+    let mut decoder = StreamingDecoder::new(&mut source).map_err(|err| {
+        io::Error::new(
+            io::ErrorKind::InvalidData,
+            format!("create zstd decoder: {err}"),
+        )
+    })?;
+    let mut decompressed = Vec::new();
+    decoder
+        .read_to_end(&mut decompressed)
+        .map_err(|err| io::Error::new(err.kind(), format!("decompress zstd payload: {err}")))?;
+    Ok(decompressed)
+}
+
+fn find_raw_arm64_image(payload: &[u8]) -> Option<(usize, &[u8])> {
+    payload
+        .windows(ARM64_IMAGE_MAGIC_BYTES.len())
+        .position(|window| window == ARM64_IMAGE_MAGIC_BYTES)
+        .and_then(|magic_offset| {
+            let start = magic_offset.checked_sub(ARM64_IMAGE_MAGIC_OFFSET)?;
+            let image = &payload[start..];
+            is_raw_arm64_image(image).then_some((start, image))
+        })
+}
+
+fn find_gzipped_arm64_image(payload: &[u8]) -> io::Result<Option<(usize, Vec<u8>)>> {
+    let mut search_offset = 0;
+    while let Some(relative_offset) = payload[search_offset..]
+        .windows(GZIP_MAGIC.len())
+        .position(|window| window == GZIP_MAGIC)
+    {
+        let offset = search_offset + relative_offset;
+        match decompress_embedded_gzip(&payload[offset..]) {
+            Ok(decompressed) if is_raw_arm64_image(&decompressed) => {
+                return Ok(Some((offset, decompressed)));
+            }
+            Ok(_) | Err(_) => search_offset = offset + 1,
+        }
+    }
+    Ok(None)
+}
+
+fn decompress_embedded_gzip(payload: &[u8]) -> io::Result<Vec<u8>> {
+    let mut decoder = GzDecoder::new(payload);
+    let mut decompressed = Vec::new();
+    decoder.read_to_end(&mut decompressed).map_err(|err| {
+        io::Error::new(
+            err.kind(),
+            format!("decompress embedded gzip kernel image: {err}"),
+        )
+    })?;
+    Ok(decompressed)
+}
+
+fn is_raw_arm64_image(payload: &[u8]) -> bool {
+    if payload.len() < ARM64_IMAGE_MIN_SIZE
+        || payload
+            .get(ARM64_IMAGE_MAGIC_OFFSET..ARM64_IMAGE_MAGIC_OFFSET + ARM64_IMAGE_MAGIC_BYTES.len())
+            != Some(ARM64_IMAGE_MAGIC_BYTES)
+    {
+        return false;
+    }
+
+    let text_offset = u64::from_le_bytes(payload[8..16].try_into().unwrap());
+    text_offset % ARM64_PAGE_SIZE == 0
 }
 
 fn read_current_dtb() -> io::Result<Vec<u8>> {
@@ -615,6 +779,7 @@ __pb_tramp_end:
 mod tests {
     use super::*;
     use flate2::{Compression, write::GzEncoder};
+    use ruzstd::encoding::{CompressionLevel, compress_to_vec};
     use std::io::Write;
 
     #[test]
@@ -635,6 +800,60 @@ mod tests {
         let prepared = prepare_kernel_payload(payload).unwrap();
 
         assert_eq!(read_file(&prepared), raw);
+    }
+
+    #[test]
+    fn pe_gzip_kernel_payload_decompresses() {
+        let raw = raw_arm64_image();
+        let section = [
+            b"prefix".as_slice(),
+            gzip(&raw).as_slice(),
+            b"padding".as_slice(),
+        ]
+        .concat();
+        let payload = payload_file("test-pe-gzip-kernel", &pe_arm64(&section));
+
+        let prepared = prepare_kernel_payload(payload).unwrap();
+
+        assert_eq!(read_file(&prepared), raw);
+    }
+
+    #[test]
+    fn zboot_gzip_kernel_payload_decompresses() {
+        let raw = raw_arm64_image();
+        let payload = payload_file(
+            "test-zboot-gzip-kernel",
+            &zboot_pe_arm64("gzip", &gzip(&raw)),
+        );
+
+        let prepared = prepare_kernel_payload(payload).unwrap();
+
+        assert_eq!(read_file(&prepared), raw);
+    }
+
+    #[test]
+    fn zboot_zstd_kernel_payload_decompresses() {
+        let raw = raw_arm64_image();
+        let payload = payload_file(
+            "test-zboot-zstd-kernel",
+            &zboot_pe_arm64("zstd", &zstd(&raw)),
+        );
+
+        let prepared = prepare_kernel_payload(payload).unwrap();
+
+        assert_eq!(read_file(&prepared), raw);
+    }
+
+    #[test]
+    fn pe_without_arm64_payload_fails() {
+        let payload = payload_file("test-pe-no-kernel", &pe_arm64(b"not a kernel"));
+
+        let err = prepare_kernel_payload(payload).unwrap_err();
+
+        assert!(
+            err.to_string().contains("does not contain a supported"),
+            "unexpected error: {err}"
+        );
     }
 
     #[test]
@@ -668,6 +887,84 @@ mod tests {
         let mut encoder = GzEncoder::new(Vec::new(), Compression::default());
         encoder.write_all(data).unwrap();
         encoder.finish().unwrap()
+    }
+
+    fn zstd(data: &[u8]) -> Vec<u8> {
+        compress_to_vec(data, CompressionLevel::Fastest)
+    }
+
+    fn raw_arm64_image() -> Vec<u8> {
+        let mut image = vec![0; 128];
+        let image_size = image.len() as u64;
+        image[8..16].copy_from_slice(&0x80000u64.to_le_bytes());
+        image[16..24].copy_from_slice(&image_size.to_le_bytes());
+        image[56..60].copy_from_slice(ARM64_IMAGE_MAGIC_BYTES);
+        image
+    }
+
+    fn pe_arm64(section_data: &[u8]) -> Vec<u8> {
+        const PE_OFFSET: usize = 0x80;
+        const COFF_HEADER_SIZE: usize = 20;
+        const OPTIONAL_HEADER_SIZE: usize = 0xf0;
+        const SECTION_HEADER_SIZE: usize = 40;
+        const PE32_PLUS_MAGIC: u16 = 0x20b;
+        const PE_SIGNATURE: &[u8; 4] = b"PE\0\0";
+
+        let section_header_offset =
+            PE_OFFSET + PE_SIGNATURE.len() + COFF_HEADER_SIZE + OPTIONAL_HEADER_SIZE;
+        let raw_offset = section_header_offset + SECTION_HEADER_SIZE;
+        let mut image = vec![0; raw_offset + section_data.len()];
+
+        image[..2].copy_from_slice(b"MZ");
+        image[0x3c..0x40].copy_from_slice(&(PE_OFFSET as u32).to_le_bytes());
+        image[PE_OFFSET..PE_OFFSET + PE_SIGNATURE.len()].copy_from_slice(PE_SIGNATURE);
+
+        let coff_offset = PE_OFFSET + PE_SIGNATURE.len();
+        image[coff_offset..coff_offset + 2]
+            .copy_from_slice(&pe::IMAGE_FILE_MACHINE_ARM64.to_le_bytes());
+        image[coff_offset + 2..coff_offset + 4].copy_from_slice(&1u16.to_le_bytes());
+        image[coff_offset + 16..coff_offset + 18]
+            .copy_from_slice(&(OPTIONAL_HEADER_SIZE as u16).to_le_bytes());
+
+        let optional_header_offset = coff_offset + COFF_HEADER_SIZE;
+        image[optional_header_offset..optional_header_offset + 2]
+            .copy_from_slice(&PE32_PLUS_MAGIC.to_le_bytes());
+
+        image[section_header_offset..section_header_offset + 8].copy_from_slice(b".gzdata\0");
+        image[section_header_offset + 16..section_header_offset + 20]
+            .copy_from_slice(&(section_data.len() as u32).to_le_bytes());
+        image[section_header_offset + 20..section_header_offset + 24]
+            .copy_from_slice(&(raw_offset as u32).to_le_bytes());
+        image[raw_offset..raw_offset + section_data.len()].copy_from_slice(section_data);
+
+        image
+    }
+
+    fn zboot_pe_arm64(compression: &str, payload: &[u8]) -> Vec<u8> {
+        const LINUX_PE_MAGIC: &[u8; 4] = &0x8182_23cdu32.to_le_bytes();
+        const LINUX_PE_MAGIC_OFFSET: usize = 0x38;
+        const PAYLOAD_OFFSET_OFFSET: usize = 8;
+        const PAYLOAD_SIZE_OFFSET: usize = 12;
+        const COMPRESSION_OFFSET: usize = 24;
+        const COMPRESSION_LEN: usize = 8;
+
+        let mut image = pe_arm64(payload);
+        let payload_offset = image.len() - payload.len();
+
+        image[..4].copy_from_slice(b"MZ\0\0");
+        image[4..8].copy_from_slice(b"zimg");
+        image[PAYLOAD_OFFSET_OFFSET..PAYLOAD_OFFSET_OFFSET + 4]
+            .copy_from_slice(&(payload_offset as u32).to_le_bytes());
+        image[PAYLOAD_SIZE_OFFSET..PAYLOAD_SIZE_OFFSET + 4]
+            .copy_from_slice(&(payload.len() as u32).to_le_bytes());
+        let compression = compression.as_bytes();
+        assert!(compression.len() < COMPRESSION_LEN);
+        image[COMPRESSION_OFFSET..COMPRESSION_OFFSET + compression.len()]
+            .copy_from_slice(compression);
+        image[LINUX_PE_MAGIC_OFFSET..LINUX_PE_MAGIC_OFFSET + LINUX_PE_MAGIC.len()]
+            .copy_from_slice(LINUX_PE_MAGIC);
+
+        image
     }
 }
 
