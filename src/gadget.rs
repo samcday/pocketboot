@@ -89,7 +89,10 @@ pub(crate) enum MassStorageStop {
 #[allow(dead_code)]
 pub(crate) enum Mode {
     Console,
-    Fastboot { commands: fastboot::CommandMap },
+    Fastboot {
+        commands: fastboot::CommandMap,
+        acm: bool,
+    },
 }
 
 impl Mode {
@@ -300,7 +303,7 @@ impl Gadget {
 
         match mode {
             Mode::Console => self.setup_console_gadget(),
-            Mode::Fastboot { commands } => self.setup_fastboot_gadget(commands),
+            Mode::Fastboot { commands, acm } => self.setup_fastboot_gadget(commands, acm),
         }
     }
 
@@ -311,11 +314,15 @@ impl Gadget {
         Ok(None)
     }
 
-    fn setup_fastboot_gadget(&self, commands: fastboot::CommandMap) -> ThreadResult {
-        let serial = AcmFunction::new();
+    fn setup_fastboot_gadget(&self, commands: fastboot::CommandMap, acm: bool) -> ThreadResult {
         let fastboot_function = fastboot::UsbFunction::new(commands);
         let adb_function = adb::UsbFunction::new();
-        let config = config_with_functions(&[&serial, &fastboot_function, &adb_function]);
+        let config = if acm {
+            let serial = AcmFunction::new();
+            config_with_functions(&[&serial, &fastboot_function, &adb_function])
+        } else {
+            config_with_functions(&[&fastboot_function, &adb_function])
+        };
         self.register_and_bind(config)?;
 
         let (server, event_loop) = fastboot_function.start()?;

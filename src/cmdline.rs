@@ -22,6 +22,10 @@ impl KernelCommandLine {
             (!value.is_empty()).then_some(value)
         })
     }
+
+    pub(crate) fn is_set(&self, key: &str) -> bool {
+        self.args.iter().any(|arg| arg == key)
+    }
 }
 
 #[cfg(test)]
@@ -35,5 +39,14 @@ mod tests {
         assert_eq!(cmdline.value("androidboot.serialno"), Some("6ea45af6"));
         assert_eq!(cmdline.value("empty"), None);
         assert_eq!(cmdline.value("missing"), None);
+    }
+
+    #[test]
+    fn detects_bare_flags() {
+        let cmdline = KernelCommandLine::parse("foo pocketboot.acm pocketboot.acm.extra=1 bar");
+
+        assert!(cmdline.is_set("pocketboot.acm"));
+        assert!(!cmdline.is_set("pocketboot.acm.extra"));
+        assert!(!cmdline.is_set("missing"));
     }
 }

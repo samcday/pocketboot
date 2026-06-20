@@ -29,6 +29,7 @@ type Result<T> = std::result::Result<T, String>;
 
 const SYS_BLOCK: &str = "/sys/block";
 const PROC_CMDLINE: &str = "/proc/cmdline";
+const ACM_CMDLINE_PARAM: &str = "pocketboot.acm";
 const FDT_SERIALNO_PATHS: [&str; 1] = [
     // lk2nd puts the serial-number here
     "/sys/firmware/devicetree/base/serial-number",
@@ -77,16 +78,22 @@ fn main() -> Result<()> {
         tracing::warn!(error = %err, "failed to spawn UI thread");
     }
     let gadget = gadget::Gadget::new(serialno.clone());
+    let acm = cmdline.is_set(ACM_CMDLINE_PARAM);
     let fastboot_thread = gadget
         .spawn(gadget::Mode::Fastboot {
             commands: fastboot_commands(gadget.clone(), serialno, cmdline.clone()),
+            acm,
         })
         .map_err(|err| format!("spawn fastboot gadget thread: {err}"))?;
     #[cfg(feature = "qemu")]
     if let Err(err) = qemu::spawn() {
         tracing::warn!(error = ?err, "failed to spawn QEMU USB/IP service");
     }
-    kmsg_forwarder::spawn();
+    if acm {
+        kmsg_forwarder::spawn();
+    } else {
+        tracing::info!(param = ACM_CMDLINE_PARAM, "CDC-ACM disabled");
+    }
 
     let settled = settle::wait_for_local_flash(Duration::from_secs(5));
     if settled.timed_out {
