@@ -63,44 +63,43 @@ pub(crate) enum Action {
 }
 
 pub(crate) struct Handle {
-    commands: mpsc::Sender<Command>,
-    actions: mpsc::Receiver<Action>,
+    commands: async_channel::Sender<Command>,
+    actions: async_channel::Receiver<Action>,
     _thread: thread::JoinHandle<()>,
 }
 
 impl Handle {
-    pub(crate) fn set_boot_entries(&self, entries: Vec<BootMenuEntryInfo>) {
+    pub(crate) fn update_boot_entries(&self, entries: Vec<BootMenuEntryInfo>, scan_complete: bool) {
         if self
             .commands
-            .send(Command::SetBootEntries(entries))
+            .try_send(Command::SetBootEntries {
+                entries,
+                scan_complete,
+            })
             .is_err()
         {
             tracing::debug!("UI command channel disconnected");
         }
     }
 
-    pub(crate) fn try_recv_action(&self) -> Option<Action> {
-        match self.actions.try_recv() {
-            Ok(action) => Some(action),
-            Err(mpsc::TryRecvError::Empty) => None,
-            Err(mpsc::TryRecvError::Disconnected) => {
-                tracing::debug!("UI action channel disconnected");
-                None
-            }
-        }
+    pub(crate) fn action_receiver(&self) -> async_channel::Receiver<Action> {
+        self.actions.clone()
     }
 }
 
 enum Command {
-    SetBootEntries(Vec<BootMenuEntryInfo>),
+    SetBootEntries {
+        entries: Vec<BootMenuEntryInfo>,
+        scan_complete: bool,
+    },
 }
 
 pub(crate) fn spawn(
     battery: Option<battery::Updates>,
     system_info: SystemInfo,
 ) -> io::Result<Handle> {
-    let (command_tx, command_rx) = mpsc::channel();
-    let (action_tx, action_rx) = mpsc::channel();
+    let (command_tx, command_rx) = async_channel::unbounded();
+    let (action_tx, action_rx) = async_channel::unbounded();
     let handle = thread::Builder::new()
         .name("pocketboot-ui".to_string())
         .spawn(move || {
@@ -119,8 +118,8 @@ pub(crate) fn spawn(
 fn run(
     battery: Option<battery::Updates>,
     system_info: SystemInfo,
-    commands: mpsc::Receiver<Command>,
-    actions: mpsc::Sender<Action>,
+    commands: async_channel::Receiver<Command>,
+    actions: async_channel::Sender<Action>,
 ) -> Result<(), String> {
     let mut kms_display = KmsDisplay::wait_open(UI_START_TIMEOUT)?;
     let window = MinimalSoftwareWindow::new(RepaintBufferType::NewBuffer);
@@ -146,7 +145,7 @@ fn run(
         let Ok(index) = usize::try_from(index) else {
             return;
         };
-        if actions.send(Action::BootEntry(index)).is_err() {
+        if actions.try_send(Action::BootEntry(index)).is_err() {
             tracing::debug!("UI action receiver disconnected");
         }
     });
@@ -217,12 +216,12 @@ fn run(
 }
 
 struct UiCommands {
-    rx: mpsc::Receiver<Command>,
+    rx: async_channel::Receiver<Command>,
     disconnected: bool,
 }
 
 impl UiCommands {
-    fn new(rx: mpsc::Receiver<Command>) -> Self {
+    fn new(rx: async_channel::Receiver<Command>) -> Self {
         Self {
             rx,
             disconnected: false,
@@ -237,8 +236,8 @@ impl UiCommands {
         loop {
             match self.rx.try_recv() {
                 Ok(command) => apply_command(window, command),
-                Err(mpsc::TryRecvError::Empty) => return,
-                Err(mpsc::TryRecvError::Disconnected) => {
+                Err(async_channel::TryRecvError::Empty) => return,
+                Err(async_channel::TryRecvError::Closed) => {
                     self.disconnected = true;
                     tracing::debug!("UI command channel disconnected");
                     return;
@@ -250,11 +249,14 @@ impl UiCommands {
 
 fn apply_command(window: &MainWindow, command: Command) {
     match command {
-        Command::SetBootEntries(entries) => apply_boot_entries(window, entries),
+        Command::SetBootEntries {
+            entries,
+            scan_complete,
+        } => apply_boot_entries(window, entries, scan_complete),
     }
 }
 
-fn apply_boot_entries(window: &MainWindow, entries: Vec<BootMenuEntryInfo>) {
+fn apply_boot_entries(window: &MainWindow, entries: Vec<BootMenuEntryInfo>, scan_complete: bool) {
     let count = entries.len();
     let rows = entries
         .into_iter()
@@ -268,7 +270,7 @@ fn apply_boot_entries(window: &MainWindow, entries: Vec<BootMenuEntryInfo>) {
 
     window.set_boot_entries(ModelRc::new(VecModel::from(rows)));
     window.set_boot_entry_count(i32::try_from(count).unwrap_or(i32::MAX));
-    window.set_boot_scan_complete(true);
+    window.set_boot_scan_complete(scan_complete);
     window.set_booting_index(-1);
 }
 

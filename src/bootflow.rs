@@ -3,13 +3,17 @@ use std::{
     collections::HashMap,
     ffi::CString,
     fs::{self, File, OpenOptions},
+    future::Future,
     io::{self, Seek, SeekFrom},
     mem,
     os::{fd::AsRawFd, unix::fs::FileExt},
     path::{Component, Path, PathBuf},
 };
 
-use crate::kexec::{self, KexecImage};
+use crate::{
+    kexec::{self, KexecImage},
+    runtime,
+};
 
 const SYS_BLOCK: &str = "/sys/block";
 const DEV: &str = "/dev";
@@ -143,42 +147,80 @@ impl BootPartitionRole {
     }
 }
 
-pub(crate) fn discover() -> io::Result<Vec<BootEntry>> {
-    let mut partitions = discover_boot_partitions()?;
+pub(crate) async fn discover<F, Fut>(mut progress: F) -> io::Result<Vec<BootEntry>>
+where
+    F: FnMut(Vec<BootEntry>) -> Fut,
+    Fut: Future<Output = ()>,
+{
+    let mut partitions = discover_boot_partitions().await?;
     partitions.sort_by(compare_partition_candidates);
+    partitions.dedup_by(|left, right| {
+        left.role == right.role
+            && left.disk == right.disk
+            && left.partno == right.partno
+            && left.partition == right.partition
+            && left.dev_path == right.dev_path
+    });
+
+    let partition_count = partitions.len();
+    let (tx, rx) = async_channel::unbounded();
+    for partition in partitions {
+        let tx = tx.clone();
+        runtime::detach(async move {
+            let entries = runtime::unblock(move || scan_boot_partition(partition)).await;
+            let _ = tx.send(entries).await;
+        });
+    }
+    drop(tx);
 
     let mut entries = Vec::new();
-    for partition in partitions {
-        match mount_partition(&partition) {
-            Ok(mount) => {
-                tracing::info!(
-                    disk = %partition.disk,
-                    partition = %partition.partition,
-                    role = partition.role.label(),
-                    path = %partition.dev_path.display(),
-                    mount = %mount.root.display(),
-                    fstype = mount.fstype,
-                    "mounted boot partition candidate"
-                );
-                let context = BlsContext::from_boot_root(&mount.root);
-                entries.extend(scan_bls_entries(&partition, &mount, &context));
-                entries.extend(scan_extlinux_entries(&partition, &mount));
-            }
-            Err(err) => {
-                tracing::warn!(
-                    disk = %partition.disk,
-                    partition = %partition.partition,
-                    role = partition.role.label(),
-                    path = %partition.dev_path.display(),
-                    error = ?err,
-                    "failed to mount boot partition candidate"
-                );
-            }
+    for _ in 0..partition_count {
+        let mut partition_entries = rx
+            .recv()
+            .await
+            .map_err(|_| io::Error::other("boot partition scanner channel closed unexpectedly"))?;
+        if partition_entries.is_empty() {
+            continue;
         }
+
+        entries.append(&mut partition_entries);
+        entries.sort_by(compare_boot_entries);
+        progress(entries.clone()).await;
     }
 
     entries.sort_by(compare_boot_entries);
     Ok(entries)
+}
+
+fn scan_boot_partition(partition: BootPartitionCandidate) -> Vec<BootEntry> {
+    match mount_partition(&partition) {
+        Ok(mount) => {
+            tracing::info!(
+                disk = %partition.disk,
+                partition = %partition.partition,
+                role = partition.role.label(),
+                path = %partition.dev_path.display(),
+                mount = %mount.root.display(),
+                fstype = mount.fstype,
+                "mounted boot partition candidate"
+            );
+            let context = BlsContext::from_boot_root(&mount.root);
+            let mut entries = scan_bls_entries(&partition, &mount, &context);
+            entries.extend(scan_extlinux_entries(&partition, &mount));
+            entries
+        }
+        Err(err) => {
+            tracing::warn!(
+                disk = %partition.disk,
+                partition = %partition.partition,
+                role = partition.role.label(),
+                path = %partition.dev_path.display(),
+                error = ?err,
+                "failed to mount boot partition candidate"
+            );
+            Vec::new()
+        }
+    }
 }
 
 fn open_initrd_payload(initrds: &[PathBuf]) -> io::Result<Option<File>> {
@@ -284,29 +326,50 @@ impl BlsContext {
     }
 }
 
-fn discover_boot_partitions() -> io::Result<Vec<BootPartitionCandidate>> {
+async fn discover_boot_partitions() -> io::Result<Vec<BootPartitionCandidate>> {
     let mut candidates = Vec::new();
-    for disk in local_disk_candidates()? {
-        match gpt_boot_partitions(&disk) {
-            Ok(partitions) => candidates.extend(partitions),
-            Err(err) => {
-                tracing::debug!(disk = %disk.name, error = ?err, "disk is not usable GPT boot media");
-            }
-        }
-        match mbr_boot_partitions(&disk) {
-            Ok(partitions) => candidates.extend(partitions),
-            Err(err) => {
-                tracing::debug!(disk = %disk.name, error = ?err, "disk is not usable MBR boot media");
-            }
-        }
-        match nested_boot_partitions(&disk) {
-            Ok(partitions) => candidates.extend(partitions),
-            Err(err) => {
-                tracing::debug!(disk = %disk.name, error = ?err, "disk has no usable nested boot media");
-            }
-        }
+    let disks = runtime::unblock(local_disk_candidates).await?;
+    let disk_count = disks.len();
+    let (tx, rx) = async_channel::unbounded();
+
+    for disk in disks {
+        let tx = tx.clone();
+        runtime::detach(async move {
+            let partitions = runtime::unblock(move || boot_partitions_for_disk(disk)).await;
+            let _ = tx.send(partitions).await;
+        });
+    }
+    drop(tx);
+
+    for _ in 0..disk_count {
+        candidates.extend(rx.recv().await.map_err(|_| {
+            io::Error::other("disk boot partition scanner channel closed unexpectedly")
+        })?);
     }
     Ok(candidates)
+}
+
+fn boot_partitions_for_disk(disk: DiskCandidate) -> Vec<BootPartitionCandidate> {
+    let mut candidates = Vec::new();
+    match gpt_boot_partitions(&disk) {
+        Ok(partitions) => candidates.extend(partitions),
+        Err(err) => {
+            tracing::debug!(disk = %disk.name, error = ?err, "disk is not usable GPT boot media");
+        }
+    }
+    match mbr_boot_partitions(&disk) {
+        Ok(partitions) => candidates.extend(partitions),
+        Err(err) => {
+            tracing::debug!(disk = %disk.name, error = ?err, "disk is not usable MBR boot media");
+        }
+    }
+    match nested_boot_partitions(&disk) {
+        Ok(partitions) => candidates.extend(partitions),
+        Err(err) => {
+            tracing::debug!(disk = %disk.name, error = ?err, "disk has no usable nested boot media");
+        }
+    }
+    candidates
 }
 
 fn local_disk_candidates() -> io::Result<Vec<DiskCandidate>> {

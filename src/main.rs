@@ -23,6 +23,7 @@ mod power;
 #[cfg(feature = "qemu")]
 mod qemu;
 mod reaper;
+mod runtime;
 mod settle;
 mod ui;
 mod zboot;
@@ -41,16 +42,15 @@ const FDT_SERIALNO_PATHS: [&str; 1] = [
 const DEFAULT_SERIALNO: &str = "0001";
 const DEFAULT_DEVICE_NAME: &str = "Pocketboot Device";
 const DEFAULT_DEVICE_DETAIL: &str = "LinuxBoot environment";
-const MAIN_LOOP_SLEEP: Duration = Duration::from_millis(50);
 
 fn main() {
-    if let Err(err) = run() {
+    if let Err(err) = runtime::block_on(run()) {
         println!("pocketboot error: {}", err);
         thread::sleep(Duration::from_secs(1));
     }
 }
 
-fn run() -> Result<()> {
+async fn run() -> Result<()> {
     if unsafe { libc::getpid() } != 1 {
         return Err("pocketboot must run as PID 1 (/init)".to_string());
     }
@@ -114,7 +114,179 @@ fn run() -> Result<()> {
         tracing::info!(param = ACM_CMDLINE_PARAM, "CDC-ACM disabled");
     }
 
-    let settled = settle::wait_for_local_flash(Duration::from_secs(5));
+    let (event_tx, event_rx) = async_channel::unbounded();
+    if let Some(ui) = &ui {
+        spawn_ui_action_forwarder(ui, event_tx.clone());
+    }
+    spawn_fastboot_joiner(fastboot_thread, event_tx.clone());
+    spawn_boot_discovery(event_tx.clone());
+    drop(event_tx);
+
+    run_boot_coordinator(ui.as_ref(), event_rx).await?;
+    Ok(())
+}
+
+enum CoordinatorEvent {
+    UiAction(ui::Action),
+    Fastboot(Result<Option<fastboot::PostResponseAction>>),
+    DiscoveryUpdate(Vec<bootflow::BootEntry>),
+    DiscoveryComplete(Vec<bootflow::BootEntry>),
+}
+
+fn spawn_ui_action_forwarder(ui: &ui::Handle, event_tx: async_channel::Sender<CoordinatorEvent>) {
+    let actions = ui.action_receiver();
+    runtime::detach(async move {
+        while let Ok(action) = actions.recv().await {
+            if event_tx
+                .send(CoordinatorEvent::UiAction(action))
+                .await
+                .is_err()
+            {
+                break;
+            }
+        }
+        tracing::debug!("UI action forwarder stopped");
+    });
+}
+
+fn spawn_fastboot_joiner(
+    fastboot_thread: thread::JoinHandle<gadget::ThreadResult>,
+    event_tx: async_channel::Sender<CoordinatorEvent>,
+) {
+    runtime::detach(async move {
+        let result = runtime::unblock(move || join_fastboot_thread(fastboot_thread)).await;
+        let _ = event_tx.send(CoordinatorEvent::Fastboot(result)).await;
+    });
+}
+
+fn spawn_boot_discovery(event_tx: async_channel::Sender<CoordinatorEvent>) {
+    runtime::detach(async move {
+        let settled =
+            runtime::unblock(|| settle::wait_for_local_flash(Duration::from_secs(5))).await;
+        log_settle_report(&settled);
+
+        match runtime::unblock(block_devices).await {
+            Ok(devices) => log_block_devices(devices),
+            Err(err) => tracing::warn!(error = %err, "block device listing failed"),
+        }
+
+        let progress_tx = event_tx.clone();
+        let result = bootflow::discover(move |entries| {
+            let progress_tx = progress_tx.clone();
+            async move {
+                let _ = progress_tx
+                    .send(CoordinatorEvent::DiscoveryUpdate(entries))
+                    .await;
+            }
+        })
+        .await;
+
+        let entries = match result {
+            Ok(entries) => {
+                log_boot_entries(&entries);
+                entries
+            }
+            Err(err) => {
+                tracing::warn!(error = ?err, "bootflow discovery failed");
+                Vec::new()
+            }
+        };
+        let _ = event_tx
+            .send(CoordinatorEvent::DiscoveryComplete(entries))
+            .await;
+    });
+}
+
+async fn run_boot_coordinator(
+    ui: Option<&ui::Handle>,
+    events: async_channel::Receiver<CoordinatorEvent>,
+) -> Result<()> {
+    let mut boot_entries: Vec<bootflow::BootEntry> = Vec::new();
+    let mut bootable_entry_indices: Vec<usize> = Vec::new();
+    let mut discovery_complete = false;
+    let mut fastboot_requested_default = false;
+    tracing::info!("waiting for UI boot selection or fastboot exit");
+
+    loop {
+        let event = events
+            .recv()
+            .await
+            .map_err(|_| "boot coordinator event channel closed".to_string())?;
+        match event {
+            CoordinatorEvent::UiAction(ui::Action::BootEntry(menu_index)) => {
+                let Some(entry_index) = bootable_entry_indices.get(menu_index).copied() else {
+                    tracing::warn!(menu_index, "UI requested unknown boot entry");
+                    continue;
+                };
+                let entry = &boot_entries[entry_index];
+                tracing::info!(
+                    id = %entry.id,
+                    source = %entry.source.display(),
+                    "booting UI-selected entry"
+                );
+                return boot_discovered_entry(entry);
+            }
+            CoordinatorEvent::Fastboot(result) => {
+                let action = result?;
+                if let Some(action) = action {
+                    tracing::info!("running fastboot post-response action");
+                    action()
+                        .map_err(|err| format!("fastboot post-response action failed: {err}"))?;
+                    return Ok(());
+                }
+
+                if discovery_complete {
+                    boot_default_entry(&boot_entries)?;
+                    return Ok(());
+                }
+
+                tracing::info!("fastboot exited; waiting for boot discovery before default boot");
+                fastboot_requested_default = true;
+            }
+            CoordinatorEvent::DiscoveryUpdate(entries) => {
+                apply_boot_entries_update(
+                    ui,
+                    &mut boot_entries,
+                    &mut bootable_entry_indices,
+                    entries,
+                    false,
+                );
+            }
+            CoordinatorEvent::DiscoveryComplete(entries) => {
+                discovery_complete = true;
+                apply_boot_entries_update(
+                    ui,
+                    &mut boot_entries,
+                    &mut bootable_entry_indices,
+                    entries,
+                    true,
+                );
+                if fastboot_requested_default {
+                    boot_default_entry(&boot_entries)?;
+                    return Ok(());
+                }
+                tracing::info!("boot discovery complete; holding for fastboot or UI selection");
+            }
+        }
+    }
+}
+
+fn apply_boot_entries_update(
+    ui: Option<&ui::Handle>,
+    boot_entries: &mut Vec<bootflow::BootEntry>,
+    bootable_entry_indices: &mut Vec<usize>,
+    entries: Vec<bootflow::BootEntry>,
+    scan_complete: bool,
+) {
+    let (indices, menu_entries) = boot_menu_entries(&entries);
+    *boot_entries = entries;
+    *bootable_entry_indices = indices;
+    if let Some(ui) = ui {
+        ui.update_boot_entries(menu_entries, scan_complete);
+    }
+}
+
+fn log_settle_report(settled: &settle::Report) {
     if settled.timed_out {
         tracing::warn!(
             elapsed_ms = settled.elapsed.as_millis(),
@@ -136,8 +308,9 @@ fn run() -> Result<()> {
             "local flash settled"
         );
     }
+}
 
-    let devices = block_devices()?;
+fn log_block_devices(devices: Vec<BlockDevice>) {
     if devices.is_empty() {
         tracing::warn!("no block devices found");
     } else {
@@ -149,94 +322,29 @@ fn run() -> Result<()> {
             }
         }
     }
-
-    let boot_entries = match bootflow::discover() {
-        Ok(entries) => {
-            if entries.is_empty() {
-                tracing::warn!("no boot entries discovered");
-            } else {
-                tracing::info!(count = entries.len(), "boot entries discovered");
-                for (index, entry) in entries.iter().enumerate() {
-                    tracing::info!(
-                        index,
-                        id = %entry.id,
-                        title = entry.title.as_deref().unwrap_or(""),
-                        version = entry.version.as_deref().unwrap_or(""),
-                        architecture = entry.architecture.as_deref().unwrap_or(""),
-                        role = ?entry.role,
-                        disk = %entry.disk,
-                        partition = %entry.partition,
-                        source = %entry.source.display(),
-                        preferred = entry.preferred,
-                        directly_bootable = entry.is_directly_bootable(),
-                        "boot entry"
-                    );
-                }
-            }
-            entries
-        }
-        Err(err) => {
-            tracing::warn!(error = ?err, "bootflow discovery failed");
-            Vec::new()
-        }
-    };
-    let (bootable_entry_indices, menu_entries) = boot_menu_entries(&boot_entries);
-    if let Some(ui) = &ui {
-        ui.set_boot_entries(menu_entries);
-    }
-
-    run_boot_coordinator(
-        fastboot_thread,
-        ui.as_ref(),
-        &boot_entries,
-        &bootable_entry_indices,
-    )?;
-    Ok(())
 }
 
-fn run_boot_coordinator(
-    fastboot_thread: thread::JoinHandle<gadget::ThreadResult>,
-    ui: Option<&ui::Handle>,
-    boot_entries: &[bootflow::BootEntry],
-    bootable_entry_indices: &[usize],
-) -> Result<()> {
-    let mut fastboot_thread = Some(fastboot_thread);
-    tracing::info!("waiting for UI boot selection or fastboot exit");
-
-    loop {
-        if let Some(action) = ui.and_then(ui::Handle::try_recv_action) {
-            match action {
-                ui::Action::BootEntry(menu_index) => {
-                    let Some(entry_index) = bootable_entry_indices.get(menu_index).copied() else {
-                        tracing::warn!(menu_index, "UI requested unknown boot entry");
-                        continue;
-                    };
-                    let entry = &boot_entries[entry_index];
-                    tracing::info!(
-                        id = %entry.id,
-                        source = %entry.source.display(),
-                        "booting UI-selected entry"
-                    );
-                    return boot_discovered_entry(entry);
-                }
-            }
+fn log_boot_entries(entries: &[bootflow::BootEntry]) {
+    if entries.is_empty() {
+        tracing::warn!("no boot entries discovered");
+    } else {
+        tracing::info!(count = entries.len(), "boot entries discovered");
+        for (index, entry) in entries.iter().enumerate() {
+            tracing::info!(
+                index,
+                id = %entry.id,
+                title = entry.title.as_deref().unwrap_or(""),
+                version = entry.version.as_deref().unwrap_or(""),
+                architecture = entry.architecture.as_deref().unwrap_or(""),
+                role = ?entry.role,
+                disk = %entry.disk,
+                partition = %entry.partition,
+                source = %entry.source.display(),
+                preferred = entry.preferred,
+                directly_bootable = entry.is_directly_bootable(),
+                "boot entry"
+            );
         }
-
-        if fastboot_thread
-            .as_ref()
-            .is_some_and(|handle| handle.is_finished())
-        {
-            let action = join_fastboot_thread(fastboot_thread.take().expect("checked above"))?;
-            if let Some(action) = action {
-                tracing::info!("running fastboot post-response action");
-                action().map_err(|err| format!("fastboot post-response action failed: {err}"))?;
-            } else {
-                boot_default_entry(boot_entries)?;
-            }
-            return Ok(());
-        }
-
-        thread::sleep(MAIN_LOOP_SLEEP);
     }
 }
 

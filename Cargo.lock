@@ -3372,8 +3372,13 @@ name = "pocketboot"
 version = "0.1.0"
 dependencies = [
  "abootimg-oxide",
+ "async-channel",
+ "async-executor",
+ "async-io",
+ "blocking",
  "drm",
  "flate2",
+ "futures-lite",
  "gadgetry-most-foul",
  "libc",
  "mbrman",

@@ -276,7 +276,7 @@ export component MainWindow inherits Window {
             height: 32px;
             x: 24px;
             y: 68px;
-            text: root.booting-index >= 0 ? "Loading kernel and preparing kexec" : "Tap a bootable entry to start it";
+            text: root.booting-index >= 0 ? "Loading kernel and preparing kexec" : root.boot-scan-complete ? "Tap a bootable entry to start it" : "Scanning continues in the background";
             color: #94a3b8;
             font-size: 22px;
             horizontal-alignment: left;
@@ -284,7 +284,7 @@ export component MainWindow inherits Window {
         }
 
         Text {
-            visible: !root.boot-scan-complete;
+            visible: !root.boot-scan-complete && root.boot-entry-count == 0;
             width: parent.width - 48px;
             height: 80px;
             x: 24px;
@@ -310,7 +310,7 @@ export component MainWindow inherits Window {
         }
 
         boot_list := Flickable {
-            visible: root.boot-scan-complete && root.boot-entry-count > 0;
+            visible: root.boot-entry-count > 0;
             width: parent.width - 48px;
             height: parent.height - self.y - 24px;
             x: 24px;

@@ -10,8 +10,13 @@ build = "build.rs"
 
 [dependencies]
 abootimg-oxide = "0.5.1"
+async-channel = "2.5.0"
+async-executor = "1.14.0"
+async-io = "2.6.0"
+blocking = "1.6.2"
 drm = "0.14.1"
 flate2 = "1"
+futures-lite = "2.6.1"
 gadgetry-most-foul = "0.1.1"
 libc = "0.2.177"
 mbrman = "0.6.1"
