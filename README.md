@@ -81,7 +81,8 @@ in `configs/device/<vendor>/<device>.toml`. The command requires an existing
 kernel build and writes `target/kernel/<vendor>/<device>/boot.img` by default.
 `kernel_image` selects the artifact under `arch/arm64/boot` to package and
 defaults to `Image.gz`. Android boot header v2 DTB sections, legacy QCDT vendor
-DT payloads and Samsung DTBH vendor DT payloads are supported.
+DT payloads, Samsung DTBH vendor DT payloads and legacy `Image.gz+dtb` appended
+DTB payloads are supported.
 
 To boot under QEMU, run:
 

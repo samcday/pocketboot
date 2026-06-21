@@ -68,6 +68,8 @@ pub(super) struct BootImgConfig {
     pub(super) ramdisk_size: u32,
     #[serde(default)]
     pub(super) append_seandroid_enforce: bool,
+    #[serde(default)]
+    pub(super) append_dtb: bool,
     pub(super) qcdt: Option<QcdtConfig>,
     pub(super) dtbh: Option<DtbhConfig>,
 }
@@ -88,6 +90,7 @@ impl Default for BootImgConfig {
             cmdline: String::new(),
             ramdisk_size: 0,
             append_seandroid_enforce: false,
+            append_dtb: false,
             qcdt: None,
             dtbh: None,
         }
@@ -458,6 +461,7 @@ mod tests {
         assert!(config.cmdline.is_empty());
         assert_eq!(config.ramdisk_size, 0);
         assert!(!config.append_seandroid_enforce);
+        assert!(!config.append_dtb);
         assert!(config.qcdt.is_none());
         assert!(config.dtbh.is_none());
     }

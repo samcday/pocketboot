@@ -143,6 +143,12 @@ fn write_bootimg(
             config_path.display()
         ));
     }
+    if config.append_dtb && (config.qcdt.is_some() || config.dtbh.is_some()) {
+        return Err(format!(
+            "{}: append_dtb cannot be combined with qcdt or dtbh",
+            config_path.display()
+        ));
+    }
 
     match config.header_version {
         0 => write_bootimg_v0(config, config_path, image, dtb, output),
@@ -181,6 +187,12 @@ fn write_bootimg_v2(
     if config.append_seandroid_enforce {
         return Err(format!(
             "{}: append_seandroid_enforce is only supported for header_version = 0",
+            config_path.display()
+        ));
+    }
+    if config.append_dtb {
+        return Err(format!(
+            "{}: append_dtb is only supported for header_version = 0",
             config_path.display()
         ));
     }
@@ -257,9 +269,12 @@ fn write_bootimg_v0(
     dtb: &Path,
     output: &Path,
 ) -> Result<()> {
-    let kernel = fs::read(image).map_err(|err| format!("read {}: {err}", image.display()))?;
+    let mut kernel = fs::read(image).map_err(|err| format!("read {}: {err}", image.display()))?;
     let dtb = fs::read(dtb).map_err(|err| format!("read {}: {err}", dtb.display()))?;
     let ramdisk = vec![0; config.ramdisk_size as usize];
+    if config.append_dtb {
+        kernel.extend_from_slice(&dtb);
+    }
     let vendor_dt = match (&config.qcdt, &config.dtbh) {
         (Some(qcdt), None) => build_qcdt(qcdt, config.page_size, &dtb, config_path)?,
         (None, Some(dtbh)) => build_dtbh(dtbh, config.page_size, &dtb, config_path)?,
@@ -541,7 +556,7 @@ fn fixed_bytes<const N: usize>(value: &str, field: &str, context: &Path) -> Resu
 
 fn print_usage() {
     println!(
-        "usage: cargo xtask bootimg <vendor/device> [--output PATH]\n\nexample: cargo xtask bootimg exynos/exynos7870-j7xelte\n\nrequires: target/kernel/<vendor>/<device>/arch/arm64/boot/<kernel_image> and the inferred DTB\nkernel_image: configured by [bootimg] in configs/device/<vendor>/<device>.toml, defaults to {DEFAULT_BOOTIMG_KERNEL_IMAGE}\nsupports: Android v2 DTB sections, legacy QCDT and Samsung DTBH vendor DT payloads\ndefault output: target/kernel/<vendor>/<device>/boot.img"
+        "usage: cargo xtask bootimg <vendor/device> [--output PATH]\n\nexample: cargo xtask bootimg exynos/exynos7870-j7xelte\n\nrequires: target/kernel/<vendor>/<device>/arch/arm64/boot/<kernel_image> and the inferred DTB\nkernel_image: configured by [bootimg] in configs/device/<vendor>/<device>.toml, defaults to {DEFAULT_BOOTIMG_KERNEL_IMAGE}\nsupports: Android v2 DTB sections, legacy QCDT, Samsung DTBH and legacy appended-DTB payloads\ndefault output: target/kernel/<vendor>/<device>/boot.img"
     );
 }
 
@@ -646,8 +661,62 @@ mod tests {
         assert_eq!(dtbh.entries[0].hw_rev_end, 255);
     }
 
+    #[test]
+    fn daisy_config_is_legacy_appended_dtb() {
+        let config = device_bootimg_config("qcom/msm8953-xiaomi-daisy");
+
+        assert_eq!(config.header_version, 0);
+        assert_eq!(config.page_size, 2048);
+        assert_eq!(config.base, 0x80000000);
+        assert_eq!(config.kernel_image, DEFAULT_BOOTIMG_KERNEL_IMAGE);
+        assert!(config.append_dtb);
+        assert!(config.qcdt.is_none());
+        assert!(config.dtbh.is_none());
+    }
+
+    #[test]
+    fn appended_dtb_is_written_in_kernel_payload() {
+        let temp_dir = unique_test_dir("appended-dtb");
+        let kernel_path = temp_dir.join("Image.gz");
+        let dtb_path = temp_dir.join("board.dtb");
+        let output_path = temp_dir.join("boot.img");
+        fs::create_dir_all(&temp_dir).unwrap();
+        fs::write(&kernel_path, b"kernel").unwrap();
+        fs::write(&dtb_path, b"dtb").unwrap();
+
+        let config = BootImgConfig {
+            header_version: 0,
+            page_size: 2048,
+            append_dtb: true,
+            ..Default::default()
+        };
+        write_bootimg_v0(
+            &config,
+            Path::new("test.toml"),
+            &kernel_path,
+            &dtb_path,
+            &output_path,
+        )
+        .unwrap();
+
+        let bootimg = fs::read(&output_path).unwrap();
+        assert_eq!(u32_at(&bootimg, 8), 9);
+        assert_eq!(u32_at(&bootimg, 40), 0);
+        assert_eq!(&bootimg[2048..2057], b"kerneldtb");
+
+        fs::remove_dir_all(temp_dir).unwrap();
+    }
+
     fn u32_at(data: &[u8], offset: usize) -> u32 {
         u32::from_le_bytes(data[offset..offset + 4].try_into().unwrap())
+    }
+
+    fn unique_test_dir(name: &str) -> PathBuf {
+        let nanos = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        std::env::temp_dir().join(format!("pocketboot-{name}-{}-{nanos}", std::process::id()))
     }
 
     fn device_bootimg_config(device_id: &str) -> BootImgConfig {
