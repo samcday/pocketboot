@@ -148,7 +148,10 @@ mod tests {
     fn accepts_linux_pe_magic_bytes() {
         let image = test_zboot("zstd", b"payload");
 
-        assert_eq!(&image[LINUX_PE_MAGIC_OFFSET..LINUX_PE_MAGIC_OFFSET + 4], b"\xcd\x23\x82\x81");
+        assert_eq!(
+            &image[LINUX_PE_MAGIC_OFFSET..LINUX_PE_MAGIC_OFFSET + 4],
+            b"\xcd\x23\x82\x81"
+        );
         assert!(Image::parse(&image).unwrap().is_some());
     }
 
