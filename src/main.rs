@@ -32,11 +32,16 @@ type Result<T> = std::result::Result<T, String>;
 const SYS_BLOCK: &str = "/sys/block";
 const PROC_CMDLINE: &str = "/proc/cmdline";
 const ACM_CMDLINE_PARAM: &str = "pocketboot.acm";
+const FDT_MODEL_PATH: &str = "/sys/firmware/devicetree/base/model";
+const FDT_COMPATIBLE_PATH: &str = "/sys/firmware/devicetree/base/compatible";
 const FDT_SERIALNO_PATHS: [&str; 1] = [
     // lk2nd puts the serial-number here
     "/sys/firmware/devicetree/base/serial-number",
 ];
 const DEFAULT_SERIALNO: &str = "0001";
+const DEFAULT_DEVICE_NAME: &str = "Pocketboot Device";
+const DEFAULT_DEVICE_DETAIL: &str = "LinuxBoot environment";
+const MAIN_LOOP_SLEEP: Duration = Duration::from_millis(50);
 
 fn main() {
     if let Err(err) = run() {
@@ -75,6 +80,7 @@ fn run() -> Result<()> {
 
     let serialno = detect_serial(&cmdline);
     tracing::info!(serialno = %serialno, "selected device serialno");
+    let system_info = detect_system_info(&serialno);
     reaper::spawn();
     let battery = match battery::spawn() {
         Ok(updates) => Some(updates),
@@ -83,9 +89,13 @@ fn run() -> Result<()> {
             None
         }
     };
-    if let Err(err) = ui::spawn(battery) {
-        tracing::warn!(error = %err, "failed to spawn UI thread");
-    }
+    let ui = match ui::spawn(battery, system_info) {
+        Ok(handle) => Some(handle),
+        Err(err) => {
+            tracing::warn!(error = %err, "failed to spawn UI thread");
+            None
+        }
+    };
     let gadget = gadget::Gadget::new(serialno.clone());
     let acm = cmdline.is_set(ACM_CMDLINE_PARAM);
     let fastboot_thread = gadget
@@ -170,26 +180,167 @@ fn run() -> Result<()> {
             Vec::new()
         }
     };
+    let (bootable_entry_indices, menu_entries) = boot_menu_entries(&boot_entries);
+    if let Some(ui) = &ui {
+        ui.set_boot_entries(menu_entries);
+    }
 
-    tracing::info!("waiting for fastboot exit");
-    let action = join_fastboot_thread(fastboot_thread)?;
-    if let Some(action) = action {
-        tracing::info!("running fastboot post-response action");
-        action().map_err(|err| format!("fastboot post-response action failed: {err}"))?;
-    } else if let Some(entry) = boot_entries
+    run_boot_coordinator(
+        fastboot_thread,
+        ui.as_ref(),
+        &boot_entries,
+        &bootable_entry_indices,
+    )?;
+    Ok(())
+}
+
+fn run_boot_coordinator(
+    fastboot_thread: thread::JoinHandle<gadget::ThreadResult>,
+    ui: Option<&ui::Handle>,
+    boot_entries: &[bootflow::BootEntry],
+    bootable_entry_indices: &[usize],
+) -> Result<()> {
+    let mut fastboot_thread = Some(fastboot_thread);
+    tracing::info!("waiting for UI boot selection or fastboot exit");
+
+    loop {
+        if let Some(action) = ui.and_then(ui::Handle::try_recv_action) {
+            match action {
+                ui::Action::BootEntry(menu_index) => {
+                    let Some(entry_index) = bootable_entry_indices.get(menu_index).copied() else {
+                        tracing::warn!(menu_index, "UI requested unknown boot entry");
+                        continue;
+                    };
+                    let entry = &boot_entries[entry_index];
+                    tracing::info!(
+                        id = %entry.id,
+                        source = %entry.source.display(),
+                        "booting UI-selected entry"
+                    );
+                    return boot_discovered_entry(entry);
+                }
+            }
+        }
+
+        if fastboot_thread
+            .as_ref()
+            .is_some_and(|handle| handle.is_finished())
+        {
+            let action = join_fastboot_thread(fastboot_thread.take().expect("checked above"))?;
+            if let Some(action) = action {
+                tracing::info!("running fastboot post-response action");
+                action().map_err(|err| format!("fastboot post-response action failed: {err}"))?;
+            } else {
+                boot_default_entry(boot_entries)?;
+            }
+            return Ok(());
+        }
+
+        thread::sleep(MAIN_LOOP_SLEEP);
+    }
+}
+
+fn boot_default_entry(boot_entries: &[bootflow::BootEntry]) -> Result<()> {
+    if let Some(entry) = boot_entries
         .iter()
         .find(|entry| entry.is_directly_bootable())
     {
         tracing::info!(id = %entry.id, source = %entry.source.display(), "booting discovered entry");
-        entry
-            .load()
-            .map_err(|err| format!("load discovered boot entry {}: {err}", entry.id))?;
-        kexec::exec_loaded_image()
-            .map_err(|err| format!("execute discovered boot entry {}: {err}", entry.id))?;
+        boot_discovered_entry(entry)?;
     } else if !boot_entries.is_empty() {
         tracing::warn!("boot entries were discovered, but none are directly bootable yet");
     }
     Ok(())
+}
+
+fn boot_discovered_entry(entry: &bootflow::BootEntry) -> Result<()> {
+    entry
+        .load()
+        .map_err(|err| format!("load discovered boot entry {}: {err}", entry.id))?;
+    kexec::exec_loaded_image()
+        .map_err(|err| format!("execute discovered boot entry {}: {err}", entry.id))?;
+    Ok(())
+}
+
+fn boot_menu_entries(
+    boot_entries: &[bootflow::BootEntry],
+) -> (Vec<usize>, Vec<ui::BootMenuEntryInfo>) {
+    let mut indices = Vec::new();
+    let mut entries = Vec::new();
+
+    for (index, entry) in boot_entries.iter().enumerate() {
+        if !entry.is_directly_bootable() {
+            continue;
+        }
+
+        indices.push(index);
+        entries.push(ui::BootMenuEntryInfo {
+            title: boot_entry_title(entry),
+            subtitle: boot_entry_subtitle(entry),
+            detail: boot_entry_detail(entry),
+            badge: boot_entry_badge(entry),
+        });
+    }
+
+    (indices, entries)
+}
+
+fn boot_entry_title(entry: &bootflow::BootEntry) -> String {
+    entry
+        .title
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .unwrap_or(&entry.id)
+        .to_string()
+}
+
+fn boot_entry_subtitle(entry: &bootflow::BootEntry) -> String {
+    let mut parts = Vec::new();
+    if let Some(version) = entry
+        .version
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    {
+        parts.push(version);
+    }
+    if let Some(architecture) = entry
+        .architecture
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    {
+        parts.push(architecture);
+    }
+
+    if parts.is_empty() {
+        "Ready to boot".to_string()
+    } else {
+        parts.join(" - ")
+    }
+}
+
+fn boot_entry_detail(entry: &bootflow::BootEntry) -> String {
+    let source = entry
+        .source
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or_else(|| entry.source.to_str().unwrap_or("boot entry"));
+    format!("{}:{} - {source}", entry.disk, entry.partition)
+}
+
+fn boot_entry_badge(entry: &bootflow::BootEntry) -> String {
+    let role = match entry.role {
+        bootflow::BootPartitionRole::Xbootldr => "xbootldr",
+        bootflow::BootPartitionRole::Esp => "esp",
+        bootflow::BootPartitionRole::Nested => "nested",
+    };
+    if entry.preferred {
+        format!("default {role}")
+    } else {
+        role.to_string()
+    }
 }
 
 fn fastboot_commands(
@@ -206,6 +357,38 @@ fn fastboot_commands(
     commands.extend(fastboot::commands::ums_commands(gadget));
     commands.push(fastboot::commands::reboot_command());
     commands
+}
+
+fn detect_system_info(serialno: &str) -> ui::SystemInfo {
+    ui::SystemInfo {
+        device_name: fdt_first_string(FDT_MODEL_PATH)
+            .unwrap_or_else(|| DEFAULT_DEVICE_NAME.to_string()),
+        device_detail: fdt_compatible_detail().unwrap_or_else(|| DEFAULT_DEVICE_DETAIL.to_string()),
+        serialno: serialno.to_string(),
+    }
+}
+
+fn fdt_first_string(path: impl AsRef<Path>) -> Option<String> {
+    read_fdt_strings(path)?.into_iter().next()
+}
+
+fn fdt_compatible_detail() -> Option<String> {
+    let compatibles = read_fdt_strings(FDT_COMPATIBLE_PATH)?;
+    match compatibles.as_slice() {
+        [] => None,
+        [only] => Some(only.clone()),
+        [first, second, ..] => Some(format!("{first} / {second}")),
+    }
+}
+
+fn read_fdt_strings(path: impl AsRef<Path>) -> Option<Vec<String>> {
+    let bytes = fs::read(path).ok()?;
+    let values = bytes
+        .split(|byte| *byte == b'\0')
+        .filter_map(parse_fdt_string)
+        .map(str::to_string)
+        .collect::<Vec<_>>();
+    (!values.is_empty()).then_some(values)
 }
 
 fn detect_serial(cmdline: &cmdline::KernelCommandLine) -> String {
@@ -227,7 +410,11 @@ fn cmdline_serialno(cmdline: &cmdline::KernelCommandLine) -> Option<String> {
 
 fn parse_fdt_serialno(bytes: &[u8]) -> Option<&str> {
     let serialno = bytes.split(|byte| *byte == b'\0').next()?;
-    let serialno = trim_ascii_bytes(serialno);
+    parse_fdt_string(serialno)
+}
+
+fn parse_fdt_string(bytes: &[u8]) -> Option<&str> {
+    let serialno = trim_ascii_bytes(bytes);
     (!serialno.is_empty())
         .then(|| std::str::from_utf8(serialno).ok())
         .flatten()

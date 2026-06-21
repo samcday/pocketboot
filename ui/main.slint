@@ -3,10 +3,24 @@ import "fonts/FreeSans.ttf";
 export enum BatteryStatus { Unknown, Charging, Discharging, NotCharging, Full }
 export enum PowerAction { Shutdown, Reboot }
 
+export struct BootMenuEntry {
+    title: string,
+    subtitle: string,
+    detail: string,
+    badge: string,
+}
+
 export component MainWindow inherits Window {
     background: #080b12;
     default-font-family: "FreeSans";
 
+    in-out property <string> device-name: "Pocketboot Device";
+    in-out property <string> device-detail: "LinuxBoot environment";
+    in-out property <string> serialno: "0001";
+    in-out property <[BootMenuEntry]> boot-entries: [];
+    in-out property <int> boot-entry-count: 0;
+    in-out property <bool> boot-scan-complete: false;
+    in-out property <int> booting-index: -1;
     in-out property <bool> battery-known: false;
     in-out property <int> battery-percent: 0;
     in-out property <BatteryStatus> battery-status: BatteryStatus.Unknown;
@@ -15,6 +29,7 @@ export component MainWindow inherits Window {
     in-out property <float> hold-progress: 0;
 
     callback power-action(PowerAction);
+    callback boot-entry-selected(int);
 
     public function show-power-menu() {
         root.power-menu-open = true;
@@ -169,6 +184,219 @@ export component MainWindow inherits Window {
             font-size: 32px;
             horizontal-alignment: center;
             vertical-alignment: center;
+        }
+    }
+
+    welcome := Rectangle {
+        width: parent.width - 64px;
+        height: 176px;
+        x: 32px;
+        y: 132px;
+        background: #0f172a;
+        border-color: #1e3a5f;
+        border-width: 2px;
+        border-radius: 28px;
+
+        Text {
+            width: parent.width - 48px;
+            height: 34px;
+            x: 24px;
+            y: 22px;
+            text: "Welcome to";
+            color: #7dd3fc;
+            font-size: 24px;
+            font-weight: 700;
+            horizontal-alignment: left;
+            vertical-alignment: center;
+        }
+
+        Text {
+            width: parent.width - 48px;
+            height: 62px;
+            x: 24px;
+            y: 54px;
+            text: root.device-name;
+            color: #f8fafc;
+            font-size: root.width > 720px ? 44px : 34px;
+            font-weight: 700;
+            horizontal-alignment: left;
+            vertical-alignment: center;
+        }
+
+        Text {
+            width: parent.width - 48px;
+            height: 30px;
+            x: 24px;
+            y: 116px;
+            text: root.device-detail;
+            color: #cbd5e1;
+            font-size: 20px;
+            horizontal-alignment: left;
+            vertical-alignment: center;
+        }
+
+        Text {
+            width: parent.width - 48px;
+            height: 26px;
+            x: 24px;
+            y: 142px;
+            text: "serial " + root.serialno;
+            color: #94a3b8;
+            font-size: 18px;
+            horizontal-alignment: left;
+            vertical-alignment: center;
+        }
+    }
+
+    boot_card := Rectangle {
+        width: parent.width - 64px;
+        height: parent.height - self.y - 40px;
+        x: 32px;
+        y: 332px;
+        background: #0b1220;
+        border-color: #1f2937;
+        border-width: 2px;
+        border-radius: 28px;
+
+        Text {
+            width: parent.width - 48px;
+            height: 46px;
+            x: 24px;
+            y: 24px;
+            text: root.booting-index >= 0 ? "Booting selected entry" : "Boot Menu";
+            color: #f8fafc;
+            font-size: 34px;
+            font-weight: 700;
+            horizontal-alignment: left;
+            vertical-alignment: center;
+        }
+
+        Text {
+            width: parent.width - 48px;
+            height: 32px;
+            x: 24px;
+            y: 68px;
+            text: root.booting-index >= 0 ? "Loading kernel and preparing kexec" : "Tap a bootable entry to start it";
+            color: #94a3b8;
+            font-size: 22px;
+            horizontal-alignment: left;
+            vertical-alignment: center;
+        }
+
+        Text {
+            visible: !root.boot-scan-complete;
+            width: parent.width - 48px;
+            height: 80px;
+            x: 24px;
+            y: 138px;
+            text: "Scanning local boot media...";
+            color: #cbd5e1;
+            font-size: 26px;
+            horizontal-alignment: center;
+            vertical-alignment: center;
+        }
+
+        Text {
+            visible: root.boot-scan-complete && root.boot-entry-count == 0;
+            width: parent.width - 48px;
+            height: 112px;
+            x: 24px;
+            y: 128px;
+            text: "No directly bootable entries found";
+            color: #cbd5e1;
+            font-size: 26px;
+            horizontal-alignment: center;
+            vertical-alignment: center;
+        }
+
+        boot_list := Flickable {
+            visible: root.boot-scan-complete && root.boot-entry-count > 0;
+            width: parent.width - 48px;
+            height: parent.height - self.y - 24px;
+            x: 24px;
+            y: 116px;
+            viewport-width: self.width;
+            viewport-height: root.boot-entry-count * 126px;
+
+            for entry[index] in root.boot-entries : Rectangle {
+                width: boot_list.width;
+                height: 112px;
+                y: index * 126px;
+                background: root.booting-index == index ? #123047 : row_touch.pressed ? #1e293b : #111827;
+                border-color: root.booting-index == index ? #38bdf8 : #334155;
+                border-width: 2px;
+                border-radius: 22px;
+
+                Text {
+                    width: parent.width - 190px;
+                    height: 36px;
+                    x: 22px;
+                    y: 15px;
+                    text: entry.title;
+                    color: #f8fafc;
+                    font-size: 26px;
+                    font-weight: 700;
+                    horizontal-alignment: left;
+                    vertical-alignment: center;
+                }
+
+                badge := Rectangle {
+                    width: 144px;
+                    height: 34px;
+                    x: parent.width - self.width - 20px;
+                    y: 16px;
+                    background: root.booting-index == index ? #075985 : #1e3a5f;
+                    border-radius: 17px;
+
+                    Text {
+                        width: parent.width - 16px;
+                        height: parent.height;
+                        x: 8px;
+                        text: entry.badge;
+                        color: #e0f2fe;
+                        font-size: 16px;
+                        font-weight: 700;
+                        horizontal-alignment: center;
+                        vertical-alignment: center;
+                    }
+                }
+
+                Text {
+                    width: parent.width - 44px;
+                    height: 28px;
+                    x: 22px;
+                    y: 52px;
+                    text: entry.subtitle;
+                    color: #cbd5e1;
+                    font-size: 20px;
+                    horizontal-alignment: left;
+                    vertical-alignment: center;
+                }
+
+                Text {
+                    width: parent.width - 44px;
+                    height: 24px;
+                    x: 22px;
+                    y: 80px;
+                    text: entry.detail;
+                    color: #94a3b8;
+                    font-size: 17px;
+                    horizontal-alignment: left;
+                    vertical-alignment: center;
+                }
+
+                row_touch := TouchArea {
+                    width: parent.width;
+                    height: parent.height;
+
+                    clicked => {
+                        if (root.booting-index < 0) {
+                            root.booting-index = index;
+                            root.boot-entry-selected(index);
+                        }
+                    }
+                }
+            }
         }
     }
 
@@ -334,6 +562,6 @@ export component MainWindow inherits Window {
 
     Text {
         visible: false;
-        text: "0123456789%+PowerShutdownRebootPressandholdactionsecondsKeepholding...";
+        text: "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789%+-:/.()_ Welcome to serial Boot Menu Booting selected entry Loading kernel and preparing kexec Tap a bootable entry to start it Scanning local boot media No directly bootable entries found Power Shutdown Reboot Press and hold action seconds Keep holding";
     }
 }

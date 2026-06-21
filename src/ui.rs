@@ -30,7 +30,7 @@ use slint::platform::{
         SoftwareRenderer, TargetPixel,
     },
 };
-use slint::{ComponentHandle, LogicalPosition, PhysicalSize};
+use slint::{ComponentHandle, LogicalPosition, ModelRc, PhysicalSize, SharedString, VecModel};
 
 use crate::{battery, power};
 
@@ -42,19 +42,86 @@ const UI_START_TIMEOUT: Duration = Duration::from_secs(2);
 const IDLE_SLEEP: Duration = Duration::from_millis(16);
 const POWER_KEY_HOLD: Duration = Duration::from_millis(2500);
 
-pub(crate) fn spawn(battery: Option<battery::Updates>) -> io::Result<thread::JoinHandle<()>> {
+#[derive(Clone, Debug)]
+pub(crate) struct SystemInfo {
+    pub(crate) device_name: String,
+    pub(crate) device_detail: String,
+    pub(crate) serialno: String,
+}
+
+#[derive(Clone, Debug)]
+pub(crate) struct BootMenuEntryInfo {
+    pub(crate) title: String,
+    pub(crate) subtitle: String,
+    pub(crate) detail: String,
+    pub(crate) badge: String,
+}
+
+#[derive(Debug)]
+pub(crate) enum Action {
+    BootEntry(usize),
+}
+
+pub(crate) struct Handle {
+    commands: mpsc::Sender<Command>,
+    actions: mpsc::Receiver<Action>,
+    _thread: thread::JoinHandle<()>,
+}
+
+impl Handle {
+    pub(crate) fn set_boot_entries(&self, entries: Vec<BootMenuEntryInfo>) {
+        if self
+            .commands
+            .send(Command::SetBootEntries(entries))
+            .is_err()
+        {
+            tracing::debug!("UI command channel disconnected");
+        }
+    }
+
+    pub(crate) fn try_recv_action(&self) -> Option<Action> {
+        match self.actions.try_recv() {
+            Ok(action) => Some(action),
+            Err(mpsc::TryRecvError::Empty) => None,
+            Err(mpsc::TryRecvError::Disconnected) => {
+                tracing::debug!("UI action channel disconnected");
+                None
+            }
+        }
+    }
+}
+
+enum Command {
+    SetBootEntries(Vec<BootMenuEntryInfo>),
+}
+
+pub(crate) fn spawn(
+    battery: Option<battery::Updates>,
+    system_info: SystemInfo,
+) -> io::Result<Handle> {
+    let (command_tx, command_rx) = mpsc::channel();
+    let (action_tx, action_rx) = mpsc::channel();
     let handle = thread::Builder::new()
         .name("pocketboot-ui".to_string())
         .spawn(move || {
-            if let Err(err) = run(battery) {
+            if let Err(err) = run(battery, system_info, command_rx, action_tx) {
                 tracing::warn!(error = %err, "UI thread exited");
             }
         })?;
     tracing::info!(thread = "pocketboot-ui", "UI thread spawned");
-    Ok(handle)
+    Ok(Handle {
+        commands: command_tx,
+        actions: action_rx,
+        _thread: handle,
+    })
 }
 
-fn run(battery: Option<battery::Updates>) -> Result<(), String> {
+fn run(
+    battery: Option<battery::Updates>,
+    system_info: SystemInfo,
+    commands: mpsc::Receiver<Command>,
+    actions: mpsc::Sender<Action>,
+) -> Result<(), String> {
     let mut kms_display = KmsDisplay::wait_open(UI_START_TIMEOUT)?;
     let window = MinimalSoftwareWindow::new(RepaintBufferType::NewBuffer);
 
@@ -63,6 +130,9 @@ fn run(battery: Option<battery::Updates>) -> Result<(), String> {
     window.set_size(PhysicalSize::new(kms_display.width, kms_display.height));
 
     let main_window = MainWindow::new().map_err(|err| format!("create Slint window: {err}"))?;
+    main_window.set_device_name(system_info.device_name.into());
+    main_window.set_device_detail(system_info.device_detail.into());
+    main_window.set_serialno(system_info.serialno.into());
     main_window.on_power_action(|action| {
         let result = match action {
             PowerAction::Shutdown => power::power_off(),
@@ -72,6 +142,14 @@ fn run(battery: Option<battery::Updates>) -> Result<(), String> {
             tracing::error!(action = ?action, error = %err, "power action failed");
         }
     });
+    main_window.on_boot_entry_selected(move |index| {
+        let Ok(index) = usize::try_from(index) else {
+            return;
+        };
+        if actions.send(Action::BootEntry(index)).is_err() {
+            tracing::debug!("UI action receiver disconnected");
+        }
+    });
     main_window
         .show()
         .map_err(|err| format!("show Slint window: {err}"))?;
@@ -79,6 +157,7 @@ fn run(battery: Option<battery::Updates>) -> Result<(), String> {
     let mut touch = TouchInput::new();
     let mut power_key = PowerKeyInput::new();
     let mut battery = battery.map(BatteryUpdates::new);
+    let mut commands = UiCommands::new(commands);
     let mut pointer_down = false;
     let display_path = kms_display.path.display().to_string();
     let connector = kms_display.connector.to_string();
@@ -97,6 +176,7 @@ fn run(battery: Option<battery::Updates>) -> Result<(), String> {
         if let Some(battery) = &mut battery {
             battery.poll(&main_window);
         }
+        commands.poll(&main_window);
 
         for report in touch.poll(kms_display.width, kms_display.height) {
             let position = LogicalPosition::new(report.x, report.y);
@@ -134,6 +214,62 @@ fn run(battery: Option<battery::Updates>) -> Result<(), String> {
             thread::sleep(IDLE_SLEEP);
         }
     }
+}
+
+struct UiCommands {
+    rx: mpsc::Receiver<Command>,
+    disconnected: bool,
+}
+
+impl UiCommands {
+    fn new(rx: mpsc::Receiver<Command>) -> Self {
+        Self {
+            rx,
+            disconnected: false,
+        }
+    }
+
+    fn poll(&mut self, window: &MainWindow) {
+        if self.disconnected {
+            return;
+        }
+
+        loop {
+            match self.rx.try_recv() {
+                Ok(command) => apply_command(window, command),
+                Err(mpsc::TryRecvError::Empty) => return,
+                Err(mpsc::TryRecvError::Disconnected) => {
+                    self.disconnected = true;
+                    tracing::debug!("UI command channel disconnected");
+                    return;
+                }
+            }
+        }
+    }
+}
+
+fn apply_command(window: &MainWindow, command: Command) {
+    match command {
+        Command::SetBootEntries(entries) => apply_boot_entries(window, entries),
+    }
+}
+
+fn apply_boot_entries(window: &MainWindow, entries: Vec<BootMenuEntryInfo>) {
+    let count = entries.len();
+    let rows = entries
+        .into_iter()
+        .map(|entry| BootMenuEntry {
+            title: SharedString::from(entry.title),
+            subtitle: SharedString::from(entry.subtitle),
+            detail: SharedString::from(entry.detail),
+            badge: SharedString::from(entry.badge),
+        })
+        .collect::<Vec<_>>();
+
+    window.set_boot_entries(ModelRc::new(VecModel::from(rows)));
+    window.set_boot_entry_count(i32::try_from(count).unwrap_or(i32::MAX));
+    window.set_boot_scan_complete(true);
+    window.set_booting_index(-1);
 }
 
 struct BatteryUpdates {
