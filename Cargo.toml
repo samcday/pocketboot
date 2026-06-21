@@ -1,5 +1,5 @@
 [workspace]
-members = [".", "xtask"]
+members = [".", "pocketpreboot", "xtask"]
 resolver = "3"
 
 [package]

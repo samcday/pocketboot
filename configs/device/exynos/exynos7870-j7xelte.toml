@@ -21,9 +21,15 @@ REGULATOR_S2MPS11 = true
 POWER_SUPPLY = true
 BATTERY_S2MU005 = true
 
+# USB / extcon / fuel-gauge
+EXTCON = true
+EXTCON_S2M = true
+CHARGER_S2M = true
+
 [bootimg]
 header_version = 0
 page_size = 2048
+kernel_image = "Image"
 base = 0x10000000
 kernel_offset = 0x00008000
 ramdisk_offset = 0x01000000
@@ -31,6 +37,10 @@ second_offset = 0x00000000
 tags_offset = 0x00000100
 dtb_offset = 0x00000000
 cmdline = ""
+
+[bootimg.preboot]
+load_addr = 0x40080000
+payload_align = 0x200000
 
 [bootimg.dtbh]
 entries = [

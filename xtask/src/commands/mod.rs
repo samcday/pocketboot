@@ -3,6 +3,7 @@ pub(crate) mod busybox;
 mod config;
 pub(crate) mod cpio;
 pub(crate) mod kernel;
+pub(crate) mod preboot;
 pub(crate) mod qemu;
 
 use std::{
@@ -20,7 +21,7 @@ const KERNEL_ARCH: &str = "arm64";
 
 pub(crate) fn print_usage() {
     println!(
-        "usage: cargo xtask <command>\n\ncommands:\n  busybox   build BusyBox for initrd use\n  cpio      build pocketboot and create an initrd cpio\n  kernel    build a pocketboot kernel image for one device\n  bootimg   package an already-built pocketboot kernel as boot.img\n  qemu      build and boot pocketboot under qemu-system-aarch64"
+        "usage: cargo xtask <command>\n\ncommands:\n  busybox   build BusyBox for initrd use\n  cpio      build pocketboot and create an initrd cpio\n  kernel    build a pocketboot kernel image for one device\n  preboot   build a pocketpreboot shim for one device\n  bootimg   package an already-built pocketboot kernel as boot.img\n  qemu      build and boot pocketboot under qemu-system-aarch64"
     );
 }
 

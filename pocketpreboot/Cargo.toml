@@ -1,0 +1,11 @@
+[package]
+name = "pocketpreboot"
+version = "0.1.0"
+edition = "2024"
+publish = false
+build = "build.rs"
+
+[features]
+default = []
+soc-exynos7870 = []
+device-exynos7870-j7xelte = ["soc-exynos7870"]
