@@ -92,6 +92,7 @@ pub(super) struct BootImgConfig {
     pub(super) append_seandroid_enforce: bool,
     #[serde(default)]
     pub(super) append_dtb: bool,
+    pub(super) preboot: Option<PrebootConfig>,
     pub(super) qcdt: Option<QcdtConfig>,
     pub(super) dtbh: Option<DtbhConfig>,
 }
@@ -113,10 +114,19 @@ impl Default for BootImgConfig {
             ramdisk_size: 0,
             append_seandroid_enforce: false,
             append_dtb: false,
+            preboot: None,
             qcdt: None,
             dtbh: None,
         }
     }
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(super) struct PrebootConfig {
+    pub(super) load_addr: u64,
+    #[serde(default = "default_preboot_payload_align")]
+    pub(super) payload_align: u64,
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -460,6 +470,10 @@ fn escaped_kconfig_string(value: &str) -> String {
 
 fn default_bootimg_kernel_image() -> String {
     DEFAULT_BOOTIMG_KERNEL_IMAGE.to_string()
+}
+
+fn default_preboot_payload_align() -> u64 {
+    2 * 1024 * 1024
 }
 
 fn default_dtbh_platform() -> u32 {

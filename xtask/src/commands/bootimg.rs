@@ -9,9 +9,10 @@ use sha1::{Digest, Sha1};
 
 use crate::Result;
 
+use super::preboot;
 use super::{
-    KernelDevice,
-    config::{self, BootImgConfig, DtbhConfig, QcdtConfig},
+    FeatureSet, KernelDevice,
+    config::{self, BootImgConfig, DtbhConfig, PrebootConfig, QcdtConfig},
     ensure_file, target_dir, workspace_root,
 };
 
@@ -23,6 +24,10 @@ const SEANDROID_ENFORCE: &[u8] = b"SEANDROIDENFORCE";
 const DTBH_MAGIC: &[u8; 4] = b"DTBH";
 const DTBH_VERSION: u32 = 2;
 const DTBH_RECORD_SPACE: u32 = 0x20;
+const ARM64_IMAGE_MIN_SIZE: usize = 64;
+const ARM64_IMAGE_SIZE_OFFSET: usize = 16;
+const ARM64_IMAGE_MAGIC_OFFSET: usize = 56;
+const ARM64_IMAGE_MAGIC: &[u8; 4] = b"ARM\x64";
 
 #[derive(clap::Args, Debug)]
 pub(crate) struct BootImgArgs {
@@ -56,13 +61,27 @@ fn bootimg(args: BootImgArgs) -> Result<()> {
             device_config.device_path.display()
         )
     })?;
-    let image = bootimg_kernel_image(config, &device_config.device_path, &out_dir)?;
-    ensure_file(&image, "kernel image")?;
+    let payload_image = bootimg_kernel_image(config, &device_config.device_path, &out_dir)?;
+    ensure_file(&payload_image, "kernel image")?;
     ensure_file(&dtb, "device tree blob")?;
+    let image = if let Some(preboot) = &config.preboot {
+        stage_preboot_kernel(
+            &workspace_root,
+            &args.device,
+            preboot,
+            &payload_image,
+            &out_dir.join("pocketpreboot-kernel.img"),
+        )?
+    } else {
+        payload_image.clone()
+    };
     write_bootimg(config, &device_config.device_path, &image, &dtb, &output)?;
 
     println!("wrote {}", output.display());
     println!("image {}", image.display());
+    if config.preboot.is_some() {
+        println!("payload {}", payload_image.display());
+    }
     println!("dtb {}", dtb.display());
     println!("config {}", device_config.device_path.display());
     Ok(())
@@ -83,6 +102,96 @@ fn bootimg_kernel_image(
             config_path.display()
         )),
     }
+}
+
+fn stage_preboot_kernel(
+    workspace_root: &Path,
+    device: &KernelDevice,
+    config: &PrebootConfig,
+    kernel: &Path,
+    output: &Path,
+) -> Result<PathBuf> {
+    let preboot = preboot::build_device_preboot(
+        workspace_root,
+        device,
+        preboot::DEFAULT_TARGET,
+        None,
+        FeatureSet::default(),
+    )?;
+    let mut staged = fs::read(&preboot.binary)
+        .map_err(|err| format!("read {}: {err}", preboot.binary.display()))?;
+    let preboot_image_size = arm64_image_size(&staged, "pocketpreboot image")?;
+
+    let kernel = fs::read(kernel).map_err(|err| format!("read {}: {err}", kernel.display()))?;
+    arm64_image_size(&kernel, "preboot payload kernel")?;
+
+    let payload_offset =
+        preboot_payload_offset(config.load_addr, preboot_image_size, config.payload_align)?;
+    if payload_offset < staged.len() {
+        return Err(format!(
+            "preboot payload offset 0x{payload_offset:x} is inside pocketpreboot file size 0x{:x}",
+            staged.len()
+        ));
+    }
+    staged.resize(payload_offset, 0);
+    staged.extend_from_slice(&kernel);
+
+    fs::write(output, &staged).map_err(|err| format!("write {}: {err}", output.display()))?;
+    println!("preboot {}", preboot.binary.display());
+    println!("preboot-features {}", preboot.features);
+    println!("preboot-payload-offset 0x{payload_offset:x}");
+    Ok(output.to_path_buf())
+}
+
+fn preboot_payload_offset(load_addr: u64, image_size: u64, payload_align: u64) -> Result<usize> {
+    let end = load_addr
+        .checked_add(image_size)
+        .ok_or_else(|| "preboot image end address overflows u64".to_string())?;
+    let payload_addr = align_up_u64(end, payload_align)?;
+    let offset = payload_addr
+        .checked_sub(load_addr)
+        .ok_or_else(|| "preboot payload offset underflows u64".to_string())?;
+    usize::try_from(offset).map_err(|_| format!("preboot payload offset is too large: {offset}"))
+}
+
+fn align_up_u64(value: u64, alignment: u64) -> Result<u64> {
+    if alignment == 0 || !alignment.is_power_of_two() {
+        return Err(format!(
+            "preboot payload_align must be a non-zero power of two: 0x{alignment:x}"
+        ));
+    }
+
+    let mask = alignment - 1;
+    value
+        .checked_add(mask)
+        .map(|value| value & !mask)
+        .ok_or_else(|| "aligned address overflows u64".to_string())
+}
+
+fn arm64_image_size(image: &[u8], description: &str) -> Result<u64> {
+    if image.len() < ARM64_IMAGE_MIN_SIZE {
+        return Err(format!(
+            "{description} is smaller than an arm64 Image header: {} < {ARM64_IMAGE_MIN_SIZE}",
+            image.len()
+        ));
+    }
+    if &image[ARM64_IMAGE_MAGIC_OFFSET..ARM64_IMAGE_MAGIC_OFFSET + ARM64_IMAGE_MAGIC.len()]
+        != ARM64_IMAGE_MAGIC
+    {
+        return Err(format!("{description} is not a raw arm64 Image"));
+    }
+
+    let image_size = u64::from_le_bytes(
+        image[ARM64_IMAGE_SIZE_OFFSET..ARM64_IMAGE_SIZE_OFFSET + 8]
+            .try_into()
+            .unwrap(),
+    );
+    if image_size == 0 {
+        return Err(format!(
+            "{description} arm64 Image header has zero image_size"
+        ));
+    }
+    Ok(image_size)
 }
 
 fn write_bootimg(
@@ -580,6 +689,21 @@ mod tests {
     }
 
     #[test]
+    fn preboot_payload_offset_aligns_from_load_address() {
+        assert_eq!(
+            preboot_payload_offset(0x4008_0000, 0x4100, 0x20_0000).unwrap(),
+            0x18_0000
+        );
+    }
+
+    #[test]
+    fn arm64_image_size_reads_header() {
+        let image = arm64_image(0xa60000);
+
+        assert_eq!(arm64_image_size(&image, "test image").unwrap(), 0xa60000);
+    }
+
+    #[test]
     fn samsung_a5u_eur_config_is_legacy_qcdt() {
         let config = device_bootimg_config("qcom/msm8916-samsung-a5u-eur");
 
@@ -602,7 +726,10 @@ mod tests {
         assert_eq!(config.header_version, 0);
         assert_eq!(config.page_size, 2048);
         assert_eq!(config.base, 0x10000000);
-        assert_eq!(config.kernel_image, DEFAULT_BOOTIMG_KERNEL_IMAGE);
+        assert_eq!(config.kernel_image, "Image");
+        let preboot = config.preboot.unwrap();
+        assert_eq!(preboot.load_addr, 0x40080000);
+        assert_eq!(preboot.payload_align, 0x200000);
         assert!(config.qcdt.is_none());
         let dtbh = config.dtbh.unwrap();
         assert_eq!(dtbh.platform, 0x50a6);
@@ -669,6 +796,15 @@ mod tests {
             .unwrap()
             .as_nanos();
         std::env::temp_dir().join(format!("pocketboot-{name}-{}-{nanos}", std::process::id()))
+    }
+
+    fn arm64_image(image_size: u64) -> Vec<u8> {
+        let mut image = vec![0; ARM64_IMAGE_MIN_SIZE];
+        image[ARM64_IMAGE_SIZE_OFFSET..ARM64_IMAGE_SIZE_OFFSET + 8]
+            .copy_from_slice(&image_size.to_le_bytes());
+        image[ARM64_IMAGE_MAGIC_OFFSET..ARM64_IMAGE_MAGIC_OFFSET + ARM64_IMAGE_MAGIC.len()]
+            .copy_from_slice(ARM64_IMAGE_MAGIC);
+        image
     }
 
     fn device_bootimg_config(device_id: &str) -> BootImgConfig {

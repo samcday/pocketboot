@@ -43,6 +43,8 @@ enum XtaskCommand {
         about = "fetch or update a configured kernel source tree"
     )]
     KernelSrc(commands::kernel_src::KernelSrcArgs),
+    #[command(about = "build a pocketpreboot shim for one device")]
+    Preboot(commands::preboot::PrebootArgs),
     #[command(about = "package an already-built pocketboot kernel as boot.img")]
     Bootimg(commands::bootimg::BootImgArgs),
     #[command(about = "build and boot pocketboot under qemu-system-aarch64")]
@@ -56,6 +58,7 @@ fn run() -> Result<()> {
         XtaskCommand::Kernel(args) => commands::kernel::run(args),
         XtaskCommand::KernelMatrix(args) => commands::kernel_matrix::run(args),
         XtaskCommand::KernelSrc(args) => commands::kernel_src::run(args),
+        XtaskCommand::Preboot(args) => commands::preboot::run(args),
         XtaskCommand::Bootimg(args) => commands::bootimg::run(args),
         XtaskCommand::Qemu(args) => commands::qemu::run(args),
     }
