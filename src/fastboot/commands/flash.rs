@@ -114,7 +114,8 @@ fn is_allowed_partition_name(name: &str) -> bool {
         .strip_suffix("_a")
         .or_else(|| name.strip_suffix("_b"))
         .unwrap_or(name);
-    ALLOWED_PARTITION_BASES.contains(&base)
+    let base = base.to_lowercase();
+    ALLOWED_PARTITION_BASES.contains(&base.as_str())
 }
 
 fn ensure_not_mounted(partition: &partitions::Partition) -> io::Result<()> {
