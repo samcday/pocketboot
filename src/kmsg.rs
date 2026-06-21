@@ -5,8 +5,8 @@ use std::{
     sync::Once,
 };
 
-use tracing_subscriber::{filter::LevelFilter, fmt::MakeWriter, prelude::*};
 use crate::cmdline::KernelCommandLine;
+use tracing_subscriber::{filter::LevelFilter, fmt::MakeWriter, prelude::*};
 
 const KMSG: &str = "/dev/kmsg";
 

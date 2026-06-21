@@ -1,17 +1,23 @@
 use std::{
     collections::HashMap,
-    ffi::CStr,
-    fs::File,
+    ffi::{CStr, CString, OsString},
+    fs::{self, File, OpenOptions},
     io::{self, Read, Write},
     os::{
         fd::{AsRawFd, FromRawFd},
         raw::c_char,
-        unix::process::CommandExt,
+        unix::{
+            ffi::{OsStrExt, OsStringExt},
+            fs::{MetadataExt, PermissionsExt},
+            process::CommandExt,
+        },
     },
-    process::{Command, Stdio},
+    path::{Path, PathBuf},
+    process::{Child, ChildStdin, Command, Stdio},
     sync::{
         Arc, Condvar, Mutex,
         atomic::{AtomicBool, AtomicU32, Ordering},
+        mpsc,
     },
     thread,
     time::Duration,
@@ -42,11 +48,25 @@ const MAX_PAYLOAD_V1: u32 = 4 * 1024;
 const MAX_PAYLOAD: u32 = 1024 * 1024;
 const HEADER_LEN: usize = 24;
 const SHELL_CHUNK: usize = 4 * 1024;
+const SYNC_CHUNK: usize = 64 * 1024;
 const READ_TIMEOUT: Duration = Duration::from_millis(500);
 const TRANSFER_TIMEOUT: Duration = Duration::from_secs(30);
 const DISCONNECT_RETRY_DELAY: Duration = Duration::from_millis(250);
 const SHELL: &str = "/bin/sh";
 const SHELL_SERVICE: &str = "shell:";
+const EXEC_SERVICE: &str = "exec:";
+const SYNC_SERVICE: &str = "sync:";
+
+const SYNC_STAT: &[u8; 4] = b"STAT";
+const SYNC_LIST: &[u8; 4] = b"LIST";
+const SYNC_SEND: &[u8; 4] = b"SEND";
+const SYNC_RECV: &[u8; 4] = b"RECV";
+const SYNC_DENT: &[u8; 4] = b"DENT";
+const SYNC_DONE: &[u8; 4] = b"DONE";
+const SYNC_DATA: &[u8; 4] = b"DATA";
+const SYNC_OKAY: &[u8; 4] = b"OKAY";
+const SYNC_FAIL: &[u8; 4] = b"FAIL";
+const SYNC_QUIT: &[u8; 4] = b"QUIT";
 
 pub(crate) struct UsbFunction {
     handle: Handle,
@@ -150,7 +170,7 @@ pub(crate) struct AdbServer {
     rx: EndpointOut,
     writer: PacketWriter,
     stop: Arc<AtomicBool>,
-    sessions: HashMap<u32, ShellSession>,
+    sessions: HashMap<u32, AdbSession>,
     next_local_id: u32,
 }
 
@@ -307,23 +327,24 @@ impl AdbServer {
     fn handle_open(&mut self, packet: Packet) -> io::Result<()> {
         let remote_id = packet.message.arg0;
         let service = service_name(&packet.payload)?;
-        let Some(command) = shell_command(service) else {
+        let Some(service) = adb_service(service) else {
             tracing::debug!(service, "rejecting unsupported adb service");
             return self.writer.send(A_CLSE, 0, remote_id, &[]);
         };
 
         let local_id = self.allocate_local_id();
-        match ShellSession::spawn(local_id, remote_id, command, self.writer.clone()) {
+        match AdbSession::spawn(local_id, remote_id, service, self.writer.clone()) {
             Ok(session) => {
                 self.writer.send(A_OKAY, local_id, remote_id, &[])?;
+                let kind = session.kind();
                 self.sessions.insert(local_id, session);
                 if let Some(session) = self.sessions.get(&local_id) {
                     session.allow_output();
                 }
-                tracing::info!(local_id, remote_id, "adb shell opened");
+                tracing::info!(local_id, remote_id, kind, "adb stream opened");
             }
             Err(err) => {
-                tracing::warn!(error = ?err, "failed to start adb shell");
+                tracing::warn!(error = ?err, "failed to start adb stream");
                 self.writer.send(A_CLSE, 0, remote_id, &[])?;
             }
         }
@@ -337,20 +358,25 @@ impl AdbServer {
             return self.writer.send(A_CLSE, 0, remote_id, &[]);
         };
 
-        if session.remote_id != remote_id {
+        if session.remote_id() != remote_id {
             tracing::warn!(
                 local_id,
                 remote_id,
-                expected_remote_id = session.remote_id,
+                expected_remote_id = session.remote_id(),
                 "adb stream id mismatch"
             );
             return self.writer.send(A_CLSE, local_id, remote_id, &[]);
         }
 
+        if session.acknowledge_before_write() {
+            self.writer.send(A_OKAY, local_id, remote_id, &[])?;
+        }
+
         match session.write_input(&packet.payload) {
+            Ok(()) if session.acknowledge_before_write() => Ok(()),
             Ok(()) => self.writer.send(A_OKAY, local_id, remote_id, &[]),
             Err(err) => {
-                tracing::debug!(local_id, remote_id, error = ?err, "adb shell input failed");
+                tracing::debug!(local_id, remote_id, error = ?err, "adb stream input failed");
                 let mut session = self.sessions.remove(&local_id).unwrap();
                 session.close_from_device(&self.writer)
             }
@@ -361,7 +387,7 @@ impl AdbServer {
         let remote_id = packet.message.arg0;
         let local_id = packet.message.arg1;
         if let Some(session) = self.sessions.get(&local_id) {
-            if session.remote_id == remote_id {
+            if session.remote_id() == remote_id {
                 session.acknowledge_output();
             }
         }
@@ -372,7 +398,12 @@ impl AdbServer {
         let remote_id = packet.message.arg0;
         let local_id = packet.message.arg1;
         if let Some(mut session) = self.sessions.remove(&local_id) {
-            tracing::info!(local_id, remote_id, "adb shell closed by host");
+            tracing::info!(
+                local_id,
+                remote_id,
+                kind = session.kind(),
+                "adb stream closed by host"
+            );
             session.close_from_host(&self.writer)?;
         }
         Ok(())
@@ -437,6 +468,93 @@ impl PacketWriter {
             "adb packet sent"
         );
         Ok(())
+    }
+}
+
+enum AdbSession {
+    Shell(ShellSession),
+    Exec(RawCommandSession),
+    Sync(SyncSession),
+}
+
+impl AdbSession {
+    fn spawn(
+        local_id: u32,
+        remote_id: u32,
+        service: AdbService,
+        writer: PacketWriter,
+    ) -> io::Result<Self> {
+        match service {
+            AdbService::Shell(command) => {
+                ShellSession::spawn(local_id, remote_id, command, writer).map(AdbSession::Shell)
+            }
+            AdbService::Exec(command) => {
+                RawCommandSession::spawn(local_id, remote_id, command, writer).map(AdbSession::Exec)
+            }
+            AdbService::Sync => {
+                SyncSession::spawn(local_id, remote_id, writer).map(AdbSession::Sync)
+            }
+        }
+    }
+
+    fn kind(&self) -> &'static str {
+        match self {
+            AdbSession::Shell(_) => "shell",
+            AdbSession::Exec(_) => "exec",
+            AdbSession::Sync(_) => "sync",
+        }
+    }
+
+    fn remote_id(&self) -> u32 {
+        match self {
+            AdbSession::Shell(session) => session.remote_id,
+            AdbSession::Exec(session) => session.remote_id,
+            AdbSession::Sync(session) => session.remote_id,
+        }
+    }
+
+    fn acknowledge_before_write(&self) -> bool {
+        matches!(self, AdbSession::Sync(_))
+    }
+
+    fn allow_output(&self) {
+        match self {
+            AdbSession::Shell(session) => session.allow_output(),
+            AdbSession::Exec(session) => session.allow_output(),
+            AdbSession::Sync(session) => session.allow_output(),
+        }
+    }
+
+    fn acknowledge_output(&self) {
+        match self {
+            AdbSession::Shell(session) => session.acknowledge_output(),
+            AdbSession::Exec(session) => session.acknowledge_output(),
+            AdbSession::Sync(session) => session.acknowledge_output(),
+        }
+    }
+
+    fn write_input(&mut self, data: &[u8]) -> io::Result<()> {
+        match self {
+            AdbSession::Shell(session) => session.write_input(data),
+            AdbSession::Exec(session) => session.write_input(data),
+            AdbSession::Sync(session) => session.write_input(data),
+        }
+    }
+
+    fn close_from_host(&mut self, writer: &PacketWriter) -> io::Result<()> {
+        match self {
+            AdbSession::Shell(session) => session.close_from_host(writer),
+            AdbSession::Exec(session) => session.close_from_host(writer),
+            AdbSession::Sync(session) => session.close_from_host(writer),
+        }
+    }
+
+    fn close_from_device(&mut self, writer: &PacketWriter) -> io::Result<()> {
+        match self {
+            AdbSession::Shell(session) => session.close_from_device(writer),
+            AdbSession::Exec(session) => session.close_from_device(writer),
+            AdbSession::Sync(session) => session.close_from_device(writer),
+        }
     }
 }
 
@@ -514,6 +632,452 @@ impl Drop for ShellSession {
         if let Some(thread) = self.output_thread.take() {
             if thread.join().is_err() {
                 tracing::warn!(pid = self.child_pid, "adb shell output thread panicked");
+            }
+        }
+    }
+}
+
+struct RawCommandSession {
+    local_id: u32,
+    remote_id: u32,
+    stdin: Option<ChildStdin>,
+    child_pid: u32,
+    child_running: Arc<AtomicBool>,
+    output: Arc<OutputFlow>,
+    output_thread: Option<thread::JoinHandle<()>>,
+}
+
+impl RawCommandSession {
+    fn spawn(
+        local_id: u32,
+        remote_id: u32,
+        command: String,
+        writer: PacketWriter,
+    ) -> io::Result<Self> {
+        let (stdin, output_reader, child) = spawn_raw_command(&command)?;
+        let child_pid = child.id();
+        let child_running = Arc::new(AtomicBool::new(true));
+        let output = Arc::new(OutputFlow::new());
+        let thread_child_running = child_running.clone();
+        let thread_output = output.clone();
+        let output_thread = thread::Builder::new()
+            .name(format!("pocketboot-adb-exec-{local_id}"))
+            .spawn(move || {
+                run_raw_command_output(
+                    output_reader,
+                    child,
+                    writer,
+                    local_id,
+                    remote_id,
+                    thread_child_running,
+                    thread_output,
+                )
+            })?;
+
+        Ok(Self {
+            local_id,
+            remote_id,
+            stdin: Some(stdin),
+            child_pid,
+            child_running,
+            output,
+            output_thread: Some(output_thread),
+        })
+    }
+
+    fn allow_output(&self) {
+        self.output.allow_one_write();
+    }
+
+    fn acknowledge_output(&self) {
+        self.output.allow_one_write();
+    }
+
+    fn write_input(&mut self, data: &[u8]) -> io::Result<()> {
+        let Some(stdin) = self.stdin.as_mut() else {
+            return Err(io::Error::new(
+                io::ErrorKind::BrokenPipe,
+                "adb exec stdin is closed",
+            ));
+        };
+        stdin.write_all(data)
+    }
+
+    fn close_from_host(&mut self, writer: &PacketWriter) -> io::Result<()> {
+        let send_close = self.close();
+        if send_close {
+            writer.send(A_CLSE, self.local_id, self.remote_id, &[])?;
+        }
+        Ok(())
+    }
+
+    fn close_from_device(&mut self, writer: &PacketWriter) -> io::Result<()> {
+        let send_close = self.close();
+        if send_close {
+            writer.send(A_CLSE, self.local_id, self.remote_id, &[])?;
+        }
+        Ok(())
+    }
+
+    fn close(&mut self) -> bool {
+        self.stdin.take();
+        if self.child_running.swap(false, Ordering::AcqRel) {
+            terminate_process_group(self.child_pid);
+        }
+        self.output.close()
+    }
+}
+
+impl Drop for RawCommandSession {
+    fn drop(&mut self) {
+        self.close();
+        if let Some(thread) = self.output_thread.take() {
+            if thread.join().is_err() {
+                tracing::warn!(pid = self.child_pid, "adb exec output thread panicked");
+            }
+        }
+    }
+}
+
+struct SyncSession {
+    local_id: u32,
+    remote_id: u32,
+    buffer: Vec<u8>,
+    state: SyncState,
+    responses: Option<mpsc::Sender<SyncResponse>>,
+    output: Arc<OutputFlow>,
+    output_thread: Option<thread::JoinHandle<()>>,
+}
+
+enum SyncState {
+    Idle,
+    Receiving(SyncSend),
+}
+
+struct SyncSend {
+    path: PathBuf,
+    mode: u32,
+    file: Option<File>,
+    failure: Option<String>,
+}
+
+enum SyncResponse {
+    Packet(Vec<u8>),
+    File(PathBuf),
+}
+
+impl SyncSession {
+    fn spawn(local_id: u32, remote_id: u32, writer: PacketWriter) -> io::Result<Self> {
+        let (responses, response_rx) = mpsc::channel();
+        let output = Arc::new(OutputFlow::new());
+        let thread_output = output.clone();
+        let output_thread = thread::Builder::new()
+            .name(format!("pocketboot-adb-sync-{local_id}"))
+            .spawn(move || {
+                run_sync_output(response_rx, writer, local_id, remote_id, thread_output)
+            })?;
+
+        Ok(Self {
+            local_id,
+            remote_id,
+            buffer: Vec::new(),
+            state: SyncState::Idle,
+            responses: Some(responses),
+            output,
+            output_thread: Some(output_thread),
+        })
+    }
+
+    fn allow_output(&self) {
+        self.output.allow_one_write();
+    }
+
+    fn acknowledge_output(&self) {
+        self.output.allow_one_write();
+    }
+
+    fn write_input(&mut self, data: &[u8]) -> io::Result<()> {
+        self.buffer.extend_from_slice(data);
+        self.process_buffer()
+    }
+
+    fn close_from_host(&mut self, writer: &PacketWriter) -> io::Result<()> {
+        let send_close = self.close();
+        if send_close {
+            writer.send(A_CLSE, self.local_id, self.remote_id, &[])?;
+        }
+        Ok(())
+    }
+
+    fn close_from_device(&mut self, writer: &PacketWriter) -> io::Result<()> {
+        let send_close = self.close();
+        if send_close {
+            writer.send(A_CLSE, self.local_id, self.remote_id, &[])?;
+        }
+        Ok(())
+    }
+
+    fn close(&mut self) -> bool {
+        self.responses.take();
+        self.output.close()
+    }
+
+    fn process_buffer(&mut self) -> io::Result<()> {
+        loop {
+            let consumed = match self.state {
+                SyncState::Idle => self.process_idle_message()?,
+                SyncState::Receiving(_) => self.process_send_message()?,
+            };
+            if !consumed {
+                return Ok(());
+            }
+        }
+    }
+
+    fn process_idle_message(&mut self) -> io::Result<bool> {
+        if self.buffer.len() < 8 {
+            return Ok(false);
+        }
+
+        let id = sync_id(&self.buffer[..4]);
+        let length = sync_u32(&self.buffer[4..8]) as usize;
+        let total = 8usize.checked_add(length).ok_or_else(|| {
+            io::Error::new(io::ErrorKind::InvalidData, "sync request length overflow")
+        })?;
+        if self.buffer.len() < total {
+            return Ok(false);
+        }
+
+        let payload = self.buffer[8..total].to_vec();
+        self.buffer.drain(..total);
+        self.handle_sync_request(id, &payload)?;
+        Ok(true)
+    }
+
+    fn process_send_message(&mut self) -> io::Result<bool> {
+        if self.buffer.len() < 8 {
+            return Ok(false);
+        }
+
+        let id = sync_id(&self.buffer[..4]);
+        let value = sync_u32(&self.buffer[4..8]);
+        if &id == SYNC_DATA {
+            let length = value as usize;
+            let total = 8usize.checked_add(length).ok_or_else(|| {
+                io::Error::new(io::ErrorKind::InvalidData, "sync data length overflow")
+            })?;
+            if self.buffer.len() < total {
+                return Ok(false);
+            }
+            let data = self.buffer[8..total].to_vec();
+            self.buffer.drain(..total);
+            self.handle_send_data(&data);
+            return Ok(true);
+        }
+
+        if &id == SYNC_DONE {
+            self.buffer.drain(..8);
+            self.finish_send(value)?;
+            return Ok(true);
+        }
+
+        self.buffer.clear();
+        self.state = SyncState::Idle;
+        self.queue_fail(format!(
+            "expected DATA or DONE during SEND, got {}",
+            sync_id_name(&id)
+        ))?;
+        Ok(false)
+    }
+
+    fn handle_sync_request(&mut self, id: [u8; 4], payload: &[u8]) -> io::Result<()> {
+        match &id {
+            SYNC_STAT => self.handle_stat(payload),
+            SYNC_LIST => self.handle_list(payload),
+            SYNC_RECV => self.handle_recv(payload),
+            SYNC_SEND => self.start_send(payload),
+            SYNC_QUIT => Ok(()),
+            _ => self.queue_fail(format!("unsupported sync request {}", sync_id_name(&id))),
+        }
+    }
+
+    fn handle_stat(&self, payload: &[u8]) -> io::Result<()> {
+        let path = sync_path(payload);
+        let (mode, size, mtime) = sync_stat(&path);
+        self.queue_packet(sync_stat_packet(mode, size, mtime))
+    }
+
+    fn handle_list(&self, payload: &[u8]) -> io::Result<()> {
+        let path = sync_path(payload);
+        let entries = match fs::read_dir(&path) {
+            Ok(entries) => entries,
+            Err(err) => return self.queue_fail(format!("list {}: {err}", path.display())),
+        };
+
+        for entry in entries {
+            let entry = match entry {
+                Ok(entry) => entry,
+                Err(err) => return self.queue_fail(format!("list {}: {err}", path.display())),
+            };
+            let name = entry.file_name();
+            let name = name.as_os_str().as_bytes();
+            let metadata = match entry.metadata() {
+                Ok(metadata) => metadata,
+                Err(err) => {
+                    return self.queue_fail(format!("stat {}: {err}", entry.path().display()));
+                }
+            };
+            self.queue_packet(sync_dent_packet(
+                metadata.mode(),
+                sync_size(&metadata),
+                sync_mtime(&metadata),
+                name,
+            )?)?;
+        }
+
+        self.queue_packet(sync_list_done_packet())
+    }
+
+    fn handle_recv(&self, payload: &[u8]) -> io::Result<()> {
+        self.queue_response(SyncResponse::File(sync_path(payload)))
+    }
+
+    fn start_send(&mut self, payload: &[u8]) -> io::Result<()> {
+        let (path, mode) = match parse_send_target(payload) {
+            Ok(target) => target,
+            Err(err) => return self.queue_fail(err.to_string()),
+        };
+
+        let file_type = mode & libc::S_IFMT;
+        if file_type == libc::S_IFDIR {
+            let failure = fs::create_dir_all(&path)
+                .err()
+                .map(|err| format!("mkdir {}: {err}", path.display()));
+            self.state = SyncState::Receiving(SyncSend {
+                path,
+                mode,
+                file: None,
+                failure,
+            });
+            return Ok(());
+        }
+
+        if file_type == libc::S_IFLNK {
+            self.state = SyncState::Receiving(SyncSend {
+                path: path.clone(),
+                mode,
+                file: None,
+                failure: Some(format!("symlink push is not supported: {}", path.display())),
+            });
+            return Ok(());
+        }
+
+        let file = match create_sync_file(&path) {
+            Ok(file) => Some(file),
+            Err(err) => {
+                self.state = SyncState::Receiving(SyncSend {
+                    path: path.clone(),
+                    mode,
+                    file: None,
+                    failure: Some(format!("create {}: {err}", path.display())),
+                });
+                return Ok(());
+            }
+        };
+
+        self.state = SyncState::Receiving(SyncSend {
+            path,
+            mode,
+            file,
+            failure: None,
+        });
+        Ok(())
+    }
+
+    fn handle_send_data(&mut self, data: &[u8]) {
+        let SyncState::Receiving(send) = &mut self.state else {
+            return;
+        };
+        if send.failure.is_some() {
+            return;
+        }
+
+        let Some(file) = send.file.as_mut() else {
+            if !data.is_empty() {
+                send.failure = Some(format!(
+                    "cannot write data to directory {}",
+                    send.path.display()
+                ));
+            }
+            return;
+        };
+
+        if let Err(err) = file.write_all(data) {
+            send.failure = Some(format!("write {}: {err}", send.path.display()));
+            send.file.take();
+        }
+    }
+
+    fn finish_send(&mut self, mtime: u32) -> io::Result<()> {
+        let state = std::mem::replace(&mut self.state, SyncState::Idle);
+        let SyncState::Receiving(mut send) = state else {
+            return self.queue_fail("DONE without SEND");
+        };
+
+        if let Some(file) = send.file.as_mut() {
+            if let Err(err) = file.flush() {
+                send.failure = Some(format!("flush {}: {err}", send.path.display()));
+            }
+        }
+        drop(send.file.take());
+
+        if send.failure.is_none() {
+            if let Err(err) = set_sync_mode(&send.path, send.mode) {
+                send.failure = Some(format!("chmod {}: {err}", send.path.display()));
+            }
+        }
+        if send.failure.is_none() {
+            if let Err(err) = set_sync_mtime(&send.path, mtime) {
+                send.failure = Some(format!("utime {}: {err}", send.path.display()));
+            }
+        }
+
+        match send.failure {
+            Some(failure) => self.queue_fail(failure),
+            None => self.queue_packet(sync_status_packet(SYNC_OKAY, 0)),
+        }
+    }
+
+    fn queue_fail(&self, message: impl AsRef<str>) -> io::Result<()> {
+        self.queue_packet(sync_fail_packet(message.as_ref())?)
+    }
+
+    fn queue_packet(&self, payload: Vec<u8>) -> io::Result<()> {
+        self.queue_response(SyncResponse::Packet(payload))
+    }
+
+    fn queue_response(&self, response: SyncResponse) -> io::Result<()> {
+        let Some(responses) = &self.responses else {
+            return Err(io::Error::new(
+                io::ErrorKind::BrokenPipe,
+                "adb sync response channel is closed",
+            ));
+        };
+        responses.send(response).map_err(|_| {
+            io::Error::new(
+                io::ErrorKind::BrokenPipe,
+                "adb sync response thread stopped",
+            )
+        })
+    }
+}
+
+impl Drop for SyncSession {
+    fn drop(&mut self) {
+        self.close();
+        if let Some(thread) = self.output_thread.take() {
+            if thread.join().is_err() {
+                tracing::warn!("adb sync output thread panicked");
             }
         }
     }
@@ -619,6 +1183,151 @@ fn run_shell_output(
     }
 }
 
+fn run_raw_command_output(
+    mut output_reader: File,
+    mut child: Child,
+    writer: PacketWriter,
+    local_id: u32,
+    remote_id: u32,
+    child_running: Arc<AtomicBool>,
+    output: Arc<OutputFlow>,
+) {
+    let mut buffer = [0; SHELL_CHUNK];
+
+    loop {
+        if !output.wait_for_write_credit() {
+            let _ = child.wait();
+            child_running.store(false, Ordering::Release);
+            return;
+        }
+
+        let read = match read_fd(&mut output_reader, &mut buffer) {
+            Ok(0) => break,
+            Ok(read) => read,
+            Err(err) => {
+                tracing::debug!(local_id, remote_id, error = ?err, "adb exec output read failed");
+                break;
+            }
+        };
+
+        if let Err(err) = writer.send(A_WRTE, local_id, remote_id, &buffer[..read]) {
+            tracing::debug!(local_id, remote_id, error = ?err, "adb exec output send failed");
+            break;
+        }
+    }
+
+    if let Err(err) = child.wait() {
+        tracing::debug!(local_id, remote_id, error = ?err, "adb exec wait failed");
+    }
+    child_running.store(false, Ordering::Release);
+
+    if output.close() {
+        if let Err(err) = writer.send(A_CLSE, local_id, remote_id, &[]) {
+            tracing::debug!(local_id, remote_id, error = ?err, "adb exec close send failed");
+        }
+    }
+}
+
+fn run_sync_output(
+    responses: mpsc::Receiver<SyncResponse>,
+    writer: PacketWriter,
+    local_id: u32,
+    remote_id: u32,
+    output: Arc<OutputFlow>,
+) {
+    while let Ok(response) = responses.recv() {
+        let sent = match response {
+            SyncResponse::Packet(payload) => {
+                send_stream_payload(&writer, local_id, remote_id, &output, &payload)
+            }
+            SyncResponse::File(path) => {
+                send_sync_file(&writer, local_id, remote_id, &output, &path)
+            }
+        };
+        if !sent {
+            break;
+        }
+    }
+}
+
+fn send_sync_file(
+    writer: &PacketWriter,
+    local_id: u32,
+    remote_id: u32,
+    output: &OutputFlow,
+    path: &Path,
+) -> bool {
+    let mut file = match File::open(path) {
+        Ok(file) => file,
+        Err(err) => {
+            let payload = match sync_fail_packet(&format!("open {}: {err}", path.display())) {
+                Ok(payload) => payload,
+                Err(err) => {
+                    tracing::debug!(local_id, remote_id, error = ?err, "adb sync fail packet failed");
+                    return false;
+                }
+            };
+            return send_stream_payload(writer, local_id, remote_id, output, &payload);
+        }
+    };
+
+    let chunk_size = SYNC_CHUNK.min(writer.max_payload().saturating_sub(8).max(1) as usize);
+    let mut buffer = vec![0; chunk_size];
+    loop {
+        let read = match read_fd(&mut file, &mut buffer) {
+            Ok(0) => break,
+            Ok(read) => read,
+            Err(err) => {
+                let payload = match sync_fail_packet(&format!("read {}: {err}", path.display())) {
+                    Ok(payload) => payload,
+                    Err(err) => {
+                        tracing::debug!(local_id, remote_id, error = ?err, "adb sync fail packet failed");
+                        return false;
+                    }
+                };
+                return send_stream_payload(writer, local_id, remote_id, output, &payload);
+            }
+        };
+
+        let payload = match sync_data_packet(&buffer[..read]) {
+            Ok(payload) => payload,
+            Err(err) => {
+                tracing::debug!(local_id, remote_id, error = ?err, "adb sync data packet failed");
+                return false;
+            }
+        };
+        if !send_stream_payload(writer, local_id, remote_id, output, &payload) {
+            return false;
+        }
+    }
+
+    send_stream_payload(
+        writer,
+        local_id,
+        remote_id,
+        output,
+        &sync_status_packet(SYNC_DONE, 0),
+    )
+}
+
+fn send_stream_payload(
+    writer: &PacketWriter,
+    local_id: u32,
+    remote_id: u32,
+    output: &OutputFlow,
+    payload: &[u8],
+) -> bool {
+    if !output.wait_for_write_credit() {
+        return false;
+    }
+
+    if let Err(err) = writer.send(A_WRTE, local_id, remote_id, payload) {
+        tracing::debug!(local_id, remote_id, error = ?err, "adb stream output send failed");
+        return false;
+    }
+    true
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct Packet {
     message: Message,
@@ -704,13 +1413,26 @@ fn service_name(payload: &[u8]) -> io::Result<&str> {
         .map_err(|_| io::Error::new(io::ErrorKind::InvalidData, "adb service is not utf-8"))
 }
 
-fn shell_command(service: &str) -> Option<Option<String>> {
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum AdbService {
+    Shell(Option<String>),
+    Exec(String),
+    Sync,
+}
+
+fn adb_service(service: &str) -> Option<AdbService> {
     if service == "shell" || service == SHELL_SERVICE {
-        return Some(None);
+        return Some(AdbService::Shell(None));
+    }
+    if service == SYNC_SERVICE {
+        return Some(AdbService::Sync);
+    }
+    if let Some(command) = service.strip_prefix(EXEC_SERVICE) {
+        return Some(AdbService::Exec(command.to_string()));
     }
     service
         .strip_prefix(SHELL_SERVICE)
-        .map(|command| Some(command.to_string()))
+        .map(|command| AdbService::Shell(Some(command.to_string())))
 }
 
 fn spawn_shell(command: Option<&str>) -> io::Result<(File, u32)> {
@@ -753,6 +1475,51 @@ fn spawn_shell(command: Option<&str>) -> io::Result<(File, u32)> {
     Ok((master, child.id()))
 }
 
+fn spawn_raw_command(command: &str) -> io::Result<(ChildStdin, File, Child)> {
+    let (output_reader, output_writer) = open_pipe()?;
+    let stdout = output_writer.try_clone()?;
+    let stderr = output_writer;
+
+    let mut shell = Command::new(SHELL);
+    shell
+        .arg("-c")
+        .arg(command)
+        .env("HOME", "/")
+        .env("PATH", "/bin:/sbin:/usr/bin:/usr/sbin")
+        .stdin(Stdio::piped())
+        .stdout(Stdio::from(stdout))
+        .stderr(Stdio::from(stderr));
+
+    unsafe {
+        shell.pre_exec(move || {
+            if libc::setsid() < 0 {
+                return Err(io::Error::last_os_error());
+            }
+            libc::signal(libc::SIGPIPE, libc::SIG_DFL);
+            Ok(())
+        });
+    }
+
+    let mut child = shell
+        .spawn()
+        .map_err(|err| io::Error::new(err.kind(), format!("spawn {SHELL}: {err}")))?;
+    let stdin = child.stdin.take().ok_or_else(|| {
+        io::Error::new(io::ErrorKind::BrokenPipe, "spawned adb exec without stdin")
+    })?;
+    Ok((stdin, output_reader, child))
+}
+
+fn open_pipe() -> io::Result<(File, File)> {
+    let mut fds = [0; 2];
+    if unsafe { libc::pipe2(fds.as_mut_ptr(), libc::O_CLOEXEC) } < 0 {
+        return Err(io::Error::last_os_error());
+    }
+
+    let read = unsafe { File::from_raw_fd(fds[0]) };
+    let write = unsafe { File::from_raw_fd(fds[1]) };
+    Ok((read, write))
+}
+
 fn open_pty() -> io::Result<(File, File)> {
     let master_fd = unsafe { libc::posix_openpt(libc::O_RDWR | libc::O_NOCTTY | libc::O_CLOEXEC) };
     if master_fd < 0 {
@@ -789,6 +1556,164 @@ fn open_pty() -> io::Result<(File, File)> {
     }
     let slave = unsafe { File::from_raw_fd(slave_fd) };
     Ok((master, slave))
+}
+
+fn sync_id(bytes: &[u8]) -> [u8; 4] {
+    bytes.try_into().expect("sync id is always four bytes")
+}
+
+fn sync_u32(bytes: &[u8]) -> u32 {
+    u32::from_le_bytes(bytes.try_into().expect("sync u32 is always four bytes"))
+}
+
+fn sync_path(bytes: &[u8]) -> PathBuf {
+    PathBuf::from(OsString::from_vec(bytes.to_vec()))
+}
+
+fn sync_stat(path: &Path) -> (u32, u32, u32) {
+    match fs::metadata(path) {
+        Ok(metadata) => (metadata.mode(), sync_size(&metadata), sync_mtime(&metadata)),
+        Err(_) => (0, 0, 0),
+    }
+}
+
+fn sync_size(metadata: &fs::Metadata) -> u32 {
+    metadata.size().min(u64::from(u32::MAX)) as u32
+}
+
+fn sync_mtime(metadata: &fs::Metadata) -> u32 {
+    metadata.mtime().clamp(0, i64::from(u32::MAX)) as u32
+}
+
+fn parse_send_target(payload: &[u8]) -> io::Result<(PathBuf, u32)> {
+    let Some(separator) = payload.iter().rposition(|byte| *byte == b',') else {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "SEND target is missing mode",
+        ));
+    };
+    let path = sync_path(&payload[..separator]);
+    let mode = std::str::from_utf8(&payload[separator + 1..])
+        .map_err(|_| io::Error::new(io::ErrorKind::InvalidData, "SEND mode is not utf-8"))?
+        .parse::<u32>()
+        .map_err(|err| io::Error::new(io::ErrorKind::InvalidData, format!("SEND mode: {err}")))?;
+    Ok((path, mode))
+}
+
+fn create_sync_file(path: &Path) -> io::Result<File> {
+    if let Some(parent) = path
+        .parent()
+        .filter(|parent| !parent.as_os_str().is_empty())
+    {
+        fs::create_dir_all(parent)?;
+    }
+    OpenOptions::new()
+        .write(true)
+        .create(true)
+        .truncate(true)
+        .open(path)
+}
+
+fn set_sync_mode(path: &Path, mode: u32) -> io::Result<()> {
+    fs::set_permissions(path, fs::Permissions::from_mode(mode & 0o7777))
+}
+
+fn set_sync_mtime(path: &Path, mtime: u32) -> io::Result<()> {
+    let path = CString::new(path.as_os_str().as_bytes())
+        .map_err(|_| io::Error::new(io::ErrorKind::InvalidInput, "path contains interior NUL"))?;
+    let times = [
+        libc::timespec {
+            tv_sec: mtime as libc::time_t,
+            tv_nsec: 0,
+        },
+        libc::timespec {
+            tv_sec: mtime as libc::time_t,
+            tv_nsec: 0,
+        },
+    ];
+    if unsafe { libc::utimensat(libc::AT_FDCWD, path.as_ptr(), times.as_ptr(), 0) } < 0 {
+        return Err(io::Error::last_os_error());
+    }
+    Ok(())
+}
+
+fn sync_status_packet(id: &[u8; 4], value: u32) -> Vec<u8> {
+    let mut packet = Vec::with_capacity(8);
+    packet.extend_from_slice(id);
+    packet.extend_from_slice(&value.to_le_bytes());
+    packet
+}
+
+fn sync_stat_packet(mode: u32, size: u32, mtime: u32) -> Vec<u8> {
+    let mut packet = Vec::with_capacity(16);
+    packet.extend_from_slice(SYNC_STAT);
+    packet.extend_from_slice(&mode.to_le_bytes());
+    packet.extend_from_slice(&size.to_le_bytes());
+    packet.extend_from_slice(&mtime.to_le_bytes());
+    packet
+}
+
+fn sync_dent_packet(mode: u32, size: u32, mtime: u32, name: &[u8]) -> io::Result<Vec<u8>> {
+    let name_len = u32::try_from(name.len()).map_err(|_| {
+        io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "sync directory entry name too long",
+        )
+    })?;
+    let mut packet = Vec::with_capacity(20 + name.len());
+    packet.extend_from_slice(SYNC_DENT);
+    packet.extend_from_slice(&mode.to_le_bytes());
+    packet.extend_from_slice(&size.to_le_bytes());
+    packet.extend_from_slice(&mtime.to_le_bytes());
+    packet.extend_from_slice(&name_len.to_le_bytes());
+    packet.extend_from_slice(name);
+    Ok(packet)
+}
+
+fn sync_list_done_packet() -> Vec<u8> {
+    let mut packet = Vec::with_capacity(20);
+    packet.extend_from_slice(SYNC_DONE);
+    packet.extend_from_slice(&0u32.to_le_bytes());
+    packet.extend_from_slice(&0u32.to_le_bytes());
+    packet.extend_from_slice(&0u32.to_le_bytes());
+    packet.extend_from_slice(&0u32.to_le_bytes());
+    packet
+}
+
+fn sync_data_packet(data: &[u8]) -> io::Result<Vec<u8>> {
+    let data_len = u32::try_from(data.len())
+        .map_err(|_| io::Error::new(io::ErrorKind::InvalidInput, "sync data packet too large"))?;
+    let mut packet = Vec::with_capacity(8 + data.len());
+    packet.extend_from_slice(SYNC_DATA);
+    packet.extend_from_slice(&data_len.to_le_bytes());
+    packet.extend_from_slice(data);
+    Ok(packet)
+}
+
+fn sync_fail_packet(message: &str) -> io::Result<Vec<u8>> {
+    let message = message.as_bytes();
+    let message_len = u32::try_from(message.len()).map_err(|_| {
+        io::Error::new(io::ErrorKind::InvalidInput, "sync failure message too long")
+    })?;
+    let mut packet = Vec::with_capacity(8 + message.len());
+    packet.extend_from_slice(SYNC_FAIL);
+    packet.extend_from_slice(&message_len.to_le_bytes());
+    packet.extend_from_slice(message);
+    Ok(packet)
+}
+
+fn sync_id_name(id: &[u8; 4]) -> String {
+    String::from_utf8_lossy(id).into_owned()
+}
+
+fn read_fd(file: &mut File, buffer: &mut [u8]) -> io::Result<usize> {
+    loop {
+        match file.read(buffer) {
+            Ok(read) => return Ok(read),
+            Err(err) if err.kind() == io::ErrorKind::Interrupted => {}
+            Err(err) => return Err(err),
+        }
+    }
 }
 
 fn read_pty(master: &mut File, buffer: &mut [u8]) -> io::Result<usize> {
@@ -902,17 +1827,49 @@ mod tests {
 
     #[test]
     fn recognizes_interactive_shell_service() {
-        assert_eq!(shell_command("shell:"), Some(None));
-        assert_eq!(shell_command("shell"), Some(None));
+        assert_eq!(adb_service("shell:"), Some(AdbService::Shell(None)));
+        assert_eq!(adb_service("shell"), Some(AdbService::Shell(None)));
     }
 
     #[test]
     fn recognizes_command_shell_service() {
-        assert_eq!(shell_command("shell:ls /"), Some(Some("ls /".to_string())));
+        assert_eq!(
+            adb_service("shell:ls /"),
+            Some(AdbService::Shell(Some("ls /".to_string())))
+        );
+    }
+
+    #[test]
+    fn recognizes_exec_service() {
+        assert_eq!(
+            adb_service("exec:cat /proc/cmdline"),
+            Some(AdbService::Exec("cat /proc/cmdline".to_string()))
+        );
+    }
+
+    #[test]
+    fn recognizes_sync_service() {
+        assert_eq!(adb_service("sync:"), Some(AdbService::Sync));
     }
 
     #[test]
     fn rejects_non_shell_service() {
-        assert_eq!(shell_command("sync:"), None);
+        assert_eq!(adb_service("host:version"), None);
+    }
+
+    #[test]
+    fn parses_send_target_with_commas_in_path() {
+        let (path, mode) = parse_send_target(b"/tmp/file,with,commas,33206").unwrap();
+
+        assert_eq!(path.as_os_str().as_bytes(), b"/tmp/file,with,commas");
+        assert_eq!(mode, 33206);
+    }
+
+    #[test]
+    fn builds_sync_stat_packet() {
+        assert_eq!(
+            sync_stat_packet(0o100644, 123, 456),
+            b"STAT\xA4\x81\x00\x00{\x00\x00\x00\xC8\x01\x00\x00".to_vec()
+        );
     }
 }
