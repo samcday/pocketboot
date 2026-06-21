@@ -27,3 +27,10 @@ POWER_SUPPLY = true
 EXTCON = true
 BATTERY_PMI8994_FG = true
 CHARGER_QCOM_SMBCHG = true
+
+[bootimg]
+header_version = 0
+page_size = 2048
+base = 0x80000000
+kernel_offset = 0x00008000
+cmdline = ""
