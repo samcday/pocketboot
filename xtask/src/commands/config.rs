@@ -13,6 +13,14 @@ use super::{FeatureSet, KernelDevice, ensure_file, validate_feature};
 
 pub(super) const DEFAULT_BOOTIMG_KERNEL_IMAGE: &str = "Image.gz";
 
+const DEFAULT_BOOTIMG_HEADER_VERSION: u32 = 0;
+const DEFAULT_BOOTIMG_PAGE_SIZE: u32 = 2048;
+const DEFAULT_BOOTIMG_BASE: u64 = 0x10000000;
+const DEFAULT_BOOTIMG_KERNEL_OFFSET: u64 = 0x00008000;
+const DEFAULT_BOOTIMG_RAMDISK_OFFSET: u64 = 0x01000000;
+const DEFAULT_BOOTIMG_SECOND_OFFSET: u64 = 0x00f00000;
+const DEFAULT_BOOTIMG_TAGS_OFFSET: u64 = 0x00000100;
+const DEFAULT_BOOTIMG_DTB_OFFSET: u64 = 0x01f00000;
 const DTBH_PLATFORM_CODE: u32 = 0x50a6;
 const DTBH_SUBTYPE_CODE: u32 = 0x217584da;
 
@@ -41,11 +49,10 @@ pub(super) struct CpioConfig {
 }
 
 #[derive(Clone, Debug, Deserialize)]
-#[serde(deny_unknown_fields)]
+#[serde(default, deny_unknown_fields)]
 pub(super) struct BootImgConfig {
     pub(super) header_version: u32,
     pub(super) page_size: u32,
-    #[serde(default = "default_bootimg_kernel_image")]
     pub(super) kernel_image: String,
     pub(super) base: u64,
     pub(super) kernel_offset: u64,
@@ -63,6 +70,28 @@ pub(super) struct BootImgConfig {
     pub(super) append_seandroid_enforce: bool,
     pub(super) qcdt: Option<QcdtConfig>,
     pub(super) dtbh: Option<DtbhConfig>,
+}
+
+impl Default for BootImgConfig {
+    fn default() -> Self {
+        Self {
+            header_version: DEFAULT_BOOTIMG_HEADER_VERSION,
+            page_size: DEFAULT_BOOTIMG_PAGE_SIZE,
+            kernel_image: default_bootimg_kernel_image(),
+            base: DEFAULT_BOOTIMG_BASE,
+            kernel_offset: DEFAULT_BOOTIMG_KERNEL_OFFSET,
+            ramdisk_offset: DEFAULT_BOOTIMG_RAMDISK_OFFSET,
+            second_offset: DEFAULT_BOOTIMG_SECOND_OFFSET,
+            tags_offset: DEFAULT_BOOTIMG_TAGS_OFFSET,
+            dtb_offset: DEFAULT_BOOTIMG_DTB_OFFSET,
+            board: String::new(),
+            cmdline: String::new(),
+            ramdisk_size: 0,
+            append_seandroid_enforce: false,
+            qcdt: None,
+            dtbh: None,
+        }
+    }
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -409,6 +438,28 @@ mod tests {
             contents,
             "CONFIG_BLOCK=y\n# CONFIG_DEBUG_INFO is not set\nCONFIG_DRM_MSM=m\nCONFIG_NR_CPUS=8\nCONFIG_MAGIC_SYSRQ_DEFAULT_ENABLE=0x80\nCONFIG_DRM_PANIC_SCREEN=\"qr_code\"\n"
         );
+    }
+
+    #[test]
+    fn empty_bootimg_table_uses_aosp_mkbootimg_defaults() {
+        let layer: ConfigLayer = toml::from_str("[bootimg]\n").unwrap();
+        let config = layer.bootimg.unwrap();
+
+        assert_eq!(config.header_version, DEFAULT_BOOTIMG_HEADER_VERSION);
+        assert_eq!(config.page_size, DEFAULT_BOOTIMG_PAGE_SIZE);
+        assert_eq!(config.kernel_image, DEFAULT_BOOTIMG_KERNEL_IMAGE);
+        assert_eq!(config.base, DEFAULT_BOOTIMG_BASE);
+        assert_eq!(config.kernel_offset, DEFAULT_BOOTIMG_KERNEL_OFFSET);
+        assert_eq!(config.ramdisk_offset, DEFAULT_BOOTIMG_RAMDISK_OFFSET);
+        assert_eq!(config.second_offset, DEFAULT_BOOTIMG_SECOND_OFFSET);
+        assert_eq!(config.tags_offset, DEFAULT_BOOTIMG_TAGS_OFFSET);
+        assert_eq!(config.dtb_offset, DEFAULT_BOOTIMG_DTB_OFFSET);
+        assert!(config.board.is_empty());
+        assert!(config.cmdline.is_empty());
+        assert_eq!(config.ramdisk_size, 0);
+        assert!(!config.append_seandroid_enforce);
+        assert!(config.qcdt.is_none());
+        assert!(config.dtbh.is_none());
     }
 
     #[test]
