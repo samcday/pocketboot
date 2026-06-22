@@ -5790,6 +5790,7 @@ dependencies = [
  "abootimg-oxide",
  "clap",
  "serde",
+ "serde_json",
  "sha1",
  "sha2",
  "toml 0.8.23",
