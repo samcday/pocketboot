@@ -179,6 +179,13 @@ jobs:
     strategy:
       fail-fast: false
       matrix: ${{ fromJson(needs.kernel-matrix.outputs.matrix) }}
+    env:
+      CCACHE_BASEDIR: ${{ github.workspace }}
+      CCACHE_COMPILERCHECK: content
+      CCACHE_DIR: ${{ github.workspace }}/target/ccache
+      CCACHE_MAXSIZE: 2G
+      CROSS_COMPILE: ccache aarch64-linux-gnu-
+      HOSTCC: ccache gcc
 
     steps:
       - name: Checkout pocketboot
@@ -202,6 +209,19 @@ jobs:
             /usr/local/cargo/registry
           key: ${{ runner.os }}-cargo-${{ hashFiles('Cargo.lock') }}
 
+      - name: Cache kernel ccache
+        uses: actions/cache@v4
+        with:
+          path: target/ccache
+          key: ${{ runner.os }}-kernel-ccache-${{ matrix.sha }}-${{ hashFiles('.github/Dockerfile') }}
+          restore-keys: |
+            ${{ runner.os }}-kernel-ccache-${{ matrix.sha }}-
+
+      - name: Configure ccache
+        run: |
+          ccache --set-config=max_size="$CCACHE_MAXSIZE"
+          ccache --zero-stats
+
       - name: Build kernels and boot images
         env:
           DEVICES: ${{ join(matrix.devices, ' ') }}
@@ -214,6 +234,10 @@ jobs:
           for device in $BOOTIMG_DEVICES; do
             cargo xtask bootimg "$device"
           done
+
+      - name: Show ccache stats
+        if: always()
+        run: ccache --show-stats
 
       - name: Upload boot artifacts
         uses: actions/upload-artifact@v4

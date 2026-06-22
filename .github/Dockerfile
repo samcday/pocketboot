@@ -10,6 +10,7 @@ RUN set -eux; \
         binutils-aarch64-linux-gnu \
         bison \
         ca-certificates \
+        ccache \
         flex \
         gcc-aarch64-linux-gnu \
         git \
