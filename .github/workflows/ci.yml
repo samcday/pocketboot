@@ -124,29 +124,19 @@ jobs:
           path: target/pocketboot-initrd.cpio
           if-no-files-found: error
 
-  kernel-bootimg:
-    name: ${{ matrix.name }} kernels
+  kernel-matrix:
+    name: Kernel matrix
     runs-on: ubuntu-latest
-    timeout-minutes: 120
-    needs:
-      - ci-image
-      - cpio
+    timeout-minutes: 10
+    needs: ci-image
+    outputs:
+      matrix: ${{ steps.matrix.outputs.matrix }}
+      has_builds: ${{ steps.matrix.outputs.has_builds }}
     container:
       image: ${{ needs.ci-image.outputs.image }}
       credentials:
         username: ${{ github.actor }}
         password: ${{ secrets.GITHUB_TOKEN }}
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - name: torvalds/master
-            repository: torvalds/linux
-            ref: master
-            artifact: bootimgs-torvalds-master
-            devices: >-
-              qcom/sdm845-oneplus-fajita
-              qcom/msm8916-samsung-a5u-eur
 
     steps:
       - name: Checkout pocketboot
@@ -156,13 +146,51 @@ jobs:
           ref: ${{ github.event.pull_request.head.sha || github.sha }}
           persist-credentials: false
 
-      - name: Checkout Linux
+      - name: Cache Cargo downloads
+        uses: actions/cache@v4
+        with:
+          path: |
+            /usr/local/cargo/git
+            /usr/local/cargo/registry
+          key: ${{ runner.os }}-cargo-${{ hashFiles('Cargo.lock') }}
+
+      - name: Generate kernel matrix
+        id: matrix
+        run: |
+          matrix="$(cargo xtask kernel-matrix)"
+          has_builds="$(python3 -c 'import json, sys; print("true" if json.loads(sys.argv[1])["include"] else "false")' "$matrix")"
+          echo "$matrix"
+          {
+            echo 'matrix<<EOF'
+            echo "$matrix"
+            echo 'EOF'
+            echo "has_builds=${has_builds}"
+          } >> "$GITHUB_OUTPUT"
+
+  kernel-bootimg:
+    name: ${{ matrix.name }} kernels
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    needs:
+      - ci-image
+      - cpio
+      - kernel-matrix
+    if: needs.kernel-matrix.outputs.has_builds == 'true'
+    container:
+      image: ${{ needs.ci-image.outputs.image }}
+      credentials:
+        username: ${{ github.actor }}
+        password: ${{ secrets.GITHUB_TOKEN }}
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJson(needs.kernel-matrix.outputs.matrix) }}
+
+    steps:
+      - name: Checkout pocketboot
         uses: actions/checkout@v4
         with:
-          repository: ${{ matrix.repository }}
-          ref: ${{ matrix.ref }}
-          path: linux
-          fetch-depth: 1
+          repository: ${{ github.event.pull_request.head.repo.full_name || github.repository }}
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
           persist-credentials: false
 
       - name: Download initrd cpio
@@ -180,13 +208,15 @@ jobs:
           key: ${{ runner.os }}-cargo-${{ hashFiles('Cargo.lock') }}
 
       - name: Build kernels and boot images
+        env:
+          DEVICES: ${{ join(matrix.devices, ' ') }}
+          BOOTIMG_DEVICES: ${{ join(matrix.bootimg_devices, ' ') }}
         run: |
-          for device in ${{ matrix.devices }}; do
-            if [ -z "$device" ]; then
-              continue
-            fi
+          for device in $DEVICES; do
+            cargo xtask kernel --initrd target/pocketboot-initrd.cpio "$device"
+          done
 
-            cargo xtask kernel --initrd target/pocketboot-initrd.cpio "$device" linux
+          for device in $BOOTIMG_DEVICES; do
             cargo xtask bootimg "$device"
           done
 
