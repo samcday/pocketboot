@@ -1,4 +1,6 @@
-use std::{env, process::ExitCode};
+use std::process::ExitCode;
+
+use clap::{Parser, Subcommand};
 
 mod commands;
 
@@ -14,19 +16,41 @@ fn main() -> ExitCode {
     }
 }
 
+#[derive(Debug, Parser)]
+#[command(bin_name = "cargo xtask")]
+#[command(about = "pocketboot build helper")]
+#[command(arg_required_else_help = true)]
+struct Cli {
+    #[command(subcommand)]
+    command: XtaskCommand,
+}
+
+#[derive(Debug, Subcommand)]
+enum XtaskCommand {
+    #[command(about = "build BusyBox for initrd use")]
+    Busybox(commands::busybox::BusyBoxArgs),
+    #[command(about = "build pocketboot and create an initrd cpio")]
+    Cpio(commands::cpio::CpioArgs),
+    #[command(about = "build a pocketboot kernel image for one device")]
+    Kernel(commands::kernel::KernelArgs),
+    #[command(
+        name = "kernel-src",
+        about = "fetch or update a configured kernel source tree"
+    )]
+    KernelSrc(commands::kernel_src::KernelSrcArgs),
+    #[command(about = "package an already-built pocketboot kernel as boot.img")]
+    Bootimg(commands::bootimg::BootImgArgs),
+    #[command(about = "build and boot pocketboot under qemu-system-aarch64")]
+    Qemu(commands::qemu::QemuArgs),
+}
+
 fn run() -> Result<()> {
-    let mut args = env::args().skip(1);
-    match args.next().as_deref() {
-        Some("busybox") => commands::busybox::run(args.collect()),
-        Some("cpio") => commands::cpio::run(args.collect()),
-        Some("kernel") => commands::kernel::run(args.collect()),
-        Some("kernel-src") => commands::kernel_src::run(args.collect()),
-        Some("bootimg") => commands::bootimg::run(args.collect()),
-        Some("qemu") => commands::qemu::run(args.collect()),
-        Some("help" | "--help" | "-h") | None => {
-            commands::print_usage();
-            Ok(())
-        }
-        Some(command) => Err(format!("unknown xtask command: {command}")),
+    match Cli::parse().command {
+        XtaskCommand::Busybox(args) => commands::busybox::run(args),
+        XtaskCommand::Cpio(args) => commands::cpio::run(args),
+        XtaskCommand::Kernel(args) => commands::kernel::run(args),
+        XtaskCommand::KernelSrc(args) => commands::kernel_src::run(args),
+        XtaskCommand::Bootimg(args) => commands::bootimg::run(args),
+        XtaskCommand::Qemu(args) => commands::qemu::run(args),
     }
 }

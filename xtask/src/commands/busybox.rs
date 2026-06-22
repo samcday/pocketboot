@@ -14,7 +14,9 @@ use sha2::{Digest, Sha256};
 
 use crate::Result;
 
-use super::{FeatureSet, ensure_file, parallel_jobs, run_command, target_dir, workspace_root};
+use super::{
+    FeatureSet, ensure_file, feature_set, parallel_jobs, run_command, target_dir, workspace_root,
+};
 
 pub(super) const BUSYBOX_VERSION: &str = "1.38.0";
 const BUSYBOX_RECIPE_VERSION: u32 = 1;
@@ -22,10 +24,12 @@ const BUSYBOX_ARCHIVE_SHA256: &str =
     "34f9ea6ff8636f2c9241153b9114eefa9e65674a45318ae1ef95bb5f31c53bb2";
 const BUSYBOX_SOURCE_URL: &str = "https://busybox.net/downloads/busybox-1.38.0.tar.bz2";
 
-#[derive(Debug)]
-struct BusyBoxArgs {
+#[derive(clap::Args, Debug)]
+pub(crate) struct BusyBoxArgs {
+    #[arg(long, default_value_t = super::cpio::DEFAULT_TARGET.to_string())]
     target: String,
-    features: FeatureSet,
+    #[arg(long, value_name = "FEATURES")]
+    features: Vec<String>,
 }
 
 #[derive(Debug)]
@@ -69,49 +73,6 @@ struct StampOutput {
     binary_len: u64,
 }
 
-impl BusyBoxArgs {
-    fn parse(args: Vec<String>) -> Result<Self> {
-        let mut target = super::cpio::DEFAULT_TARGET.to_string();
-        let mut features = FeatureSet::default();
-        let mut index = 0;
-
-        while index < args.len() {
-            let arg = &args[index];
-            match arg.as_str() {
-                "--target" => {
-                    index += 1;
-                    target = args
-                        .get(index)
-                        .ok_or_else(|| "--target requires a value".to_string())?
-                        .to_string();
-                }
-                "--features" => {
-                    index += 1;
-                    features.add(
-                        args.get(index)
-                            .ok_or_else(|| "--features requires a value".to_string())?,
-                    )?;
-                }
-                value if value.starts_with("--target=") => {
-                    target = value["--target=".len()..].to_string();
-                }
-                value if value.starts_with("--features=") => {
-                    features.add(&value["--features=".len()..])?;
-                }
-                value if value.starts_with('-') => {
-                    return Err(format!("unknown busybox option: {value}"));
-                }
-                value => {
-                    return Err(format!("unexpected positional argument: {value}"));
-                }
-            }
-            index += 1;
-        }
-
-        Ok(Self { target, features })
-    }
-}
-
 impl BusyBoxPaths {
     fn new(target_dir: &Path, target: &str, features: &FeatureSet) -> Self {
         let root = target_dir.join("busybox");
@@ -131,22 +92,15 @@ impl BusyBoxPaths {
     }
 }
 
-pub(crate) fn run(args: Vec<String>) -> Result<()> {
-    if args
-        .iter()
-        .any(|arg| matches!(arg.as_str(), "--help" | "-h"))
-    {
-        print_usage();
-        Ok(())
-    } else {
-        busybox(BusyBoxArgs::parse(args)?)
-    }
+pub(crate) fn run(args: BusyBoxArgs) -> Result<()> {
+    busybox(args)
 }
 
 fn busybox(args: BusyBoxArgs) -> Result<()> {
     let workspace_root = workspace_root()?;
     let target_dir = target_dir(&workspace_root);
-    let install = build(&target_dir, &args.target, &args.features)?;
+    let features = feature_set(&args.features)?;
+    let install = build(&target_dir, &args.target, &features)?;
     println!("install {}", install.root.display());
     println!(
         "busybox {} ({} bytes)",
@@ -858,11 +812,4 @@ fn strip_busybox(binary: &Path, target: &str) -> Result<()> {
     let mut command = Command::new(strip);
     command.arg("--strip-all").arg(binary);
     run_command(command, "strip busybox")
-}
-
-fn print_usage() {
-    println!(
-        "usage: cargo xtask busybox [--target TRIPLE] [--features FEATURES]\n\ndefault target: {}\nbusybox: official {BUSYBOX_VERSION} release, built statically and cached under target/busybox",
-        super::cpio::DEFAULT_TARGET
-    );
 }

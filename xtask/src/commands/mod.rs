@@ -19,12 +19,6 @@ use crate::Result;
 
 const KERNEL_ARCH: &str = "arm64";
 
-pub(crate) fn print_usage() {
-    println!(
-        "usage: cargo xtask <command>\n\ncommands:\n  busybox      build BusyBox for initrd use\n  cpio         build pocketboot and create an initrd cpio\n  kernel       build a pocketboot kernel image for one device\n  kernel-src   fetch or update a configured kernel source tree\n  bootimg      package an already-built pocketboot kernel as boot.img\n  qemu         build and boot pocketboot under qemu-system-aarch64"
-    );
-}
-
 #[derive(Clone, Debug, Default)]
 pub(super) struct FeatureSet {
     values: Vec<String>,
@@ -61,6 +55,14 @@ impl FeatureSet {
     }
 }
 
+fn feature_set(values: &[String]) -> Result<FeatureSet> {
+    let mut features = FeatureSet::default();
+    for value in values {
+        features.add(value)?;
+    }
+    Ok(features)
+}
+
 fn validate_feature(feature: &str) -> Result<()> {
     if feature
         .chars()
@@ -72,7 +74,7 @@ fn validate_feature(feature: &str) -> Result<()> {
     }
 }
 
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 struct KernelDevice {
     vendor: String,
     stem: String,
@@ -102,6 +104,14 @@ impl KernelDevice {
             stem: stem.to_string(),
             soc: soc.to_string(),
         })
+    }
+}
+
+impl std::str::FromStr for KernelDevice {
+    type Err = String;
+
+    fn from_str(value: &str) -> std::result::Result<Self, Self::Err> {
+        Self::parse(value)
     }
 }
 
