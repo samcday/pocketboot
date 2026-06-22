@@ -554,6 +554,7 @@ mod tests {
         for device_id in [
             "exynos/exynos7870-j7xelte",
             "qcom/apq8016-sbc",
+            "qcom/msm8926-sony-xperia-yukon-eagle",
             "qcom/msm8930-samsung-expressltexx",
             "qcom/msm8916-samsung-a5u-eur",
             "qcom/msm8916-samsung-gt510",

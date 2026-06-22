@@ -82,43 +82,6 @@ jobs:
           echo "The CI Image workflow may still be running, or this PR may need a ci-ok label."
           exit 1
 
-  cpio:
-    name: cpio
-    runs-on: ubuntu-latest
-    timeout-minutes: 30
-    needs: ci-image
-    container:
-      image: ${{ needs.ci-image.outputs.image }}
-      credentials:
-        username: ${{ github.actor }}
-        password: ${{ secrets.GITHUB_TOKEN }}
-
-    steps:
-      - name: Checkout pocketboot
-        uses: actions/checkout@v4
-        with:
-          repository: ${{ github.event.pull_request.head.repo.full_name || github.repository }}
-          ref: ${{ github.event.pull_request.head.sha || github.sha }}
-          persist-credentials: false
-
-      - name: Cache Cargo downloads
-        uses: actions/cache@v4
-        with:
-          path: |
-            /usr/local/cargo/git
-            /usr/local/cargo/registry
-          key: ${{ runner.os }}-cargo-${{ hashFiles('Cargo.lock') }}
-
-      - name: Build initrd cpio
-        run: cargo xtask cpio --output target/pocketboot-initrd.cpio
-
-      - name: Upload initrd cpio
-        uses: actions/upload-artifact@v4
-        with:
-          name: pocketboot-initrd-cpio
-          path: target/pocketboot-initrd.cpio
-          if-no-files-found: error
-
   kernel-matrix:
     name: Kernel matrix
     runs-on: ubuntu-latest
@@ -168,7 +131,6 @@ jobs:
     timeout-minutes: 120
     needs:
       - ci-image
-      - cpio
       - kernel-matrix
     if: needs.kernel-matrix.outputs.has_builds == 'true'
     container:
@@ -184,7 +146,6 @@ jobs:
       CCACHE_COMPILERCHECK: content
       CCACHE_DIR: ${{ github.workspace }}/target/ccache
       CCACHE_MAXSIZE: 2G
-      CROSS_COMPILE: ccache aarch64-linux-gnu-
       HOSTCC: ccache gcc
 
     steps:
@@ -195,19 +156,15 @@ jobs:
           ref: ${{ github.event.pull_request.head.sha || github.sha }}
           persist-credentials: false
 
-      - name: Download initrd cpio
-        uses: actions/download-artifact@v4
+      - name: Set up Rust cache
+        uses: actions-rust-lang/setup-rust-toolchain@v1
         with:
-          name: pocketboot-initrd-cpio
-          path: target
-
-      - name: Cache Cargo downloads
-        uses: actions/cache@v4
-        with:
-          path: |
-            /usr/local/cargo/git
-            /usr/local/cargo/registry
-          key: ${{ runner.os }}-cargo-${{ hashFiles('Cargo.lock') }}
+          components: rust-src,rustfmt
+          target: ${{ join(matrix.cpio_targets, ',') }}
+          rustflags: ""
+          cache-shared-key: pocketboot-kernel-${{ join(matrix.cpio_targets, '-') }}-df-${{ hashFiles('.github/Dockerfile') }}
+          cache-bin: false
+          cache-on-failure: true
 
       - name: Cache kernel ccache
         uses: actions/cache@v4
@@ -228,7 +185,7 @@ jobs:
           BOOTIMG_DEVICES: ${{ join(matrix.bootimg_devices, ' ') }}
         run: |
           for device in $DEVICES; do
-            cargo xtask kernel --initrd target/pocketboot-initrd.cpio "$device"
+            cargo xtask kernel "$device"
           done
 
           for device in $BOOTIMG_DEVICES; do
@@ -246,6 +203,8 @@ jobs:
           path: |
             target/kernel/**/boot.img
             target/kernel/**/.config
+            target/kernel/**/arch/arm/boot/Image.gz
+            target/kernel/**/arch/arm/boot/dts/**/*.dtb
             target/kernel/**/arch/arm64/boot/Image.gz
             target/kernel/**/arch/arm64/boot/dts/**/*.dtb
           if-no-files-found: error
