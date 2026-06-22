@@ -11,9 +11,12 @@ use crate::Result;
 
 use super::{
     KernelDevice,
-    config::{self, BootImgConfig, DEFAULT_BOOTIMG_KERNEL_IMAGE, DtbhConfig, QcdtConfig},
+    config::{self, BootImgConfig, DtbhConfig, QcdtConfig},
     ensure_file, target_dir, workspace_root,
 };
+
+#[cfg(test)]
+use super::config::DEFAULT_BOOTIMG_KERNEL_IMAGE;
 
 const ANDROID_BOOT_MAGIC: &[u8; 8] = b"ANDROID!";
 const SEANDROID_ENFORCE: &[u8] = b"SEANDROIDENFORCE";
@@ -21,61 +24,16 @@ const DTBH_MAGIC: &[u8; 4] = b"DTBH";
 const DTBH_VERSION: u32 = 2;
 const DTBH_RECORD_SPACE: u32 = 0x20;
 
-#[derive(Debug)]
-struct BootImgArgs {
+#[derive(clap::Args, Debug)]
+pub(crate) struct BootImgArgs {
+    #[arg(value_name = "VENDOR/DEVICE")]
     device: KernelDevice,
+    #[arg(short, long, value_name = "PATH")]
     output: Option<PathBuf>,
 }
 
-impl BootImgArgs {
-    fn parse(args: Vec<String>) -> Result<Self> {
-        let mut device = None;
-        let mut output = None;
-        let mut index = 0;
-
-        while index < args.len() {
-            let arg = &args[index];
-            match arg.as_str() {
-                "--output" | "-o" => {
-                    index += 1;
-                    output = Some(PathBuf::from(
-                        args.get(index)
-                            .ok_or_else(|| "--output requires a value".to_string())?,
-                    ));
-                }
-                value if value.starts_with("--output=") => {
-                    output = Some(PathBuf::from(&value["--output=".len()..]));
-                }
-                value if value.starts_with('-') => {
-                    return Err(format!("unknown bootimg option: {value}"));
-                }
-                value => {
-                    if device.is_some() {
-                        return Err(format!("unexpected positional argument: {value}"));
-                    }
-                    device = Some(KernelDevice::parse(value)?);
-                }
-            }
-            index += 1;
-        }
-
-        let device = device.ok_or_else(|| {
-            "usage: cargo xtask bootimg <vendor/device> [--output PATH]".to_string()
-        })?;
-        Ok(Self { device, output })
-    }
-}
-
-pub(crate) fn run(args: Vec<String>) -> Result<()> {
-    if args
-        .iter()
-        .any(|arg| matches!(arg.as_str(), "--help" | "-h"))
-    {
-        print_usage();
-        Ok(())
-    } else {
-        bootimg(BootImgArgs::parse(args)?)
-    }
+pub(crate) fn run(args: BootImgArgs) -> Result<()> {
+    bootimg(args)
 }
 
 fn bootimg(args: BootImgArgs) -> Result<()> {
@@ -552,12 +510,6 @@ fn fixed_bytes<const N: usize>(value: &str, field: &str, context: &Path) -> Resu
     let mut output = [0; N];
     output[..bytes.len()].copy_from_slice(bytes);
     Ok(output)
-}
-
-fn print_usage() {
-    println!(
-        "usage: cargo xtask bootimg <vendor/device> [--output PATH]\n\nexample: cargo xtask bootimg exynos/exynos7870-j7xelte\n\nrequires: target/kernel/<vendor>/<device>/arch/arm64/boot/<kernel_image> and the inferred DTB\nkernel_image: configured by [bootimg] in configs/device/<vendor>/<device>.toml, defaults to {DEFAULT_BOOTIMG_KERNEL_IMAGE}\nsupports: Android v2 DTB sections, legacy QCDT, Samsung DTBH and legacy appended-DTB payloads\ndefault output: target/kernel/<vendor>/<device>/boot.img"
-    );
 }
 
 #[cfg(test)]

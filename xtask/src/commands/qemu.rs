@@ -13,63 +13,18 @@ const QEMU_DEVICE: &str = "qemu/aarch64-virt";
 const QEMU_TARGET: &str = "aarch64-virt";
 const QEMU_DISK_SIZE: u64 = 64 * 1024 * 1024;
 
-#[derive(Debug)]
-struct QemuArgs {
+#[derive(clap::Args, Debug)]
+pub(crate) struct QemuArgs {
+    #[arg(value_name = "KERNEL_TREE")]
     kernel_tree: PathBuf,
+    #[arg(long)]
     build_only: bool,
+    #[arg(last = true, value_name = "QEMU_ARG")]
     qemu_args: Vec<String>,
 }
 
-impl QemuArgs {
-    fn parse(args: Vec<String>) -> Result<Self> {
-        let mut kernel_tree = None;
-        let mut build_only = false;
-        let mut qemu_args = Vec::new();
-        let mut index = 0;
-
-        while index < args.len() {
-            let arg = &args[index];
-            match arg.as_str() {
-                "--build-only" => build_only = true,
-                "--" => {
-                    qemu_args.extend(args[index + 1..].iter().cloned());
-                    break;
-                }
-                value if value.starts_with('-') => {
-                    return Err(format!("unknown qemu option: {value}"));
-                }
-                value => {
-                    if kernel_tree.is_some() {
-                        return Err(format!("unexpected positional argument: {value}"));
-                    }
-                    kernel_tree = Some(PathBuf::from(value));
-                }
-            }
-            index += 1;
-        }
-
-        let kernel_tree = kernel_tree.ok_or_else(|| {
-            "usage: cargo xtask qemu [--build-only] <kernel-tree> [-- QEMU-ARG...]".to_string()
-        })?;
-
-        Ok(Self {
-            kernel_tree,
-            build_only,
-            qemu_args,
-        })
-    }
-}
-
-pub(crate) fn run(args: Vec<String>) -> Result<()> {
-    if args
-        .iter()
-        .any(|arg| matches!(arg.as_str(), "--help" | "-h"))
-    {
-        print_usage();
-        Ok(())
-    } else {
-        qemu(QemuArgs::parse(args)?)
-    }
+pub(crate) fn run(args: QemuArgs) -> Result<()> {
+    qemu(args)
 }
 
 fn qemu(args: QemuArgs) -> Result<()> {
@@ -150,10 +105,4 @@ fn run_qemu(workspace_root: &Path, image: &Path, disk: &Path, extra_args: &[Stri
         .args(["-device", "virtio-net-device,netdev=net0"])
         .args(extra_args);
     run_command(command, "qemu")
-}
-
-fn print_usage() {
-    println!(
-        "usage: cargo xtask qemu [--build-only] <kernel-tree> [-- QEMU-ARG...]\n\nexample: cargo xtask qemu ./linux\n\nbuilds: target/kernel/qemu/{QEMU_TARGET}/arch/arm64/boot/Image with an embedded initramfs\nruns: qemu-system-aarch64 -machine virt -nographic"
-    );
 }

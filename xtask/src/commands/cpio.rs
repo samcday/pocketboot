@@ -11,8 +11,8 @@ use crate::Result;
 
 use super::{
     FeatureSet,
-    busybox::{BUSYBOX_VERSION, BusyBoxInstall, build as build_busybox},
-    target_dir, workspace_root,
+    busybox::{BusyBoxInstall, build as build_busybox},
+    feature_set, target_dir, workspace_root,
 };
 
 pub(super) const DEFAULT_TARGET: &str = "aarch64-unknown-linux-musl";
@@ -20,100 +20,35 @@ pub(super) const DEFAULT_INITRD: &str = "pocketboot-initrd.cpio";
 
 const INIT_BINARY: &str = "pocketboot";
 
-#[derive(Debug)]
-struct CpioArgs {
+#[derive(clap::Args, Debug)]
+pub(crate) struct CpioArgs {
+    #[arg(long, default_value_t = DEFAULT_TARGET.to_string())]
     target: String,
+    #[arg(short, long, value_name = "PATH", conflicts_with = "positional_output")]
     output: Option<PathBuf>,
+    #[arg(long = "no-busybox", action = clap::ArgAction::SetFalse, default_value_t = true)]
     busybox: bool,
-    features: FeatureSet,
+    #[arg(long, value_name = "FEATURES")]
+    features: Vec<String>,
+    #[arg(value_name = "OUTPUT")]
+    positional_output: Option<PathBuf>,
 }
 
-impl CpioArgs {
-    fn parse(args: Vec<String>) -> Result<Self> {
-        let mut target = DEFAULT_TARGET.to_string();
-        let mut output = None;
-        let mut busybox = true;
-        let mut features = FeatureSet::default();
-        let mut index = 0;
-
-        while index < args.len() {
-            let arg = &args[index];
-            match arg.as_str() {
-                "--target" => {
-                    index += 1;
-                    target = args
-                        .get(index)
-                        .ok_or_else(|| "--target requires a value".to_string())?
-                        .to_string();
-                }
-                "--output" | "-o" => {
-                    index += 1;
-                    output = Some(PathBuf::from(
-                        args.get(index)
-                            .ok_or_else(|| "--output requires a value".to_string())?,
-                    ));
-                }
-                "--no-busybox" => busybox = false,
-                "--features" => {
-                    index += 1;
-                    features.add(
-                        args.get(index)
-                            .ok_or_else(|| "--features requires a value".to_string())?,
-                    )?;
-                }
-                value if value.starts_with("--target=") => {
-                    target = value["--target=".len()..].to_string();
-                }
-                value if value.starts_with("--output=") => {
-                    output = Some(PathBuf::from(&value["--output=".len()..]));
-                }
-                value if value.starts_with("--features=") => {
-                    features.add(&value["--features=".len()..])?;
-                }
-                value if value.starts_with('-') => {
-                    return Err(format!("unknown cpio option: {value}"));
-                }
-                value => {
-                    if output.is_some() {
-                        return Err(format!("unexpected positional argument: {value}"));
-                    }
-                    output = Some(PathBuf::from(value));
-                }
-            }
-            index += 1;
-        }
-
-        Ok(Self {
-            target,
-            output,
-            busybox,
-            features,
-        })
-    }
-}
-
-pub(crate) fn run(args: Vec<String>) -> Result<()> {
-    if args
-        .iter()
-        .any(|arg| matches!(arg.as_str(), "--help" | "-h"))
-    {
-        print_usage();
-        Ok(())
-    } else {
-        cpio(CpioArgs::parse(args)?)
-    }
+pub(crate) fn run(args: CpioArgs) -> Result<()> {
+    cpio(args)
 }
 
 fn cpio(args: CpioArgs) -> Result<()> {
     let workspace_root = workspace_root()?;
-    let mut features = args.features;
+    let mut features = feature_set(&args.features)?;
     if args.busybox {
         features.add("busybox")?;
     }
+    let output = args.output.or(args.positional_output);
     let output = build_initrd(
         &workspace_root,
         &args.target,
-        args.output,
+        output,
         args.busybox,
         &features,
     )?;
@@ -394,10 +329,4 @@ fn cpio_name(path: &Path) -> Result<String> {
     } else {
         Ok(name.to_string())
     }
-}
-
-fn print_usage() {
-    println!(
-        "usage: cargo xtask cpio [--target TRIPLE] [--features FEATURES] [--output PATH] [--no-busybox]\n\ndefault target: {DEFAULT_TARGET}\ndefault output: target/{DEFAULT_INITRD}\nbusybox: official {BUSYBOX_VERSION} release, built statically unless --no-busybox is used"
-    );
 }

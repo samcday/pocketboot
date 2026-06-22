@@ -17,10 +17,13 @@ use super::{
     workspace_root,
 };
 
-#[derive(Debug)]
-struct KernelArgs {
+#[derive(clap::Args, Debug)]
+pub(crate) struct KernelArgs {
+    #[arg(value_name = "VENDOR/DEVICE")]
     device: KernelDevice,
+    #[arg(value_name = "KERNEL_TREE")]
     kernel_tree: PathBuf,
+    #[arg(long, value_name = "PATH")]
     initrd: Option<PathBuf>,
 }
 
@@ -60,58 +63,8 @@ struct KernelConfigFile {
 
 const KERNEL_CONFIG_RECIPE_VERSION: u32 = 1;
 
-impl KernelArgs {
-    fn parse(args: Vec<String>) -> Result<Self> {
-        let mut initrd = None;
-        let mut positionals = Vec::new();
-        let mut index = 0;
-
-        while index < args.len() {
-            let arg = &args[index];
-            match arg.as_str() {
-                "--initrd" => {
-                    index += 1;
-                    initrd = Some(PathBuf::from(
-                        args.get(index)
-                            .ok_or_else(|| "--initrd requires a value".to_string())?,
-                    ));
-                }
-                value if value.starts_with("--initrd=") => {
-                    initrd = Some(PathBuf::from(&value["--initrd=".len()..]));
-                }
-                value if value.starts_with('-') => {
-                    return Err(format!("unknown kernel option: {value}"));
-                }
-                value => positionals.push(value.to_string()),
-            }
-            index += 1;
-        }
-
-        if positionals.len() != 2 {
-            return Err(
-                "usage: cargo xtask kernel [--initrd PATH] <vendor/device> <kernel-tree>"
-                    .to_string(),
-            );
-        }
-
-        Ok(Self {
-            device: KernelDevice::parse(&positionals[0])?,
-            kernel_tree: PathBuf::from(&positionals[1]),
-            initrd,
-        })
-    }
-}
-
-pub(crate) fn run(args: Vec<String>) -> Result<()> {
-    if args
-        .iter()
-        .any(|arg| matches!(arg.as_str(), "--help" | "-h"))
-    {
-        print_usage();
-        Ok(())
-    } else {
-        kernel(KernelArgs::parse(args)?)
-    }
+pub(crate) fn run(args: KernelArgs) -> Result<()> {
+    kernel(args)
 }
 
 fn kernel(args: KernelArgs) -> Result<()> {
@@ -379,10 +332,4 @@ fn hash_file(path: &Path) -> Result<String> {
 
 fn path_stamp_value(path: &Path) -> String {
     path.to_string_lossy().into_owned()
-}
-
-fn print_usage() {
-    println!(
-        "usage: cargo xtask kernel [--initrd PATH] <vendor/device> <kernel-tree>\n\nexample: cargo xtask kernel qcom/msm8916-samsung-a5u-eur ./linux\n\nwhen --initrd is omitted, target/cpio/<vendor>/<device>/{DEFAULT_INITRD} is rebuilt automatically\noutputs: target/kernel/<vendor>/<device>/arch/arm64/boot/Image.gz and the inferred DTB by default; configs/pocketboot.toml, configs/soc/<vendor>/<soc>.toml and configs/device/<vendor>/<device>.toml tailor kernel artifacts, cpio settings, features and Kconfig"
-    );
 }

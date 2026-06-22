@@ -12,8 +12,9 @@ use super::{
     run_command, target_dir, workspace_root,
 };
 
-#[derive(Debug)]
-struct KernelSrcArgs {
+#[derive(clap::Args, Debug)]
+pub(crate) struct KernelSrcArgs {
+    #[arg(value_name = "VENDOR/DEVICE")]
     device: KernelDevice,
 }
 
@@ -28,28 +29,8 @@ enum KernelSourceStatus {
     Updated,
 }
 
-impl KernelSrcArgs {
-    fn parse(args: Vec<String>) -> Result<Self> {
-        if args.len() != 1 {
-            return Err("usage: cargo xtask kernel-src <vendor/device>".to_string());
-        }
-
-        Ok(Self {
-            device: KernelDevice::parse(&args[0])?,
-        })
-    }
-}
-
-pub(crate) fn run(args: Vec<String>) -> Result<()> {
-    if args
-        .iter()
-        .any(|arg| matches!(arg.as_str(), "--help" | "-h"))
-    {
-        print_usage();
-        Ok(())
-    } else {
-        kernel_src(KernelSrcArgs::parse(args)?)
-    }
+pub(crate) fn run(args: KernelSrcArgs) -> Result<()> {
+    kernel_src(args)
 }
 
 fn kernel_src(args: KernelSrcArgs) -> Result<()> {
@@ -350,10 +331,4 @@ fn stdout(bytes: Vec<u8>, action: &str) -> Result<String> {
     String::from_utf8(bytes)
         .map(|value| value.trim().to_string())
         .map_err(|err| format!("decode {action} output: {err}"))
-}
-
-fn print_usage() {
-    println!(
-        "usage: cargo xtask kernel-src <vendor/device>\n\nensures target/kernel/src contains the configured [kernel-source] tree for one device"
-    );
 }
