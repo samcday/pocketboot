@@ -7,7 +7,6 @@ on:
       - opened
       - reopened
       - synchronize
-  push:
   workflow_dispatch:
 
 permissions:
