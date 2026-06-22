@@ -12,7 +12,9 @@ use crate::Result;
 use super::{
     KernelDevice,
     config::{self, BootImgConfig, DtbhConfig, QcdtConfig},
-    ensure_file, target_dir, workspace_root,
+    ensure_file,
+    kernel::{kernel_arch, kernel_dtb_stem},
+    target_dir, workspace_root,
 };
 
 #[cfg(test)]
@@ -39,24 +41,26 @@ pub(crate) fn run(args: BootImgArgs) -> Result<()> {
 fn bootimg(args: BootImgArgs) -> Result<()> {
     let workspace_root = workspace_root()?;
     let target_dir = target_dir(&workspace_root);
+
+    let device_config = config::load_device_config(&workspace_root, &args.device)?;
+    let arch = kernel_arch(&device_config.kernel)?;
+    let dtb_stem = kernel_dtb_stem(&device_config.kernel, &args.device)?;
     let out_dir = target_dir
         .join("kernel")
         .join(&args.device.vendor)
         .join(&args.device.stem);
     let dtb = out_dir
-        .join("arch/arm64/boot/dts")
+        .join(format!("arch/{arch}/boot/dts"))
         .join(&args.device.vendor)
-        .join(format!("{}.dtb", args.device.stem));
+        .join(format!("{dtb_stem}.dtb"));
     let output = args.output.unwrap_or_else(|| out_dir.join("boot.img"));
-
-    let device_config = config::load_device_config(&workspace_root, &args.device)?;
     let config = device_config.bootimg.as_ref().ok_or_else(|| {
         format!(
             "missing [bootimg] table in {}",
             device_config.device_path.display()
         )
     })?;
-    let image = bootimg_kernel_image(config, &device_config.device_path, &out_dir)?;
+    let image = bootimg_kernel_image(config, &device_config.device_path, &out_dir, &arch)?;
     ensure_file(&image, "kernel image")?;
     ensure_file(&dtb, "device tree blob")?;
     write_bootimg(config, &device_config.device_path, &image, &dtb, &output)?;
@@ -72,14 +76,15 @@ fn bootimg_kernel_image(
     config: &BootImgConfig,
     config_path: &Path,
     out_dir: &Path,
+    arch: &str,
 ) -> Result<PathBuf> {
     let mut components = Path::new(&config.kernel_image).components();
     match (components.next(), components.next()) {
-        (Some(std::path::Component::Normal(_)), None) => {
-            Ok(out_dir.join("arch/arm64/boot").join(&config.kernel_image))
-        }
+        (Some(std::path::Component::Normal(_)), None) => Ok(out_dir
+            .join(format!("arch/{arch}/boot"))
+            .join(&config.kernel_image)),
         _ => Err(format!(
-            "{}: kernel_image must be a file name under arch/arm64/boot",
+            "{}: kernel_image must be a file name under arch/{arch}/boot",
             config_path.display()
         )),
     }
