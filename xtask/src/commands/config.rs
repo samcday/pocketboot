@@ -59,8 +59,10 @@ struct KernelSourceLayer {
 #[derive(Clone, Debug, Default, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub(super) struct KernelConfig {
+    pub(super) arch: Option<String>,
     pub(super) image: Option<String>,
     pub(super) image_path: Option<PathBuf>,
+    pub(super) dtb_stem: Option<String>,
     pub(super) dtb: Option<bool>,
 }
 
@@ -191,6 +193,7 @@ enum KconfigValue {
     Module,
     Integer(i64),
     Hex(i64),
+    Omit,
     Raw(String),
     String(String),
 }
@@ -320,11 +323,17 @@ fn parse_kernel_source(
 }
 
 fn merge_kernel(merged: &mut KernelConfig, layer: &KernelConfig) {
+    if layer.arch.is_some() {
+        merged.arch = layer.arch.clone();
+    }
     if layer.image.is_some() {
         merged.image = layer.image.clone();
     }
     if layer.image_path.is_some() {
         merged.image_path = layer.image_path.clone();
+    }
+    if layer.dtb_stem.is_some() {
+        merged.dtb_stem = layer.dtb_stem.clone();
     }
     if layer.dtb.is_some() {
         merged.dtb = layer.dtb;
@@ -379,8 +388,9 @@ fn parse_kconfig_value(symbol: &str, value: &Value) -> Result<KconfigValue> {
         Value::Boolean(value) => Ok(KconfigValue::Bool(*value)),
         Value::Integer(value) => Ok(KconfigValue::Integer(*value)),
         Value::String(value) if matches!(value.as_str(), "m" | "mod") => Ok(KconfigValue::Module),
+        Value::String(value) if value == "omit" => Ok(KconfigValue::Omit),
         Value::String(_) => Err(format!(
-            "{symbol}: string kconfig values must be \"m\", \"mod\", or an inline table like {{ string = \"...\" }} / {{ raw = \"...\" }}"
+            "{symbol}: string kconfig values must be \"m\", \"mod\", \"omit\", or an inline table like {{ string = \"...\" }} / {{ raw = \"...\" }}"
         )),
         Value::Table(table) => parse_structured_kconfig_value(symbol, table),
         Value::Float(_) | Value::Datetime(_) | Value::Array(_) => Err(format!(
@@ -447,6 +457,7 @@ fn write_kconfig_line(contents: &mut String, symbol: &str, value: &KconfigValue)
         KconfigValue::Module => contents.push_str(&format!("CONFIG_{symbol}=m\n")),
         KconfigValue::Integer(value) => contents.push_str(&format!("CONFIG_{symbol}={value}\n")),
         KconfigValue::Hex(value) => contents.push_str(&format!("CONFIG_{symbol}=0x{value:x}\n")),
+        KconfigValue::Omit => {}
         KconfigValue::Raw(value) => contents.push_str(&format!("CONFIG_{symbol}={value}\n")),
         KconfigValue::String(value) => contents.push_str(&format!(
             "CONFIG_{symbol}=\"{}\"\n",
@@ -543,6 +554,7 @@ mod tests {
         for device_id in [
             "exynos/exynos7870-j7xelte",
             "qcom/apq8016-sbc",
+            "qcom/msm8930-samsung-expressltexx",
             "qcom/msm8916-samsung-a5u-eur",
             "qcom/msm8916-samsung-gt510",
             "qcom/msm8953-xiaomi-daisy",

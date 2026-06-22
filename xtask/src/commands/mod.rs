@@ -10,16 +10,19 @@ pub(crate) mod qemu;
 
 use std::{
     env,
-    ffi::OsString,
-    fs,
+    ffi::{OsStr, OsString},
+    fs::{self, Permissions},
     path::{Path, PathBuf},
     process::Command,
     thread,
 };
 
+#[cfg(unix)]
+use std::os::unix::fs::PermissionsExt;
+
 use crate::Result;
 
-const KERNEL_ARCH: &str = "arm64";
+const DEFAULT_KERNEL_ARCH: &str = "arm64";
 
 #[derive(Clone, Debug, Default)]
 pub(super) struct FeatureSet {
@@ -153,7 +156,7 @@ fn canonical_file(path: &Path, description: &str) -> Result<PathBuf> {
     Ok(path)
 }
 
-fn make_command(kernel_tree: &Path, out_dir: &Path) -> Command {
+fn make_command_for_arch(kernel_tree: &Path, out_dir: &Path, arch: &str) -> Result<Command> {
     let make = env::var_os("MAKE").unwrap_or_else(|| "make".into());
     let mut output = OsString::from("O=");
     output.push(out_dir.as_os_str());
@@ -161,12 +164,92 @@ fn make_command(kernel_tree: &Path, out_dir: &Path) -> Command {
     let mut command = Command::new(make);
     command
         .current_dir(kernel_tree)
-        .env("ARCH", KERNEL_ARCH)
+        .env("ARCH", arch)
         .arg(output);
-    if env::var_os("CROSS_COMPILE").is_none() {
-        command.env("CROSS_COMPILE", "aarch64-linux-gnu-");
+    set_default_kernel_toolchain(&mut command, arch, Some(out_dir))?;
+    Ok(command)
+}
+
+fn set_default_kernel_toolchain(
+    command: &mut Command,
+    arch: &str,
+    out_dir: Option<&Path>,
+) -> Result<()> {
+    if env::var_os("CROSS_COMPILE").is_none() && env::var_os("LLVM").is_none() {
+        match arch {
+            DEFAULT_KERNEL_ARCH => {
+                command.env("CROSS_COMPILE", "aarch64-linux-gnu-");
+            }
+            "arm" => {
+                command.env("LLVM", "1");
+                if !path_command_exists("ld.lld") {
+                    if let Some(tool_dir) = arm_llvm_tool_dir(out_dir)? {
+                        prepend_command_path(command, &tool_dir)?;
+                    }
+                }
+                if env::var_os("LLVM_IAS").is_none() {
+                    command.env("LLVM_IAS", "1");
+                }
+            }
+            _ => {}
+        }
     }
-    command
+    Ok(())
+}
+
+fn arm_llvm_tool_dir(out_dir: Option<&Path>) -> Result<Option<PathBuf>> {
+    let Some(out_dir) = out_dir else {
+        return Ok(None);
+    };
+    if !path_command_exists("rust-lld") {
+        return Ok(None);
+    }
+    let tool_dir = out_dir.join("pocketboot-toolchain");
+    fs::create_dir_all(&tool_dir).map_err(|err| format!("create {}: {err}", tool_dir.display()))?;
+    let ld_lld = tool_dir.join("ld.lld");
+    write_ld_lld_wrapper(&ld_lld)?;
+    Ok(Some(tool_dir))
+}
+
+fn write_ld_lld_wrapper(path: &Path) -> Result<()> {
+    if path.symlink_metadata().is_ok() {
+        fs::remove_file(path).map_err(|err| format!("remove {}: {err}", path.display()))?;
+    }
+    fs::write(path, b"#!/bin/sh\nexec rust-lld -flavor gnu \"$@\"\n")
+        .map_err(|err| format!("write {}: {err}", path.display()))?;
+    make_executable(path)
+}
+
+#[cfg(unix)]
+fn make_executable(path: &Path) -> Result<()> {
+    fs::set_permissions(path, Permissions::from_mode(0o755))
+        .map_err(|err| format!("chmod {}: {err}", path.display()))
+}
+
+#[cfg(not(unix))]
+fn make_executable(_path: &Path) -> Result<()> {
+    Ok(())
+}
+
+fn prepend_command_path(command: &mut Command, dir: &Path) -> Result<()> {
+    let mut paths = vec![dir.to_path_buf()];
+    if let Some(existing) = env::var_os("PATH") {
+        paths.extend(env::split_paths(&existing));
+    }
+    let path = env::join_paths(paths).map_err(|err| format!("join PATH: {err}"))?;
+    command.env("PATH", path);
+    Ok(())
+}
+
+fn path_command(name: &str) -> Option<PathBuf> {
+    let paths = env::var_os("PATH")?;
+    env::split_paths(&paths)
+        .map(|dir| dir.join(OsStr::new(name)))
+        .find(|path| path.is_file())
+}
+
+fn path_command_exists(name: &str) -> bool {
+    path_command(name).is_some()
 }
 
 fn run_command(mut command: Command, action: &str) -> Result<()> {

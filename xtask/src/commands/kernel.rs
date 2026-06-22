@@ -1,7 +1,7 @@
 use std::{
-    fs,
+    fs::{self, File},
     path::{Path, PathBuf},
-    process::Command,
+    process::{Command, Stdio},
 };
 
 use serde::{Deserialize, Serialize};
@@ -10,11 +10,11 @@ use sha2::{Digest, Sha256};
 use crate::Result;
 
 use super::{
-    FeatureSet, KERNEL_ARCH, KernelDevice, canonical_file,
+    DEFAULT_KERNEL_ARCH, FeatureSet, KernelDevice, canonical_file,
     config::{self, CpioConfig, KernelConfig},
     cpio::{DEFAULT_INITRD, DEFAULT_TARGET, build_initrd},
-    ensure_file, kconfig_string, kernel_tree, make_command, parallel_jobs, run_command, target_dir,
-    workspace_root,
+    ensure_file, kconfig_string, kernel_tree, make_command_for_arch, parallel_jobs, run_command,
+    set_default_kernel_toolchain, target_dir, workspace_root,
 };
 
 #[derive(clap::Args, Debug)]
@@ -114,7 +114,9 @@ fn build_device_kernel(
 ) -> Result<KernelBuild> {
     let target_dir = target_dir(workspace_root);
     let config = config::load_device_config(workspace_root, device)?;
-    let target = kernel_target(&config.kernel)?;
+    let arch = kernel_arch(&config.kernel)?;
+    let dtb_stem = kernel_dtb_stem(&config.kernel, device)?;
+    let target = kernel_target(&config.kernel, &arch)?;
     let out_dir = target_dir
         .join("kernel")
         .join(&device.vendor)
@@ -122,9 +124,9 @@ fn build_device_kernel(
     fs::create_dir_all(&out_dir).map_err(|err| format!("create {}: {err}", out_dir.display()))?;
 
     let dts_source = kernel_tree
-        .join("arch/arm64/boot/dts")
+        .join(format!("arch/{arch}/boot/dts"))
         .join(&device.vendor)
-        .join(format!("{}.dts", device.stem));
+        .join(format!("{dtb_stem}.dts"));
 
     if target.build_dtb {
         ensure_file(&dts_source, "device tree source")?;
@@ -153,12 +155,18 @@ fn build_device_kernel(
     let merge_config = kernel_tree.join("scripts/kconfig/merge_config.sh");
     ensure_file(&merge_config, "merge_config.sh")?;
     let config_fragments = [pocketboot_config.as_path(), initramfs_config.as_path()];
-    ensure_kernel_config(kernel_tree, &out_dir, &merge_config, &config_fragments)?;
+    ensure_kernel_config(
+        kernel_tree,
+        &out_dir,
+        &merge_config,
+        &config_fragments,
+        &arch,
+    )?;
 
     let dtb_target = target
         .build_dtb
-        .then(|| format!("{}/{}.dtb", device.vendor, device.stem));
-    let mut build = make_command(kernel_tree, &out_dir);
+        .then(|| format!("{}/{dtb_stem}.dtb", device.vendor));
+    let mut build = make_command_for_arch(kernel_tree, &out_dir, &arch)?;
     build
         .arg(format!("-j{}", parallel_jobs()))
         .arg(&target.image_make_target);
@@ -175,11 +183,12 @@ fn build_device_kernel(
     let image = out_dir.join(&target.image_path);
     let dtb = target.build_dtb.then(|| {
         out_dir
-            .join("arch/arm64/boot/dts")
+            .join(format!("arch/{arch}/boot/dts"))
             .join(&device.vendor)
-            .join(format!("{}.dtb", device.stem))
+            .join(format!("{dtb_stem}.dtb"))
     });
     ensure_file(&image, "kernel image")?;
+    write_bootimg_kernel_artifact(config.bootimg.as_ref(), &out_dir, &arch, &image, &target)?;
     if let Some(dtb) = &dtb {
         ensure_file(dtb, "device tree blob")?;
     }
@@ -192,7 +201,39 @@ fn build_device_kernel(
     })
 }
 
-fn kernel_target(config: &KernelConfig) -> Result<KernelTarget> {
+pub(super) fn kernel_arch(config: &KernelConfig) -> Result<String> {
+    let arch = config
+        .arch
+        .clone()
+        .unwrap_or_else(|| DEFAULT_KERNEL_ARCH.to_string());
+    if arch.is_empty()
+        || !arch
+            .chars()
+            .all(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '_' | '-'))
+    {
+        return Err(format!("invalid kernel arch: {arch}"));
+    }
+    Ok(arch)
+}
+
+pub(super) fn kernel_dtb_stem(config: &KernelConfig, device: &KernelDevice) -> Result<String> {
+    let stem = config
+        .dtb_stem
+        .clone()
+        .unwrap_or_else(|| device.stem.clone());
+    if stem.is_empty()
+        || stem.ends_with(".dts")
+        || stem.ends_with(".dtb")
+        || !stem
+            .chars()
+            .all(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '-' | '_' | '.'))
+    {
+        return Err(format!("invalid kernel DTB stem: {stem}"));
+    }
+    Ok(stem)
+}
+
+fn kernel_target(config: &KernelConfig, arch: &str) -> Result<KernelTarget> {
     let image_make_target = config
         .image
         .clone()
@@ -203,13 +244,38 @@ fn kernel_target(config: &KernelConfig) -> Result<KernelTarget> {
     let image_path = config
         .image_path
         .clone()
-        .unwrap_or_else(|| PathBuf::from("arch/arm64/boot").join(&image_make_target));
+        .unwrap_or_else(|| PathBuf::from(format!("arch/{arch}/boot")).join(&image_make_target));
 
     Ok(KernelTarget {
         image_make_target,
         image_path,
         build_dtb: config.dtb.unwrap_or(true),
     })
+}
+
+fn write_bootimg_kernel_artifact(
+    config: Option<&config::BootImgConfig>,
+    out_dir: &Path,
+    arch: &str,
+    image: &Path,
+    target: &KernelTarget,
+) -> Result<()> {
+    let Some(config) = config else {
+        return Ok(());
+    };
+    if config.kernel_image != "Image.gz" || target.image_make_target != "Image" {
+        return Ok(());
+    }
+
+    let output = out_dir.join(format!("arch/{arch}/boot/Image.gz"));
+    let output_file =
+        File::create(&output).map_err(|err| format!("create {}: {err}", output.display()))?;
+    let mut gzip = Command::new("gzip");
+    gzip.arg("-n")
+        .arg("-c")
+        .arg(image)
+        .stdout(Stdio::from(output_file));
+    run_command(gzip, "gzip kernel Image")
 }
 
 fn build_device_initrd(
@@ -244,8 +310,9 @@ fn ensure_kernel_config(
     out_dir: &Path,
     merge_config: &Path,
     fragments: &[&Path],
+    arch: &str,
 ) -> Result<()> {
-    let input = kernel_config_input(kernel_tree, merge_config, fragments)?;
+    let input = kernel_config_input(kernel_tree, merge_config, fragments, arch)?;
     let stamp = out_dir.join("pocketboot-config.toml");
     let config = out_dir.join(".config");
     if config.is_file() && kernel_config_stamp_matches(&stamp, &input)? {
@@ -255,13 +322,14 @@ fn ensure_kernel_config(
     let mut merge = Command::new(merge_config);
     merge
         .current_dir(kernel_tree)
-        .env("ARCH", KERNEL_ARCH)
+        .env("ARCH", arch)
         .args(["-s", "-n", "-O"])
         .arg(out_dir)
         .args(fragments);
+    set_default_kernel_toolchain(&mut merge, arch, Some(out_dir))?;
     run_command(merge, "merge kernel config")?;
 
-    let mut olddefconfig = make_command(kernel_tree, out_dir);
+    let mut olddefconfig = make_command_for_arch(kernel_tree, out_dir, arch)?;
     olddefconfig.arg("olddefconfig");
     run_command(olddefconfig, "make olddefconfig")?;
 
@@ -272,10 +340,11 @@ fn kernel_config_input(
     kernel_tree: &Path,
     merge_config: &Path,
     fragments: &[&Path],
+    arch: &str,
 ) -> Result<KernelConfigInput> {
     Ok(KernelConfigInput {
         recipe_version: KERNEL_CONFIG_RECIPE_VERSION,
-        arch: KERNEL_ARCH.to_string(),
+        arch: arch.to_string(),
         kernel_tree: path_stamp_value(kernel_tree),
         merge_config: kernel_config_file(merge_config)?,
         fragments: fragments
