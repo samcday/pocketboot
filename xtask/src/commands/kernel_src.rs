@@ -24,7 +24,13 @@ struct KernelSourceIdentity {
     path: PathBuf,
 }
 
-enum KernelSourceStatus {
+pub(super) struct KernelSourceTree {
+    pub(super) path: PathBuf,
+    pub(super) sha: String,
+    pub(super) status: KernelSourceStatus,
+}
+
+pub(super) enum KernelSourceStatus {
     Current,
     Updated,
 }
@@ -35,26 +41,39 @@ pub(crate) fn run(args: KernelSrcArgs) -> Result<()> {
 
 fn kernel_src(args: KernelSrcArgs) -> Result<()> {
     let workspace_root = workspace_root()?;
-    let config = config::load_device_config(&workspace_root, &args.device)?;
+    let tree = ensure_device_kernel_source(&workspace_root, &args.device)?;
+
+    match tree.status {
+        KernelSourceStatus::Current => println!("kernel source current {}", tree.path.display()),
+        KernelSourceStatus::Updated => println!("kernel source updated {}", tree.path.display()),
+    }
+    println!("sha {}", tree.sha);
+    Ok(())
+}
+
+pub(super) fn ensure_device_kernel_source(
+    workspace_root: &Path,
+    device: &KernelDevice,
+) -> Result<KernelSourceTree> {
+    let config = config::load_device_config(workspace_root, device)?;
     let source = config.kernel_source.as_ref().ok_or_else(|| {
         format!(
             "no [kernel-source] configured for {}/{}",
-            args.device.vendor, args.device.stem
+            device.vendor, device.stem
         )
     })?;
-    let identity = kernel_source_identity(&args.device, source);
-    let source_tree = target_dir(&workspace_root)
+    let identity = kernel_source_identity(device, source);
+    let source_tree = target_dir(workspace_root)
         .join("kernel")
         .join("src")
         .join(&identity.path);
     let status = ensure_kernel_source(&workspace_root, &source_tree, &identity, source)?;
 
-    match status {
-        KernelSourceStatus::Current => println!("kernel source current {}", source_tree.display()),
-        KernelSourceStatus::Updated => println!("kernel source updated {}", source_tree.display()),
-    }
-    println!("sha {}", source.sha);
-    Ok(())
+    Ok(KernelSourceTree {
+        path: source_tree,
+        sha: source.sha.clone(),
+        status,
+    })
 }
 
 fn kernel_source_identity(device: &KernelDevice, source: &KernelSource) -> KernelSourceIdentity {
