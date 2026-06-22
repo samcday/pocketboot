@@ -22,7 +22,7 @@ pub(crate) struct KernelArgs {
     #[arg(value_name = "VENDOR/DEVICE")]
     device: KernelDevice,
     #[arg(value_name = "KERNEL_TREE")]
-    kernel_tree: PathBuf,
+    kernel_tree: Option<PathBuf>,
     #[arg(long, value_name = "PATH")]
     initrd: Option<PathBuf>,
 }
@@ -74,7 +74,14 @@ fn kernel(args: KernelArgs) -> Result<()> {
         initrd,
     } = args;
     let workspace_root = workspace_root()?;
-    let kernel_tree = kernel_tree(&kernel_tree_arg)?;
+    let kernel_tree = match kernel_tree_arg {
+        Some(kernel_tree_arg) => kernel_tree(&kernel_tree_arg)?,
+        None => {
+            let tree = super::kernel_src::ensure_device_kernel_source(&workspace_root, &device)?;
+            println!("kernel source {}", tree.path.display());
+            kernel_tree(&tree.path)?
+        }
+    };
     let built_initrd = initrd.is_none();
     let build = build_device_kernel(&workspace_root, &kernel_tree, &device, initrd)?;
 
