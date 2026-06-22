@@ -1,0 +1,51 @@
+name = "Sony Xperia M2 (eagle)"
+
+[features]
+busybox = false
+
+[cpio]
+target = "armv7-unknown-linux-musleabihf"
+
+[kconfig]
+# Buttons and vibrator
+INPUT = true
+INPUT_EVDEV = true
+INPUT_KEYBOARD = true
+INPUT_MISC = true
+KEYBOARD_GPIO = true
+INPUT_PM8941_PWRKEY = true
+INPUT_PM8XXX_VIBRATOR = true
+
+# Board sensors exposed by the mainline DTS
+IIO_KFIFO_BUF = true
+IIO_TRIGGERED_BUFFER = true
+KXCJK1013 = true
+STK3310 = true
+
+# USB connector state, charger and NFC
+EXTCON = true
+CHARGER_QCOM_SMBB = true
+NFC = true
+NFC_NCI = true
+NFC_NXP_NCI = true
+NFC_NXP_NCI_I2C = true
+
+[bootimg]
+header_version = 0
+page_size = 2048
+kernel_image = "Image.gz"
+base = 0x00000000
+kernel_offset = 0x00008000
+ramdisk_offset = 0x02000000
+second_offset = 0x00f00000
+tags_offset = 0x01e00000
+dtb_offset = 0x0
+cmdline = ""
+
+[bootimg.qcdt]
+entries = [
+    { msm_id = [200, 0], board_id = [8, 0] },
+    { msm_id = [224, 0], board_id = [8, 0] },
+    { msm_id = [200, 0x10001], board_id = [8, 0] },
+    { msm_id = [224, 0x10001], board_id = [8, 0] },
+]
