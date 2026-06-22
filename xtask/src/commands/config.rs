@@ -28,10 +28,32 @@ const DTBH_SUBTYPE_CODE: u32 = 0x217584da;
 pub(super) struct DeviceConfig {
     pub(super) device_path: PathBuf,
     pub(super) features: FeatureSet,
+    pub(super) kernel_source: Option<KernelSource>,
     pub(super) kernel: KernelConfig,
     pub(super) cpio: CpioConfig,
     pub(super) bootimg: Option<BootImgConfig>,
     kconfig: BTreeMap<String, KconfigValue>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum KernelSourceScope {
+    Default,
+    Soc,
+    Device,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(super) struct KernelSource {
+    pub(super) scope: KernelSourceScope,
+    pub(super) remote: String,
+    pub(super) sha: String,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct KernelSourceLayer {
+    remote: String,
+    sha: String,
 }
 
 #[derive(Clone, Debug, Default, Deserialize)]
@@ -140,6 +162,8 @@ struct ConfigLayer {
     kconfig: BTreeMap<String, Value>,
     #[serde(default)]
     kernel: KernelConfig,
+    #[serde(default, rename = "kernel-source")]
+    kernel_source: Option<KernelSourceLayer>,
     #[serde(default)]
     cpio: CpioConfig,
     bootimg: Option<BootImgConfig>,
@@ -189,7 +213,11 @@ pub(super) fn load_device_config(
     let common = load_config_layer(&common_path, "common pocketboot config")?;
     let soc = load_config_layer(&soc_path, "SoC config")?;
     let device_layer = load_config_layer(&device_path, "device config")?;
-    let layers = [common, soc, device_layer];
+    let layers = [
+        (KernelSourceScope::Default, common),
+        (KernelSourceScope::Soc, soc),
+        (KernelSourceScope::Device, device_layer),
+    ];
 
     let enabled_features = merge_features(&layers)?;
     let mut features = FeatureSet::default();
@@ -198,10 +226,14 @@ pub(super) fn load_device_config(
     }
 
     let mut kernel = KernelConfig::default();
+    let mut kernel_source = None;
     let mut cpio = CpioConfig::default();
     let mut bootimg = None;
     let mut kconfig = BTreeMap::new();
-    for layer in &layers {
+    for (scope, layer) in &layers {
+        if let Some(source) = &layer.kernel_source {
+            kernel_source = Some(parse_kernel_source(*scope, source)?);
+        }
         merge_kernel(&mut kernel, &layer.kernel);
         merge_cpio(&mut cpio, &layer.cpio);
         if let Some(layer_bootimg) = &layer.bootimg {
@@ -224,6 +256,7 @@ pub(super) fn load_device_config(
     Ok(DeviceConfig {
         device_path,
         features,
+        kernel_source,
         kernel,
         cpio,
         bootimg,
@@ -238,9 +271,9 @@ fn load_config_layer(path: &Path, description: &str) -> Result<ConfigLayer> {
     toml::from_str(&contents).map_err(|err| format!("parse {}: {err}", path.display()))
 }
 
-fn merge_features(layers: &[ConfigLayer; 3]) -> Result<BTreeSet<String>> {
+fn merge_features(layers: &[(KernelSourceScope, ConfigLayer); 3]) -> Result<BTreeSet<String>> {
     let mut merged = BTreeMap::new();
-    for layer in layers {
+    for (_, layer) in layers {
         for (feature, enabled) in &layer.features {
             validate_feature(feature)?;
             merged.insert(feature.clone(), *enabled);
@@ -250,6 +283,30 @@ fn merge_features(layers: &[ConfigLayer; 3]) -> Result<BTreeSet<String>> {
         .into_iter()
         .filter_map(|(feature, enabled)| enabled.then_some(feature))
         .collect())
+}
+
+fn parse_kernel_source(
+    scope: KernelSourceScope,
+    source: &KernelSourceLayer,
+) -> Result<KernelSource> {
+    if source.remote.is_empty() {
+        return Err("kernel-source remote must not be empty".to_string());
+    }
+    if source.sha.is_empty() {
+        return Err("kernel-source sha must not be empty".to_string());
+    }
+    if !source.sha.chars().all(|ch| ch.is_ascii_hexdigit()) {
+        return Err(format!(
+            "kernel-source sha must be hexadecimal: {}",
+            source.sha
+        ));
+    }
+
+    Ok(KernelSource {
+        scope,
+        remote: source.remote.clone(),
+        sha: source.sha.clone(),
+    })
 }
 
 fn merge_kernel(merged: &mut KernelConfig, layer: &KernelConfig) {
