@@ -2,7 +2,7 @@ name = "Qualcomm MSM8930"
 
 [kernel]
 arch = "arm"
-image = "Image"
+image = "zImage"
 
 [kconfig]
 # Platform
@@ -85,6 +85,10 @@ MMC_QCOM_DML = true
 #FB_SIMPLE = true
 #DUMMY_CONSOLE = true
 #FRAMEBUFFER_CONSOLE = true
+
+# touch
+INPUT_TOUCHSCREEN = true
+TOUCHSCREEN_ATMEL_MXT = true
 
 # USB HS controller/PHY for the configfs gadget UDC.
 USB_SUPPORT = true

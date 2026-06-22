@@ -19,7 +19,7 @@ KEYBOARD_GPIO = true
 [bootimg]
 header_version = 0
 page_size = 2048
-kernel_image = "Image.gz"
+kernel_image = "zImage"
 base = 0x80200000
 kernel_offset = 0x00008000
 ramdisk_offset = 0x02200000
