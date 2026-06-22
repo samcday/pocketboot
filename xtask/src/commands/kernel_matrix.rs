@@ -6,7 +6,7 @@ use crate::Result;
 
 use super::{
     KernelDevice,
-    config::{self, KernelSource},
+    config::{self, KernelSource, KernelSourceScope},
     cpio::DEFAULT_TARGET,
     workspace_root,
 };
@@ -22,7 +22,7 @@ struct KernelSourceKey {
 
 #[derive(Debug)]
 struct KernelMatrixGroup {
-    name: String,
+    labels: Vec<String>,
     remote: String,
     sha: String,
     cpio_targets: Vec<String>,
@@ -65,13 +65,14 @@ fn kernel_matrix(workspace_root: &Path) -> Result<KernelMatrix> {
         };
         let key = kernel_source_key(source);
         let group = groups.entry(key).or_insert_with(|| KernelMatrixGroup {
-            name: kernel_source_name(source),
+            labels: Vec::new(),
             remote: source.remote.clone(),
             sha: source.sha.clone(),
             cpio_targets: Vec::new(),
             devices: Vec::new(),
             bootimg_devices: Vec::new(),
         });
+        push_unique_sorted(&mut group.labels, kernel_source_label(source, &device));
         push_unique_sorted(
             &mut group.cpio_targets,
             device_config
@@ -148,9 +149,10 @@ fn kernel_source_key(source: &KernelSource) -> KernelSourceKey {
 }
 
 fn kernel_matrix_entry(group: KernelMatrixGroup) -> KernelMatrixEntry {
+    let name = group.labels.join(" + ");
     KernelMatrixEntry {
-        artifact: format!("kernel-{}", sanitize(&group.name)),
-        name: group.name,
+        artifact: format!("kernel-{}", sanitize(&name)),
+        name,
         remote: group.remote,
         sha: group.sha,
         cpio_targets: group.cpio_targets,
@@ -167,29 +169,12 @@ fn push_unique_sorted(values: &mut Vec<String>, value: String) {
     values.sort();
 }
 
-fn short_sha(sha: &str) -> &str {
-    &sha[..sha.len().min(12)]
-}
-
-fn kernel_source_name(source: &KernelSource) -> String {
-    format!(
-        "{}@{}",
-        remote_label(&source.remote),
-        short_sha(&source.sha)
-    )
-}
-
-fn remote_label(remote: &str) -> String {
-    let remote = remote.trim_end_matches(".git");
-    for separator in ["github.com/", "github.com:"] {
-        if let Some((_, label)) = remote.split_once(separator) {
-            return label.to_string();
-        }
+fn kernel_source_label(source: &KernelSource, device: &KernelDevice) -> String {
+    match source.scope {
+        KernelSourceScope::Default => "default devices".to_string(),
+        KernelSourceScope::Soc => format!("{}/{} devices", device.vendor, device.soc),
+        KernelSourceScope::Device => device.id(),
     }
-    remote
-        .rsplit_once('/')
-        .map_or(remote, |(_, label)| label)
-        .to_string()
 }
 
 fn sanitize(value: &str) -> String {

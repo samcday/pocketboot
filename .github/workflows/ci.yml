@@ -82,14 +82,11 @@ jobs:
           echo "The CI Image workflow may still be running, or this PR may need a ci-ok label."
           exit 1
 
-  kernel-matrix:
-    name: Kernel matrix
+  generated-workflows:
+    name: Generated workflows
     runs-on: ubuntu-latest
     timeout-minutes: 10
     needs: ci-image
-    outputs:
-      matrix: ${{ steps.matrix.outputs.matrix }}
-      has_builds: ${{ steps.matrix.outputs.has_builds }}
     container:
       image: ${{ needs.ci-image.outputs.image }}
       credentials:
@@ -104,108 +101,15 @@ jobs:
           ref: ${{ github.event.pull_request.head.sha || github.sha }}
           persist-credentials: false
 
-      - name: Cache Cargo downloads
-        uses: actions/cache@v4
-        with:
-          path: |
-            /usr/local/cargo/git
-            /usr/local/cargo/registry
-          key: ${{ runner.os }}-cargo-${{ hashFiles('Cargo.lock') }}
+      - name: Check generated workflows
+        run: cargo xtask ci-workflows --check
 
-      - name: Generate kernel matrix
-        id: matrix
-        run: |
-          matrix="$(cargo xtask kernel-matrix)"
-          has_builds="$(python3 -c 'import json, sys; print("true" if json.loads(sys.argv[1])["include"] else "false")' "$matrix")"
-          echo "$matrix"
-          {
-            echo 'matrix<<EOF'
-            echo "$matrix"
-            echo 'EOF'
-            echo "has_builds=${has_builds}"
-          } >> "$GITHUB_OUTPUT"
-
-  kernel-bootimg:
-    name: ${{ matrix.name }} kernels
-    runs-on: ubuntu-latest
-    timeout-minutes: 120
+  kernel-ci:
+    name: Kernel CI
     needs:
       - ci-image
-      - kernel-matrix
-    if: needs.kernel-matrix.outputs.has_builds == 'true'
-    container:
+      - generated-workflows
+    uses: ./.github/workflows/kernel-ci.generated.yml
+    with:
       image: ${{ needs.ci-image.outputs.image }}
-      credentials:
-        username: ${{ github.actor }}
-        password: ${{ secrets.GITHUB_TOKEN }}
-    strategy:
-      fail-fast: false
-      matrix: ${{ fromJson(needs.kernel-matrix.outputs.matrix) }}
-    env:
-      CCACHE_BASEDIR: ${{ github.workspace }}
-      CCACHE_COMPILERCHECK: content
-      CCACHE_DIR: ${{ github.workspace }}/target/ccache
-      CCACHE_MAXSIZE: 2G
-      HOSTCC: ccache gcc
-
-    steps:
-      - name: Checkout pocketboot
-        uses: actions/checkout@v4
-        with:
-          repository: ${{ github.event.pull_request.head.repo.full_name || github.repository }}
-          ref: ${{ github.event.pull_request.head.sha || github.sha }}
-          persist-credentials: false
-
-      - name: Set up Rust cache
-        uses: actions-rust-lang/setup-rust-toolchain@v1
-        with:
-          components: rust-src,rustfmt
-          target: ${{ join(matrix.cpio_targets, ',') }}
-          rustflags: ""
-          cache-shared-key: pocketboot-kernel-${{ join(matrix.cpio_targets, '-') }}-df-${{ hashFiles('.github/Dockerfile') }}
-          cache-bin: false
-          cache-on-failure: true
-
-      - name: Cache kernel ccache
-        uses: actions/cache@v4
-        with:
-          path: target/ccache
-          key: ${{ runner.os }}-kernel-ccache-${{ matrix.sha }}-${{ hashFiles('.github/Dockerfile') }}
-          restore-keys: |
-            ${{ runner.os }}-kernel-ccache-${{ matrix.sha }}-
-
-      - name: Configure ccache
-        run: |
-          ccache --set-config=max_size="$CCACHE_MAXSIZE"
-          ccache --zero-stats
-
-      - name: Build kernels and boot images
-        env:
-          DEVICES: ${{ join(matrix.devices, ' ') }}
-          BOOTIMG_DEVICES: ${{ join(matrix.bootimg_devices, ' ') }}
-        run: |
-          for device in $DEVICES; do
-            cargo xtask kernel "$device"
-          done
-
-          for device in $BOOTIMG_DEVICES; do
-            cargo xtask bootimg "$device"
-          done
-
-      - name: Show ccache stats
-        if: always()
-        run: ccache --show-stats
-
-      - name: Upload boot artifacts
-        uses: actions/upload-artifact@v4
-        with:
-          name: ${{ matrix.artifact }}
-          path: |
-            target/kernel/**/boot.img
-            target/kernel/**/.config
-            target/kernel/**/arch/arm/boot/Image.gz
-            target/kernel/**/arch/arm/boot/dts/**/*.dtb
-            target/kernel/**/arch/arm64/boot/Image.gz
-            target/kernel/**/arch/arm64/boot/dts/**/*.dtb
-          if-no-files-found: error
-          include-hidden-files: true
+    secrets: inherit

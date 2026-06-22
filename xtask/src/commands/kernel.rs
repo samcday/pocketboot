@@ -11,7 +11,7 @@ use crate::Result;
 
 use super::{
     DEFAULT_KERNEL_ARCH, FeatureSet, KernelDevice, canonical_file,
-    config::{self, CpioConfig, KernelConfig},
+    config::{self, CpioConfig, KernelConfig, SourceConfig},
     cpio::{DEFAULT_INITRD, DEFAULT_TARGET, build_initrd},
     ensure_file, kconfig_string, kernel_tree, make_command_for_arch, parallel_jobs, run_command,
     set_default_kernel_toolchain, target_dir, workspace_root,
@@ -33,6 +33,12 @@ pub(super) struct KernelBuild {
     pub(super) dtb: Option<PathBuf>,
     pub(super) config: PathBuf,
     pub(super) initrd: PathBuf,
+}
+
+#[derive(Debug)]
+pub(super) struct PrimeKernelBuild {
+    pub(super) image: PathBuf,
+    pub(super) config: PathBuf,
 }
 
 struct KernelTarget {
@@ -104,6 +110,46 @@ pub(super) fn build_device_kernel_id(
 ) -> Result<KernelBuild> {
     let device = KernelDevice::parse(device_id)?;
     build_device_kernel(workspace_root, kernel_tree, &device, initrd)
+}
+
+pub(super) fn build_prime_kernel(
+    workspace_root: &Path,
+    kernel_tree: &Path,
+    id: &str,
+    config: &SourceConfig,
+) -> Result<PrimeKernelBuild> {
+    let target_dir = target_dir(workspace_root);
+    let arch = kernel_arch(&config.kernel)?;
+    let target = kernel_target(&config.kernel, &arch)?;
+    let out_dir = target_dir.join("kernel-prime").join(id);
+    fs::create_dir_all(&out_dir).map_err(|err| format!("create {}: {err}", out_dir.display()))?;
+
+    let pocketboot_config = out_dir.join("pocketboot.config");
+    write_if_changed(&pocketboot_config, config.kconfig_contents()?.as_bytes())?;
+
+    let merge_config = kernel_tree.join("scripts/kconfig/merge_config.sh");
+    ensure_file(&merge_config, "merge_config.sh")?;
+    let config_fragments = [pocketboot_config.as_path()];
+    ensure_kernel_config(
+        kernel_tree,
+        &out_dir,
+        &merge_config,
+        &config_fragments,
+        &arch,
+    )?;
+
+    let mut build = make_command_for_arch(kernel_tree, &out_dir, &arch)?;
+    build
+        .arg(format!("-j{}", parallel_jobs()))
+        .arg(&target.image_make_target);
+    run_command(build, "make prime kernel image")?;
+
+    let image = out_dir.join(&target.image_path);
+    ensure_file(&image, "kernel image")?;
+    Ok(PrimeKernelBuild {
+        image,
+        config: out_dir.join(".config"),
+    })
 }
 
 fn build_device_kernel(
