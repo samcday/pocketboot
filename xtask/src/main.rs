@@ -20,6 +20,7 @@ fn run() -> Result<()> {
         Some("busybox") => commands::busybox::run(args.collect()),
         Some("cpio") => commands::cpio::run(args.collect()),
         Some("kernel") => commands::kernel::run(args.collect()),
+        Some("kernel-src") => commands::kernel_src::run(args.collect()),
         Some("bootimg") => commands::bootimg::run(args.collect()),
         Some("qemu") => commands::qemu::run(args.collect()),
         Some("help" | "--help" | "-h") | None => {

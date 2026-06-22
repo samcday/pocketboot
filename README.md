@@ -68,6 +68,11 @@ existing cpio archive. Kernel configuration is assembled from
 `configs/pocketboot.toml`, `configs/soc/<vendor>/<soc>.toml` and
 `configs/device/<vendor>/<device>.toml`.
 
+Pinned kernel sources can be described with an inherited `[kernel-source]` table
+containing `remote` and `sha` fields. `cargo xtask kernel-src <vendor/device>`
+materializes that source under `target/kernel/src`; this is not wired into
+`cargo xtask kernel` yet.
+
 Once the kernel is built, package those artifacts as an Android boot image:
 
 ```sh

@@ -1,5 +1,9 @@
 name = "Qualcomm MSM8916/APQ8016"
 
+[kernel-source]
+remote = "https://github.com/samcday/linux.git"
+sha = "d87323486b79a31b9b25eb6fe30f1b503f142ff2"
+
 [kconfig]
 # Platform sizing
 ARCH_QCOM = true
