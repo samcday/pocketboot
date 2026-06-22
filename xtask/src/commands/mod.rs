@@ -3,6 +3,7 @@ pub(crate) mod busybox;
 mod config;
 pub(crate) mod cpio;
 pub(crate) mod kernel;
+pub(crate) mod kernel_matrix;
 pub(crate) mod kernel_src;
 pub(crate) mod qemu;
 
@@ -104,6 +105,10 @@ impl KernelDevice {
             stem: stem.to_string(),
             soc: soc.to_string(),
         })
+    }
+
+    fn id(&self) -> String {
+        format!("{}/{}", self.vendor, self.stem)
     }
 }
 

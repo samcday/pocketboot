@@ -34,6 +34,11 @@ enum XtaskCommand {
     #[command(about = "build a pocketboot kernel image for one device")]
     Kernel(commands::kernel::KernelArgs),
     #[command(
+        name = "kernel-matrix",
+        about = "emit the configured kernel build matrix as JSON"
+    )]
+    KernelMatrix(commands::kernel_matrix::KernelMatrixArgs),
+    #[command(
         name = "kernel-src",
         about = "fetch or update a configured kernel source tree"
     )]
@@ -49,6 +54,7 @@ fn run() -> Result<()> {
         XtaskCommand::Busybox(args) => commands::busybox::run(args),
         XtaskCommand::Cpio(args) => commands::cpio::run(args),
         XtaskCommand::Kernel(args) => commands::kernel::run(args),
+        XtaskCommand::KernelMatrix(args) => commands::kernel_matrix::run(args),
         XtaskCommand::KernelSrc(args) => commands::kernel_src::run(args),
         XtaskCommand::Bootimg(args) => commands::bootimg::run(args),
         XtaskCommand::Qemu(args) => commands::qemu::run(args),
