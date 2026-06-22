@@ -1,0 +1,30 @@
+name = "Samsung Galaxy Express GT-I8730"
+
+[kernel]
+dtb_stem = "qcom-msm8930-samsung-expressltexx"
+
+[features]
+busybox = false
+
+[cpio]
+target = "armv7-unknown-linux-musleabihf"
+
+[kconfig]
+# Buttons are useful for local UI bring-up once simplefb is alive.
+INPUT = true
+INPUT_EVDEV = true
+INPUT_KEYBOARD = true
+KEYBOARD_GPIO = true
+
+[bootimg]
+header_version = 0
+page_size = 2048
+kernel_image = "Image.gz"
+base = 0x80200000
+kernel_offset = 0x00008000
+ramdisk_offset = 0x02200000
+second_offset = 0x00f00000
+tags_offset = 0x02000000
+dtb_offset = 0x0
+append_dtb = true
+cmdline = ""
