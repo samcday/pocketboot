@@ -1,9 +1,11 @@
 pub(crate) mod bootimg;
 pub(crate) mod busybox;
+pub(crate) mod ci_workflows;
 mod config;
 pub(crate) mod cpio;
 pub(crate) mod kernel;
 pub(crate) mod kernel_matrix;
+pub(crate) mod kernel_prime;
 pub(crate) mod kernel_src;
 pub(crate) mod preboot;
 pub(crate) mod qemu;

@@ -76,6 +76,29 @@ pub(super) fn ensure_device_kernel_source(
     })
 }
 
+pub(super) fn ensure_named_kernel_source(
+    workspace_root: &Path,
+    name: &str,
+    path: PathBuf,
+    source: &KernelSource,
+) -> Result<KernelSourceTree> {
+    let identity = KernelSourceIdentity {
+        name: name.to_string(),
+        path,
+    };
+    let source_tree = target_dir(workspace_root)
+        .join("kernel")
+        .join("src")
+        .join(&identity.path);
+    let status = ensure_kernel_source(&workspace_root, &source_tree, &identity, source)?;
+
+    Ok(KernelSourceTree {
+        path: source_tree,
+        sha: source.sha.clone(),
+        status,
+    })
+}
+
 fn kernel_source_identity(device: &KernelDevice, source: &KernelSource) -> KernelSourceIdentity {
     match source.scope {
         KernelSourceScope::Default => KernelSourceIdentity {
