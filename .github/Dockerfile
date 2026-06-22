@@ -11,6 +11,7 @@ RUN set -eux; \
         bison \
         ca-certificates \
         ccache \
+        clang \
         flex \
         gcc-aarch64-linux-gnu \
         git \
@@ -18,15 +19,17 @@ RUN set -eux; \
         libelf-dev \
         libfontconfig1-dev \
         libssl-dev \
+        lld \
         linux-libc-dev-arm64-cross \
         make \
         musl-dev:arm64 \
+        llvm \
         pkg-config \
         python3; \
     rm -rf /var/lib/apt/lists/*
 
 RUN set -eux; \
-    rustup target add aarch64-unknown-linux-musl; \
+    rustup target add aarch64-unknown-linux-musl armv7-unknown-linux-musleabihf; \
     rustup component add rust-src rustfmt; \
     cargo install --locked bindgen-cli; \
     rustc --version; \

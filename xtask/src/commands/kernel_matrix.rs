@@ -7,6 +7,7 @@ use crate::Result;
 use super::{
     KernelDevice,
     config::{self, KernelSource},
+    cpio::DEFAULT_TARGET,
     workspace_root,
 };
 
@@ -24,6 +25,7 @@ struct KernelMatrixGroup {
     name: String,
     remote: String,
     sha: String,
+    cpio_targets: Vec<String>,
     devices: Vec<String>,
     bootimg_devices: Vec<String>,
 }
@@ -39,6 +41,7 @@ struct KernelMatrixEntry {
     artifact: String,
     remote: String,
     sha: String,
+    cpio_targets: Vec<String>,
     devices: Vec<String>,
     bootimg_devices: Vec<String>,
 }
@@ -65,9 +68,18 @@ fn kernel_matrix(workspace_root: &Path) -> Result<KernelMatrix> {
             name: kernel_source_name(source),
             remote: source.remote.clone(),
             sha: source.sha.clone(),
+            cpio_targets: Vec::new(),
             devices: Vec::new(),
             bootimg_devices: Vec::new(),
         });
+        push_unique_sorted(
+            &mut group.cpio_targets,
+            device_config
+                .cpio
+                .target
+                .clone()
+                .unwrap_or_else(|| DEFAULT_TARGET.to_string()),
+        );
         let device_id = device.id();
         group.devices.push(device_id.clone());
         if device_config.bootimg.is_some() {
@@ -141,9 +153,18 @@ fn kernel_matrix_entry(group: KernelMatrixGroup) -> KernelMatrixEntry {
         name: group.name,
         remote: group.remote,
         sha: group.sha,
+        cpio_targets: group.cpio_targets,
         devices: group.devices,
         bootimg_devices: group.bootimg_devices,
     }
+}
+
+fn push_unique_sorted(values: &mut Vec<String>, value: String) {
+    if values.iter().any(|existing| existing == &value) {
+        return;
+    }
+    values.push(value);
+    values.sort();
 }
 
 fn short_sha(sha: &str) -> &str {
