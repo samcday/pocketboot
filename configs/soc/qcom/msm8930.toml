@@ -1,0 +1,99 @@
+name = "Qualcomm MSM8930"
+
+[kernel]
+arch = "arm"
+image = "Image"
+
+[kconfig]
+# Platform
+MMU = true
+SMP = true
+ARCH_MULTI_V7 = true
+ARCH_QCOM = true
+NR_CPUS = 2
+HIGHMEM = true
+CMA = true
+DMA_CMA = true
+CMA_SIZE_MBYTES = 64
+ARM_PATCH_IDIV = true
+VFP = true
+NEON = true
+ARM_THUMB = true
+COMPAT_32BIT_TIME = true
+
+# ARM32 boot handoff from lk2nd/aboot with a DTB at r2.
+ARM_PATCH_PHYS_VIRT = true
+ATAGS = true
+ARM_APPENDED_DTB = true
+ARM_ATAG_DTB_COMPAT = true
+ARM_ATAG_DTB_COMPAT_CMDLINE_FROM_BOOTLOADER = true
+AUTO_ZRELADDR = true
+
+# TODO:
+RUST = false
+KEXEC_FILE = "omit"
+RANDOMIZE_BASE = "omit"
+RELOCATABLE = "omit"
+DRM_PANIC_SCREEN_QR_CODE = "omit"
+DRM_PANIC_SCREEN = { string = "user" }
+
+# Core Qualcomm firmware/resource plumbing
+PM = true
+QCOM_SCM = true
+QCOM_SMEM = true
+QCOM_SOCINFO = true
+HWSPINLOCK = true
+HWSPINLOCK_QCOM = true
+MFD_QCOM_RPM = true
+PM_DEVFREQ = true
+
+# Clocks, pinctrl, GPIO and PMIC access
+COMMON_CLK_QCOM = true
+QCOM_CLK_RPM = true
+MSM_GCC_8960 = true
+MSM_MMCC_8960 = true
+PINCTRL = true
+GPIOLIB = true
+PINCTRL_MSM = true
+PINCTRL_MSM8960 = true
+MFD_PM8XXX = true
+REGULATOR = true
+REGULATOR_QCOM_RPM = true
+REGULATOR_QCOM_PM8917 = true
+POWER_RESET = true
+POWER_RESET_MSM = true
+
+# BLSP UART/I2C and DMA
+TTY = true
+SERIAL_MSM = true
+SERIAL_MSM_CONSOLE = true
+I2C = true
+I2C_QUP = true
+DMADEVICES = true
+QCOM_BAM_DMA = true
+QCOM_GSBI = true
+
+# eMMC/SD storage on MSM8930 is PL18x/AMBA, not SDHCI.
+BLOCK = true
+MMC = true
+MMC_BLOCK = true
+MMC_ARMMMCI = true
+MMC_QCOM_DML = true
+
+# Simple-framebuffer handoff
+#FB = true
+#FB_SIMPLE = true
+#DUMMY_CONSOLE = true
+#FRAMEBUFFER_CONSOLE = true
+
+# USB HS controller/PHY for the configfs gadget UDC.
+USB_SUPPORT = true
+USB = true
+USB_EHCI_HCD = true
+USB_GADGET = true
+USB_CHIPIDEA = true
+USB_CHIPIDEA_UDC = true
+USB_CHIPIDEA_HOST = true
+USB_CHIPIDEA_MSM = true
+GENERIC_PHY = true
+PHY_QCOM_USB_HS = true
