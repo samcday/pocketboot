@@ -1,10 +1,9 @@
 pub(crate) mod bootimg;
 pub(crate) mod busybox;
-pub(crate) mod ci_workflows;
+pub(crate) mod ci_matrix;
 mod config;
 pub(crate) mod cpio;
 pub(crate) mod kernel;
-pub(crate) mod kernel_prime;
 pub(crate) mod kernel_src;
 pub(crate) mod preboot;
 pub(crate) mod qemu;
@@ -195,7 +194,55 @@ fn set_default_kernel_toolchain(
             _ => {}
         }
     }
+    if let Some(out_dir) = out_dir {
+        prepend_ccache_wrappers(command, out_dir)?;
+    }
     Ok(())
+}
+
+fn prepend_ccache_wrappers(command: &mut Command, out_dir: &Path) -> Result<()> {
+    if env::var_os("CCACHE_DIR").is_none() {
+        return Ok(());
+    }
+
+    let tool_dir = kernel_tool_dir(out_dir)?;
+    for compiler in [
+        "gcc",
+        "g++",
+        "cc",
+        "c++",
+        "aarch64-linux-gnu-gcc",
+        "arm-linux-gnueabihf-gcc",
+        "clang",
+        "clang++",
+    ] {
+        if let Some(real_compiler) = path_command(compiler) {
+            write_ccache_wrapper(&tool_dir.join(compiler), &real_compiler)?;
+        }
+    }
+    prepend_command_path(command, &tool_dir)
+}
+
+fn kernel_tool_dir(out_dir: &Path) -> Result<PathBuf> {
+    let tool_dir = out_dir.join("pocketboot-toolchain");
+    fs::create_dir_all(&tool_dir).map_err(|err| format!("create {}: {err}", tool_dir.display()))?;
+    Ok(tool_dir)
+}
+
+fn write_ccache_wrapper(path: &Path, compiler: &Path) -> Result<()> {
+    let compiler = compiler
+        .to_str()
+        .ok_or_else(|| format!("compiler path is not valid UTF-8: {}", compiler.display()))?;
+    fs::write(
+        path,
+        format!("#!/bin/sh\nexec ccache '{}' \"$@\"\n", sh_quote(compiler)),
+    )
+    .map_err(|err| format!("write {}: {err}", path.display()))?;
+    make_executable(path)
+}
+
+fn sh_quote(value: &str) -> String {
+    value.replace('\'', "'\\''")
 }
 
 fn arm_llvm_tool_dir(out_dir: Option<&Path>) -> Result<Option<PathBuf>> {
@@ -205,8 +252,7 @@ fn arm_llvm_tool_dir(out_dir: Option<&Path>) -> Result<Option<PathBuf>> {
     if !path_command_exists("rust-lld") {
         return Ok(None);
     }
-    let tool_dir = out_dir.join("pocketboot-toolchain");
-    fs::create_dir_all(&tool_dir).map_err(|err| format!("create {}: {err}", tool_dir.display()))?;
+    let tool_dir = kernel_tool_dir(out_dir)?;
     let ld_lld = tool_dir.join("ld.lld");
     write_ld_lld_wrapper(&ld_lld)?;
     Ok(Some(tool_dir))

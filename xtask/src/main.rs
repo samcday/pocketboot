@@ -31,18 +31,10 @@ enum XtaskCommand {
     Busybox(commands::busybox::BusyBoxArgs),
     #[command(about = "build pocketboot and create an initrd cpio")]
     Cpio(commands::cpio::CpioArgs),
-    #[command(
-        name = "ci-workflows",
-        about = "generate checked-in GitHub workflow files"
-    )]
-    CiWorkflows(commands::ci_workflows::CiWorkflowsArgs),
+    #[command(name = "ci-matrix", about = "emit the configured CI matrix as JSON")]
+    CiMatrix(commands::ci_matrix::CiMatrixArgs),
     #[command(about = "build a pocketboot kernel image for one device")]
     Kernel(commands::kernel::KernelArgs),
-    #[command(
-        name = "kernel-prime",
-        about = "build a source-scope kernel to warm ccache"
-    )]
-    KernelPrime(commands::kernel_prime::KernelPrimeArgs),
     #[command(
         name = "kernel-src",
         about = "fetch or update a configured kernel source tree"
@@ -60,9 +52,8 @@ fn run() -> Result<()> {
     match Cli::parse().command {
         XtaskCommand::Busybox(args) => commands::busybox::run(args),
         XtaskCommand::Cpio(args) => commands::cpio::run(args),
-        XtaskCommand::CiWorkflows(args) => commands::ci_workflows::run(args),
+        XtaskCommand::CiMatrix(args) => commands::ci_matrix::run(args),
         XtaskCommand::Kernel(args) => commands::kernel::run(args),
-        XtaskCommand::KernelPrime(args) => commands::kernel_prime::run(args),
         XtaskCommand::KernelSrc(args) => commands::kernel_src::run(args),
         XtaskCommand::Preboot(args) => commands::preboot::run(args),
         XtaskCommand::Bootimg(args) => commands::bootimg::run(args),

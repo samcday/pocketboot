@@ -69,23 +69,6 @@ pub(super) fn ensure_device_kernel_source(
     })
 }
 
-pub(super) fn ensure_source_kernel_source(
-    workspace_root: &Path,
-    source: &KernelSource,
-) -> Result<KernelSourceTree> {
-    let source_tree = target_dir(workspace_root)
-        .join("kernel")
-        .join("src")
-        .join(&source.identity.tree_path);
-    let status = ensure_kernel_source(&workspace_root, &source_tree, &source.identity, source)?;
-
-    Ok(KernelSourceTree {
-        path: source_tree,
-        sha: source.sha.clone(),
-        status,
-    })
-}
-
 fn ensure_kernel_source(
     workspace_root: &Path,
     source_tree: &Path,

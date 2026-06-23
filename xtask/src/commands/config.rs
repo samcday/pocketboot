@@ -35,13 +35,6 @@ pub(super) struct DeviceConfig {
     kconfig: BTreeMap<String, KconfigValue>,
 }
 
-#[derive(Debug)]
-pub(super) struct SourceConfig {
-    pub(super) kernel_source: Option<KernelSource>,
-    pub(super) kernel: KernelConfig,
-    kconfig: BTreeMap<String, KconfigValue>,
-}
-
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) enum KernelSourceScope {
     Default,
@@ -226,12 +219,6 @@ impl DeviceConfig {
     }
 }
 
-impl SourceConfig {
-    pub(super) fn kconfig_contents(&self) -> Result<String> {
-        kconfig_contents(&self.kconfig)
-    }
-}
-
 pub(super) fn load_device_config(
     workspace_root: &Path,
     device: &KernelDevice,
@@ -276,57 +263,6 @@ pub(super) fn load_device_config(
         kernel: merged.kernel,
         cpio: merged.cpio,
         bootimg: merged.bootimg,
-        kconfig: merged.kconfig,
-    })
-}
-
-pub(super) fn load_default_config(workspace_root: &Path) -> Result<SourceConfig> {
-    let common_path = workspace_root.join("configs/pocketboot.toml");
-    let common = load_config_layer(&common_path, "common pocketboot config")?;
-    let layers = [ConfigLayerEntry {
-        scope: KernelSourceScope::Default,
-        identity: default_kernel_source_identity(),
-        layer: common,
-    }];
-    let merged = merge_layers(&layers)?;
-
-    Ok(SourceConfig {
-        kernel_source: merged.kernel_source,
-        kernel: merged.kernel,
-        kconfig: merged.kconfig,
-    })
-}
-
-pub(super) fn load_soc_config(
-    workspace_root: &Path,
-    vendor: &str,
-    soc: &str,
-) -> Result<SourceConfig> {
-    let common_path = workspace_root.join("configs/pocketboot.toml");
-    let soc_path = workspace_root
-        .join("configs/soc")
-        .join(vendor)
-        .join(format!("{soc}.toml"));
-
-    let common = load_config_layer(&common_path, "common pocketboot config")?;
-    let soc_layer = load_config_layer(&soc_path, "SoC config")?;
-    let layers = [
-        ConfigLayerEntry {
-            scope: KernelSourceScope::Default,
-            identity: default_kernel_source_identity(),
-            layer: common,
-        },
-        ConfigLayerEntry {
-            scope: KernelSourceScope::Soc,
-            identity: soc_kernel_source_identity(&soc_path, vendor, soc)?,
-            layer: soc_layer,
-        },
-    ];
-    let merged = merge_layers(&layers)?;
-
-    Ok(SourceConfig {
-        kernel_source: merged.kernel_source,
-        kernel: merged.kernel,
         kconfig: merged.kconfig,
     })
 }
