@@ -15,7 +15,8 @@ use sha2::{Digest, Sha256};
 use crate::Result;
 
 use super::{
-    FeatureSet, ensure_file, feature_set, parallel_jobs, run_command, target_dir, workspace_root,
+    FeatureSet, ensure_file, feature_set, parallel_jobs, podman, run_command, target_dir,
+    workspace_root,
 };
 
 pub(super) const BUSYBOX_VERSION: &str = "1.38.0";
@@ -30,6 +31,8 @@ pub(crate) struct BusyBoxArgs {
     target: String,
     #[arg(long, value_name = "FEATURES")]
     features: Vec<String>,
+    #[arg(long)]
+    podman: bool,
 }
 
 #[derive(Debug)]
@@ -93,7 +96,24 @@ impl BusyBoxPaths {
 }
 
 pub(crate) fn run(args: BusyBoxArgs) -> Result<()> {
+    if args.podman {
+        return podman_busybox(args);
+    }
     busybox(args)
+}
+
+fn podman_busybox(args: BusyBoxArgs) -> Result<()> {
+    let workspace_root = workspace_root()?;
+    let mut xtask_args = vec![
+        OsString::from("busybox"),
+        OsString::from("--target"),
+        OsString::from(args.target),
+    ];
+    for feature in args.features {
+        xtask_args.push(OsString::from("--features"));
+        xtask_args.push(OsString::from(feature));
+    }
+    podman::run_xtask(&workspace_root, xtask_args, Vec::new())
 }
 
 fn busybox(args: BusyBoxArgs) -> Result<()> {

@@ -52,12 +52,28 @@ C toolchain, or pass `--no-busybox` to build only the Rust `/init`. BusyBox is
 cached under `target/busybox`; use `cargo xtask busybox` to build it without
 creating an initrd.
 
+If local cross-toolchains are getting in the way, pass `--podman` to run the
+toolchain-heavy steps in the same image CI uses:
+
+```sh
+cargo xtask cpio --podman
+cargo xtask busybox --podman
+```
+
+`xtask` first tries the published CI image
+`ghcr.io/samcday/pocketboot-ci:df-<sha256(.github/Dockerfile)>`. If that exact
+image is unavailable, it builds `localhost/pocketboot-ci:df-<hash>` locally from
+`.github/Dockerfile`. Set `POCKETBOOT_PODMAN_IMAGE` to force a specific image, or
+`POCKETBOOT_PODMAN_CACHE_FROM` to pass one or more Buildah cache repositories to
+`podman build --cache-from`.
+
 To build a pocketboot kernel for a supported device, pass the canonical arm64
 DTB path without the `.dtb` suffix and a kernel tree:
 
 ```sh
 cargo xtask kernel qcom/msm8916-samsung-a5u-eur ./linux
 cargo xtask kernel exynos/exynos7870-j7xelte ~/tmp/linux-pocketboot-exynos7870
+cargo xtask kernel --podman qcom/msm8916-samsung-a5u-eur
 ```
 
 The kernel build uses `target/kernel/<vendor>/<device>` as `O=`, embeds a
@@ -70,8 +86,9 @@ existing cpio archive. Kernel configuration is assembled from
 
 Pinned kernel sources can be described with an inherited `[kernel-source]` table
 containing `remote` and `sha` fields. `cargo xtask kernel-src <vendor/device>`
-materializes that source under `target/kernel/src`; this is not wired into
-`cargo xtask kernel` yet.
+materializes that source under `target/kernel/src`. When `KERNEL_TREE` is omitted,
+`cargo xtask kernel` fetches or updates the configured source automatically before
+building, including when `--podman` is used.
 
 Once the kernel is built, package those artifacts as an Android boot image:
 
@@ -79,6 +96,7 @@ Once the kernel is built, package those artifacts as an Android boot image:
 cargo xtask bootimg qcom/sdm670-google-sargo
 cargo xtask bootimg qcom/msm8916-samsung-a5u-eur
 cargo xtask bootimg exynos/exynos7870-j7xelte
+cargo xtask bootimg --podman exynos/exynos7870-j7xelte
 ```
 
 Boot image packaging is device-specific and configured by the `[bootimg]` table

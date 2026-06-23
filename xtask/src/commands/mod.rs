@@ -6,6 +6,7 @@ pub(crate) mod cpio;
 pub(crate) mod kernel;
 pub(crate) mod kernel_prime;
 pub(crate) mod kernel_src;
+mod podman;
 pub(crate) mod preboot;
 pub(crate) mod qemu;
 

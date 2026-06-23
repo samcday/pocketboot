@@ -1,4 +1,5 @@
 use std::{
+    ffi::OsString,
     fs::{self, File},
     io::Write,
     path::{Path, PathBuf},
@@ -15,7 +16,7 @@ use super::{
     config::{self, BootImgConfig, DtbhConfig, PrebootConfig, QcdtConfig},
     ensure_file,
     kernel::{kernel_arch, kernel_dtb_stem},
-    target_dir, workspace_root,
+    podman, target_dir, workspace_root,
 };
 
 #[cfg(test)]
@@ -37,10 +38,26 @@ pub(crate) struct BootImgArgs {
     device: KernelDevice,
     #[arg(short, long, value_name = "PATH")]
     output: Option<PathBuf>,
+    #[arg(long)]
+    podman: bool,
 }
 
 pub(crate) fn run(args: BootImgArgs) -> Result<()> {
+    if args.podman {
+        return podman_bootimg(args);
+    }
     bootimg(args)
+}
+
+fn podman_bootimg(args: BootImgArgs) -> Result<()> {
+    let workspace_root = workspace_root()?;
+    let mut mapper = podman::PathMapper::new(&workspace_root)?;
+    let mut xtask_args = vec![OsString::from("bootimg"), OsString::from(args.device.id())];
+    if let Some(output) = args.output {
+        xtask_args.push(OsString::from("--output"));
+        xtask_args.push(mapper.map_output_path(&output)?.into_os_string());
+    }
+    podman::run_xtask(&workspace_root, xtask_args, mapper.into_mounts())
 }
 
 fn bootimg(args: BootImgArgs) -> Result<()> {

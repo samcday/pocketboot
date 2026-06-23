@@ -1,4 +1,5 @@
 use std::{
+    ffi::OsString,
     fs::{self, File},
     path::{Path, PathBuf},
     process::{Command, Stdio},
@@ -13,8 +14,8 @@ use super::{
     DEFAULT_KERNEL_ARCH, FeatureSet, KernelDevice, canonical_file,
     config::{self, CpioConfig, KernelConfig, SourceConfig},
     cpio::{DEFAULT_INITRD, DEFAULT_TARGET, build_initrd},
-    ensure_file, kconfig_string, kernel_tree, make_command_for_arch, parallel_jobs, run_command,
-    set_default_kernel_toolchain, target_dir, workspace_root,
+    ensure_file, kconfig_string, kernel_tree, make_command_for_arch, parallel_jobs, podman,
+    run_command, set_default_kernel_toolchain, target_dir, workspace_root,
 };
 
 #[derive(clap::Args, Debug)]
@@ -25,6 +26,8 @@ pub(crate) struct KernelArgs {
     kernel_tree: Option<PathBuf>,
     #[arg(long, value_name = "PATH")]
     initrd: Option<PathBuf>,
+    #[arg(long)]
+    podman: bool,
 }
 
 #[derive(Debug)]
@@ -70,7 +73,44 @@ struct KernelConfigFile {
 const KERNEL_CONFIG_RECIPE_VERSION: u32 = 1;
 
 pub(crate) fn run(args: KernelArgs) -> Result<()> {
+    if args.podman {
+        return podman_kernel(args);
+    }
     kernel(args)
+}
+
+fn podman_kernel(args: KernelArgs) -> Result<()> {
+    let KernelArgs {
+        device,
+        kernel_tree: kernel_tree_arg,
+        initrd,
+        podman: _,
+    } = args;
+    let workspace_root = workspace_root()?;
+    let mut mapper = podman::PathMapper::new(&workspace_root)?;
+    let kernel_tree = match kernel_tree_arg {
+        Some(kernel_tree_arg) => kernel_tree(&kernel_tree_arg)?,
+        None => {
+            let tree = super::kernel_src::ensure_device_kernel_source(&workspace_root, &device)?;
+            println!("kernel source {}", tree.path.display());
+            kernel_tree(&tree.path)?
+        }
+    };
+    let kernel_tree = mapper.map_existing_dir(&kernel_tree, "kernel tree")?;
+    let initrd = initrd
+        .map(|initrd| mapper.map_existing_file(&initrd, "initrd cpio"))
+        .transpose()?;
+
+    let mut xtask_args = vec![
+        OsString::from("kernel"),
+        OsString::from(device.id()),
+        kernel_tree.into_os_string(),
+    ];
+    if let Some(initrd) = initrd {
+        xtask_args.push(OsString::from("--initrd"));
+        xtask_args.push(initrd.into_os_string());
+    }
+    podman::run_xtask(&workspace_root, xtask_args, mapper.into_mounts())
 }
 
 fn kernel(args: KernelArgs) -> Result<()> {
@@ -78,6 +118,7 @@ fn kernel(args: KernelArgs) -> Result<()> {
         device,
         kernel_tree: kernel_tree_arg,
         initrd,
+        podman: _,
     } = args;
     let workspace_root = workspace_root()?;
     let kernel_tree = match kernel_tree_arg {

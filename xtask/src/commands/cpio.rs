@@ -1,5 +1,6 @@
 use std::{
     env,
+    ffi::OsString,
     fs::{self, File},
     io::Write,
     os::unix::{ffi::OsStrExt, fs::PermissionsExt},
@@ -12,7 +13,7 @@ use crate::Result;
 use super::{
     FeatureSet,
     busybox::{BusyBoxInstall, build as build_busybox},
-    feature_set, target_dir, workspace_root,
+    feature_set, podman, target_dir, workspace_root,
 };
 
 pub(super) const DEFAULT_TARGET: &str = "aarch64-unknown-linux-musl";
@@ -30,12 +31,42 @@ pub(crate) struct CpioArgs {
     busybox: bool,
     #[arg(long, value_name = "FEATURES")]
     features: Vec<String>,
+    #[arg(long)]
+    podman: bool,
     #[arg(value_name = "OUTPUT")]
     positional_output: Option<PathBuf>,
 }
 
 pub(crate) fn run(args: CpioArgs) -> Result<()> {
+    if args.podman {
+        return podman_cpio(args);
+    }
     cpio(args)
+}
+
+fn podman_cpio(args: CpioArgs) -> Result<()> {
+    let workspace_root = workspace_root()?;
+    let mut mapper = podman::PathMapper::new(&workspace_root)?;
+    let mut xtask_args = vec![
+        OsString::from("cpio"),
+        OsString::from("--target"),
+        OsString::from(args.target),
+    ];
+    if !args.busybox {
+        xtask_args.push(OsString::from("--no-busybox"));
+    }
+    for feature in args.features {
+        xtask_args.push(OsString::from("--features"));
+        xtask_args.push(OsString::from(feature));
+    }
+    if let Some(output) = args.output {
+        xtask_args.push(OsString::from("--output"));
+        xtask_args.push(mapper.map_output_path(&output)?.into_os_string());
+    }
+    if let Some(output) = args.positional_output {
+        xtask_args.push(mapper.map_output_path(&output)?.into_os_string());
+    }
+    podman::run_xtask(&workspace_root, xtask_args, mapper.into_mounts())
 }
 
 fn cpio(args: CpioArgs) -> Result<()> {
