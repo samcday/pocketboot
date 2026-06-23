@@ -6,6 +6,7 @@ use super::{
     KernelDevice,
     config::{self, KernelSource, KernelSourceScope},
     cpio::DEFAULT_TARGET,
+    preboot::DEFAULT_TARGET as PREBOOT_TARGET,
     workspace_root,
 };
 
@@ -40,7 +41,7 @@ struct DeviceJob {
     device: String,
     source_id: String,
     source: KernelSource,
-    cpio_target: String,
+    rust_targets: String,
     bootimg: bool,
     prime_id: Option<String>,
 }
@@ -143,6 +144,16 @@ fn kernel_ci_plan(workspace_root: &Path) -> Result<KernelCiPlan> {
         };
 
         let device_id = device.id();
+        let cpio_target = device_config
+            .cpio
+            .target
+            .clone()
+            .unwrap_or_else(|| DEFAULT_TARGET.to_string());
+        let preboot = device_config
+            .bootimg
+            .as_ref()
+            .and_then(|bootimg| bootimg.preboot.as_ref())
+            .is_some();
         devices.push(DeviceJob {
             id: format!("kernel-{}", sanitize(&device_id)),
             name: device_id.clone(),
@@ -150,10 +161,7 @@ fn kernel_ci_plan(workspace_root: &Path) -> Result<KernelCiPlan> {
             device: device_id,
             source_id,
             source,
-            cpio_target: device_config
-                .cpio
-                .target
-                .unwrap_or_else(|| DEFAULT_TARGET.to_string()),
+            rust_targets: rust_targets(&cpio_target, preboot),
             bootimg: device_config.bootimg.is_some(),
             prime_id,
         });
@@ -163,6 +171,14 @@ fn kernel_ci_plan(workspace_root: &Path) -> Result<KernelCiPlan> {
         primes: primes.into_values().collect(),
         devices,
     })
+}
+
+fn rust_targets(cpio_target: &str, preboot: bool) -> String {
+    if preboot && cpio_target != PREBOOT_TARGET {
+        format!("{cpio_target},{PREBOOT_TARGET}")
+    } else {
+        cpio_target.to_string()
+    }
 }
 
 fn prime_job(source: &KernelSource) -> Result<PrimeJob> {
@@ -239,12 +255,12 @@ fn write_device_job(output: &mut String, device: &DeviceJob) {
     output.push_str("        uses: actions-rust-lang/setup-rust-toolchain@v1\n");
     output.push_str("        with:\n");
     output.push_str("          components: rust-src,rustfmt\n");
-    writeln!(output, "          target: {}", device.cpio_target).unwrap();
+    writeln!(output, "          target: {}", device.rust_targets).unwrap();
     output.push_str("          rustflags: \"\"\n");
     writeln!(
         output,
         "          cache-shared-key: pocketboot-kernel-{}-df-${{{{ hashFiles('.github/Dockerfile') }}}}",
-        sanitize(&device.cpio_target)
+        sanitize(&device.rust_targets)
     )
     .unwrap();
     output.push_str("          cache-bin: false\n");

@@ -220,9 +220,9 @@ jobs:
         uses: actions-rust-lang/setup-rust-toolchain@v1
         with:
           components: rust-src,rustfmt
-          target: aarch64-unknown-linux-musl
+          target: aarch64-unknown-linux-musl,aarch64-unknown-none
           rustflags: ""
-          cache-shared-key: pocketboot-kernel-aarch64-unknown-linux-musl-df-${{ hashFiles('.github/Dockerfile') }}
+          cache-shared-key: pocketboot-kernel-aarch64-unknown-linux-musl-aarch64-unknown-none-df-${{ hashFiles('.github/Dockerfile') }}
           cache-bin: false
           cache-on-failure: true
       - name: Restore device or source ccache

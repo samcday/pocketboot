@@ -29,7 +29,7 @@ RUN set -eux; \
     rm -rf /var/lib/apt/lists/*
 
 RUN set -eux; \
-    rustup target add aarch64-unknown-linux-musl armv7-unknown-linux-musleabihf; \
+    rustup target add aarch64-unknown-linux-musl aarch64-unknown-none armv7-unknown-linux-musleabihf; \
     rustup component add rust-src rustfmt; \
     cargo install --locked bindgen-cli; \
     rustc --version; \
