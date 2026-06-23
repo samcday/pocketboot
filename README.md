@@ -46,11 +46,11 @@ installed as `/init`.
 
 By default, the initrd also includes BusyBox built from the official 1.38.0
 source release with applet symlinks installed under `/bin`, `/sbin`, `/usr/bin`
-and `/usr/sbin`. The default target expects `aarch64-linux-musl-gcc`; set
-`BUSYBOX_CC` or `BUSYBOX_CROSS_COMPILE` to use another static libc-capable target
-C toolchain, or pass `--no-busybox` to build only the Rust `/init`. BusyBox is
-cached under `target/busybox`; use `cargo xtask busybox` to build it without
-creating an initrd.
+and `/usr/sbin`. The known musl targets use the matching `*-linux-musl*-gcc`
+wrapper by default; set `BUSYBOX_CC` or `BUSYBOX_CROSS_COMPILE` to use another
+static libc-capable target C toolchain, or pass `--no-busybox` to build only the
+Rust `/init`. BusyBox is cached under `target/busybox`; use `cargo xtask busybox`
+to build it without creating an initrd.
 
 To build a pocketboot kernel for a supported device, pass the canonical arm64
 DTB path without the `.dtb` suffix and a kernel tree:

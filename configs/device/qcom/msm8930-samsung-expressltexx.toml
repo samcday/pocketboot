@@ -3,9 +3,6 @@ name = "Samsung Galaxy Express GT-I8730"
 [kernel]
 dtb_stem = "qcom-msm8930-samsung-expressltexx"
 
-[features]
-busybox = false
-
 [cpio]
 target = "armv7-unknown-linux-musleabihf"
 

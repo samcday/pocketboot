@@ -1,8 +1,5 @@
 name = "Sony Xperia M2 (eagle)"
 
-[features]
-busybox = false
-
 [cpio]
 target = "armv7-unknown-linux-musleabihf"
 
