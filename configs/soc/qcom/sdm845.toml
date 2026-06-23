@@ -1,5 +1,10 @@
 name = "Qualcomm SDM845"
 
+[kernel-source]
+remote = "https://github.com/samcday/linux.git"
+# https://github.com/samcday/linux/tree/pocketboot/sdm845
+sha = "eff9f2f3acf7429d36e002c822252a96de390c31"
+
 [kconfig]
 # Platform sizing
 ARCH_QCOM = true

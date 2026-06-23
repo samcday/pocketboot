@@ -1,5 +1,10 @@
 name = "Samsung Exynos 7870"
 
+[kernel-source]
+remote = "https://github.com/samcday/linux.git"
+# https://github.com/samcday/linux/tree/pocketboot/exynos7870
+sha = "124f59ceb29a9313306d54f1d1051daf4907e0a5"
+
 [kconfig]
 # Platform sizing
 ARCH_EXYNOS = true
