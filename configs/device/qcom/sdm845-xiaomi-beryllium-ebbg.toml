@@ -1,0 +1,45 @@
+name = "Xiaomi Pocophone F1 (beryllium)"
+
+[kconfig]
+# Buttons and input core
+INPUT = true
+INPUT_EVDEV = true
+INPUT_KEYBOARD = true
+INPUT_MISC = true
+INPUT_TOUCHSCREEN = true
+KEYBOARD_GPIO = true
+INPUT_PM8941_PWRKEY = true
+
+# EBBG variant touchscreen: focaltech,ft8719
+TOUCHSCREEN_EDT_FT5X06 = true
+
+# Tianma variant touchscreen: novatek,nt36672a-ts
+TOUCHSCREEN_NOVATEK_NVT_TS = true
+
+# Board GPIO-controlled rails
+REGULATOR_FIXED_VOLTAGE = true
+
+# Touchscreen/display bias rails shared by EBBG and Tianma
+REGULATOR_QCOM_LABIBB = true
+
+# Battery, fuel gauge and PMI8998 charger
+POWER_SUPPLY = true
+BATTERY_PMI8998_FG = true
+IIO = true
+QCOM_SPMI_RRADC = true
+QCOM_SPMI_ADC5 = true
+CHARGER_QCOM_SMB2 = true
+
+# USB
+PHY_QCOM_QMP_COMBO = true
+
+[bootimg]
+header_version = 0
+page_size = 4096
+base = 0x0
+kernel_offset = 0x00008000
+ramdisk_offset = 0x01000000
+second_offset = 0x00f00000
+tags_offset = 0x00000100
+cmdline = ""
+append_dtb = true
