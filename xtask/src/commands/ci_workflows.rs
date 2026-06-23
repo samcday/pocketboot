@@ -121,10 +121,10 @@ fn kernel_ci_plan(workspace_root: &Path) -> Result<KernelCiPlan> {
         let Some(source) = device_config.kernel_source.clone() else {
             continue;
         };
-        let source_id = source_id(&source, &device);
+        let source_id = sanitize(&source.identity.id);
         let prime_id = match source.scope {
             KernelSourceScope::Default | KernelSourceScope::Soc => {
-                let prime = prime_job(&source, &device)?;
+                let prime = prime_job(&source)?;
                 let prime_id = prime.id.clone();
                 match primes.get(&prime_id) {
                     Some(existing) if existing.source != source => {
@@ -165,36 +165,25 @@ fn kernel_ci_plan(workspace_root: &Path) -> Result<KernelCiPlan> {
     })
 }
 
-fn prime_job(source: &KernelSource, device: &KernelDevice) -> Result<PrimeJob> {
+fn prime_job(source: &KernelSource) -> Result<PrimeJob> {
     match source.scope {
         KernelSourceScope::Default => Ok(PrimeJob {
             id: "prime-default".to_string(),
-            cache_id: "default".to_string(),
-            name: "default devices prime".to_string(),
-            target: "default".to_string(),
+            cache_id: sanitize(&source.identity.id),
+            name: format!("{} prime", source.identity.label),
+            target: source.identity.id.clone(),
             source: source.clone(),
         }),
-        KernelSourceScope::Soc => {
-            let target = format!("{}/{}", device.vendor, device.soc);
-            Ok(PrimeJob {
-                id: format!("prime-{}", sanitize(&target)),
-                cache_id: sanitize(&target),
-                name: format!("{target} devices prime"),
-                target,
-                source: source.clone(),
-            })
-        }
+        KernelSourceScope::Soc => Ok(PrimeJob {
+            id: format!("prime-{}", sanitize(&source.identity.id)),
+            cache_id: sanitize(&source.identity.id),
+            name: format!("{} prime", source.identity.label),
+            target: source.identity.id.clone(),
+            source: source.clone(),
+        }),
         KernelSourceScope::Device => {
             Err("device-scoped sources do not have prime jobs".to_string())
         }
-    }
-}
-
-fn source_id(source: &KernelSource, device: &KernelDevice) -> String {
-    match source.scope {
-        KernelSourceScope::Default => "default".to_string(),
-        KernelSourceScope::Soc => sanitize(&format!("{}/{}", device.vendor, device.soc)),
-        KernelSourceScope::Device => sanitize(&device.id()),
     }
 }
 
@@ -215,6 +204,7 @@ fn write_prime_job(output: &mut String, prime: &PrimeJob) {
     write_checkout_step(output);
     write_restore_ccache_step(
         output,
+        "Restore source ccache",
         &source_cache_key(&prime.cache_id, &prime.source),
         None,
     );
@@ -227,7 +217,11 @@ fn write_prime_job(output: &mut String, prime: &PrimeJob) {
     )
     .unwrap();
     write_show_ccache_step(output);
-    write_save_ccache_step(output, &source_cache_key(&prime.cache_id, &prime.source));
+    write_save_ccache_step(
+        output,
+        "Save source ccache for device jobs",
+        &source_cache_key(&prime.cache_id, &prime.source),
+    );
 }
 
 fn write_device_job(output: &mut String, device: &DeviceJob) {
@@ -257,7 +251,12 @@ fn write_device_job(output: &mut String, device: &DeviceJob) {
     output.push_str("          cache-on-failure: true\n");
     let device_key = device_cache_key(device);
     let source_key = source_cache_key(&device.source_id, &device.source);
-    write_restore_ccache_step(output, &device_key, Some(&source_key));
+    write_restore_ccache_step(
+        output,
+        "Restore device or source ccache",
+        &device_key,
+        Some(&source_key),
+    );
     write_configure_ccache_step(output);
     output.push_str("      - name: Build kernel and boot image\n");
     output.push_str("        run: |\n");
@@ -276,7 +275,7 @@ fn write_device_job(output: &mut String, device: &DeviceJob) {
         .unwrap();
     }
     write_show_ccache_step(output);
-    write_save_ccache_step(output, &device_key);
+    write_save_ccache_step(output, "Save device ccache", &device_key);
     output.push_str("      - name: Upload boot artifacts\n");
     output.push_str("        uses: actions/upload-artifact@v4\n");
     output.push_str("        with:\n");
@@ -352,8 +351,8 @@ fn write_checkout_step(output: &mut String) {
     output.push_str("          persist-credentials: false\n");
 }
 
-fn write_restore_ccache_step(output: &mut String, key: &str, fallback: Option<&str>) {
-    output.push_str("      - name: Restore kernel ccache\n");
+fn write_restore_ccache_step(output: &mut String, name: &str, key: &str, fallback: Option<&str>) {
+    writeln!(output, "      - name: {name}").unwrap();
     output.push_str("        uses: actions/cache/restore@v4\n");
     output.push_str("        with:\n");
     output.push_str("          path: target/ccache\n");
@@ -381,8 +380,8 @@ fn write_show_ccache_step(output: &mut String) {
     output.push_str("        run: ccache --show-stats\n");
 }
 
-fn write_save_ccache_step(output: &mut String, key: &str) {
-    output.push_str("      - name: Save kernel ccache\n");
+fn write_save_ccache_step(output: &mut String, name: &str, key: &str) {
+    writeln!(output, "      - name: {name}").unwrap();
     output.push_str("        if: always()\n");
     output.push_str("        uses: actions/cache/save@v4\n");
     output.push_str("        with:\n");

@@ -79,19 +79,14 @@ fn kernel_prime(args: KernelPrimeArgs) -> Result<()> {
     let kernel_tree = match args.kernel_tree {
         Some(kernel_tree_arg) => kernel_tree(&kernel_tree_arg)?,
         None => {
-            let tree = kernel_src::ensure_named_kernel_source(
-                &workspace_root,
-                &args.target.name,
-                source_tree_path(&args.target),
-                source,
-            )?;
+            let tree = kernel_src::ensure_source_kernel_source(&workspace_root, source)?;
             println!("kernel source {}", tree.path.display());
             kernel_tree(&tree.path)?
         }
     };
 
     let build =
-        kernel::build_prime_kernel(&workspace_root, &kernel_tree, &args.target.id(), &config)?;
+        kernel::build_prime_kernel(&workspace_root, &kernel_tree, &source.identity.id, &config)?;
     println!("image {}", build.image.display());
     println!("config {}", build.config.display());
     Ok(())
@@ -104,12 +99,5 @@ fn load_prime_config(
     match &target.vendor {
         Some(vendor) => config::load_soc_config(workspace_root, vendor, &target.name),
         None => config::load_default_config(workspace_root),
-    }
-}
-
-fn source_tree_path(target: &KernelPrimeTarget) -> PathBuf {
-    match &target.vendor {
-        Some(_) => PathBuf::from(&target.name),
-        None => PathBuf::from("pocketboot"),
     }
 }
