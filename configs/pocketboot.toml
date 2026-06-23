@@ -72,6 +72,11 @@ DEBUG_BUGVERBOSE = true
 KALLSYMS = true
 STACKTRACE = true
 
+# Persistent crash logs from bootloader/previous-kernel ramoops regions
+PSTORE = true
+PSTORE_RAM = true
+PSTORE_COMPRESS = true
+
 # magic sysrq for quick reboots over UART
 MAGIC_SYSRQ = true
 MAGIC_SYSRQ_SERIAL = true
@@ -88,6 +93,7 @@ DRM_PANIC_SCREEN_QR_CODE = true
 DRM_PANIC_SCREEN = { string = "qr_code" }
 
 # filesystem support for bootflows
+MISC_FILESYSTEMS = true
 MSDOS_PARTITION = true
 EFI_PARTITION = true
 FAT_FS = true
@@ -99,4 +105,3 @@ BLK_DEV = true
 BLK_DEV_LOOP = true
 EXT4_FS = true
 EXT4_USE_FOR_EXT2 = true
-
