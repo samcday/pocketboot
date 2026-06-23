@@ -90,6 +90,7 @@ DRM = true
 DRM_SIMPLEDRM = true
 DRM_PANIC = true
 DRM_PANIC_SCREEN_QR_CODE = true
+DRM_PANIC_SCREEN_QR_CODE_URL = { string = "https://drm-panic.fedoraproject.org#" }
 DRM_PANIC_SCREEN = { string = "qr_code" }
 
 # filesystem support for bootflows
