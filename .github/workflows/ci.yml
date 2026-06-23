@@ -84,11 +84,14 @@ jobs:
           echo "The CI Image workflow may still be running, or this PR may need a ci-ok label."
           exit 1
 
-  generated-workflows:
-    name: Generated workflows
+  ci-matrix:
+    name: CI matrix
     runs-on: ubuntu-latest
     timeout-minutes: 10
     needs: ci-image
+    outputs:
+      matrix: ${{ steps.matrix.outputs.matrix }}
+      has_builds: ${{ steps.matrix.outputs.has_builds }}
     container:
       image: ${{ needs.ci-image.outputs.image }}
       credentials:
@@ -103,15 +106,101 @@ jobs:
           ref: ${{ github.event.pull_request.head.sha || github.sha }}
           persist-credentials: false
 
-      - name: Check generated workflows
-        run: cargo xtask ci-workflows --check
+      - name: Generate CI matrix
+        id: matrix
+        run: |
+          matrix="$(cargo xtask ci-matrix)"
+          has_builds="$(python3 -c 'import json, sys; print("true" if json.loads(sys.argv[1])["include"] else "false")' "$matrix")"
+          echo "$matrix"
+          {
+            echo 'matrix<<EOF'
+            echo "$matrix"
+            echo 'EOF'
+            echo "has_builds=${has_builds}"
+          } >> "$GITHUB_OUTPUT"
 
-  kernel-ci:
-    name: Kernel CI
+  kernel-bootimg:
+    name: ${{ matrix.name }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
     needs:
       - ci-image
-      - generated-workflows
-    uses: ./.github/workflows/kernel-ci.generated.yml
-    with:
+      - ci-matrix
+    if: needs.ci-matrix.outputs.has_builds == 'true'
+    container:
       image: ${{ needs.ci-image.outputs.image }}
-    secrets: inherit
+      credentials:
+        username: ${{ github.actor }}
+        password: ${{ secrets.GITHUB_TOKEN }}
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJson(needs.ci-matrix.outputs.matrix) }}
+    env:
+      CCACHE_COMPILERCHECK: content
+      CCACHE_MAXSIZE: 2G
+
+    steps:
+      - name: Checkout pocketboot
+        uses: actions/checkout@v7
+        with:
+          repository: ${{ github.event.pull_request.head.repo.full_name || github.repository }}
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+
+      - name: Set up Rust cache
+        uses: actions-rust-lang/setup-rust-toolchain@v1
+        with:
+          components: rust-src,rustfmt
+          target: ${{ matrix.rust_targets }}
+          rustflags: ""
+          cache-shared-key: pocketboot-kernel-${{ matrix.rust_cache }}-df-${{ hashFiles('.github/Dockerfile') }}
+          cache-bin: false
+          cache-on-failure: true
+
+      - name: Set ccache environment
+        run: |
+          echo "CCACHE_BASEDIR=$GITHUB_WORKSPACE" >> "$GITHUB_ENV"
+          echo "CCACHE_DIR=$GITHUB_WORKSPACE/target/ccache" >> "$GITHUB_ENV"
+
+      - name: Restore kernel ccache
+        uses: actions/cache/restore@v5
+        with:
+          path: target/ccache
+          key: ${{ runner.os }}-kernel-ccache-${{ matrix.cache }}-${{ matrix.sha }}-${{ hashFiles('.github/Dockerfile') }}-${{ github.run_id }}-${{ github.run_attempt }}
+          restore-keys: |
+            ${{ runner.os }}-kernel-ccache-${{ matrix.cache }}-${{ matrix.sha }}-${{ hashFiles('.github/Dockerfile') }}
+            ${{ runner.os }}-kernel-ccache-${{ matrix.cache }}-${{ matrix.sha }}
+
+      - name: Configure ccache
+        run: |
+          ccache --set-config=max_size="$CCACHE_MAXSIZE"
+          ccache --zero-stats
+
+      - name: Build kernel and boot image
+        env:
+          DEVICE: ${{ matrix.device }}
+          BOOTIMG: ${{ matrix.bootimg }}
+        run: |
+          cargo xtask kernel "$DEVICE"
+          if [ "$BOOTIMG" = "true" ]; then
+            cargo xtask bootimg "$DEVICE"
+          fi
+
+      - name: Show ccache stats
+        if: always()
+        run: ccache --show-stats
+
+      - name: Save kernel ccache
+        if: always()
+        uses: actions/cache/save@v5
+        with:
+          path: target/ccache
+          key: ${{ runner.os }}-kernel-ccache-${{ matrix.cache }}-${{ matrix.sha }}-${{ hashFiles('.github/Dockerfile') }}-${{ github.run_id }}-${{ github.run_attempt }}
+
+      - name: Upload boot image
+        if: matrix.bootimg
+        uses: actions/upload-artifact@v7
+        with:
+          name: ${{ matrix.artifact }}
+          path: target/kernel/${{ matrix.device }}/boot.img
+          if-no-files-found: error
