@@ -342,7 +342,7 @@ fn write_kernel_env(output: &mut String) {
 
 fn write_checkout_step(output: &mut String) {
     output.push_str("      - name: Checkout pocketboot\n");
-    output.push_str("        uses: actions/checkout@v4\n");
+    output.push_str("        uses: actions/checkout@v7\n");
     output.push_str("        with:\n");
     output.push_str(
         "          repository: ${{ github.event.pull_request.head.repo.full_name || github.repository }}\n",
@@ -353,7 +353,7 @@ fn write_checkout_step(output: &mut String) {
 
 fn write_restore_ccache_step(output: &mut String, name: &str, key: &str, fallback: Option<&str>) {
     writeln!(output, "      - name: {name}").unwrap();
-    output.push_str("        uses: actions/cache/restore@v4\n");
+    output.push_str("        uses: actions/cache/restore@v5\n");
     output.push_str("        with:\n");
     output.push_str("          path: target/ccache\n");
     writeln!(output, "          key: {key}").unwrap();
@@ -383,7 +383,7 @@ fn write_show_ccache_step(output: &mut String) {
 fn write_save_ccache_step(output: &mut String, name: &str, key: &str) {
     writeln!(output, "      - name: {name}").unwrap();
     output.push_str("        if: always()\n");
-    output.push_str("        uses: actions/cache/save@v4\n");
+    output.push_str("        uses: actions/cache/save@v5\n");
     output.push_str("        with:\n");
     output.push_str("          path: target/ccache\n");
     writeln!(output, "          key: {key}").unwrap();

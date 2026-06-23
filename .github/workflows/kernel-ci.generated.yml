@@ -33,13 +33,13 @@ jobs:
       HOSTCC: ccache gcc
     steps:
       - name: Checkout pocketboot
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           repository: ${{ github.event.pull_request.head.repo.full_name || github.repository }}
           ref: ${{ github.event.pull_request.head.sha || github.sha }}
           persist-credentials: false
       - name: Restore source ccache
-        uses: actions/cache/restore@v4
+        uses: actions/cache/restore@v5
         with:
           path: target/ccache
           key: ${{ runner.os }}-kernel-ccache-source-qcom-msm8916-d87323486b79a31b9b25eb6fe30f1b503f142ff2-${{ hashFiles('.github/Dockerfile') }}-${{ github.run_id }}-${{ github.run_attempt }}
@@ -56,7 +56,7 @@ jobs:
         run: ccache --show-stats
       - name: Save source ccache for device jobs
         if: always()
-        uses: actions/cache/save@v4
+        uses: actions/cache/save@v5
         with:
           path: target/ccache
           key: ${{ runner.os }}-kernel-ccache-source-qcom-msm8916-d87323486b79a31b9b25eb6fe30f1b503f142ff2-${{ hashFiles('.github/Dockerfile') }}-${{ github.run_id }}-${{ github.run_attempt }}
@@ -77,13 +77,13 @@ jobs:
       HOSTCC: ccache gcc
     steps:
       - name: Checkout pocketboot
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           repository: ${{ github.event.pull_request.head.repo.full_name || github.repository }}
           ref: ${{ github.event.pull_request.head.sha || github.sha }}
           persist-credentials: false
       - name: Restore source ccache
-        uses: actions/cache/restore@v4
+        uses: actions/cache/restore@v5
         with:
           path: target/ccache
           key: ${{ runner.os }}-kernel-ccache-source-qcom-msm8926-a98d1bed283a78ee1bc1e6c6b5654f7ee4e57ab8-${{ hashFiles('.github/Dockerfile') }}-${{ github.run_id }}-${{ github.run_attempt }}
@@ -100,7 +100,7 @@ jobs:
         run: ccache --show-stats
       - name: Save source ccache for device jobs
         if: always()
-        uses: actions/cache/save@v4
+        uses: actions/cache/save@v5
         with:
           path: target/ccache
           key: ${{ runner.os }}-kernel-ccache-source-qcom-msm8926-a98d1bed283a78ee1bc1e6c6b5654f7ee4e57ab8-${{ hashFiles('.github/Dockerfile') }}-${{ github.run_id }}-${{ github.run_attempt }}
@@ -123,7 +123,7 @@ jobs:
       HOSTCC: ccache gcc
     steps:
       - name: Checkout pocketboot
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           repository: ${{ github.event.pull_request.head.repo.full_name || github.repository }}
           ref: ${{ github.event.pull_request.head.sha || github.sha }}
@@ -138,7 +138,7 @@ jobs:
           cache-bin: false
           cache-on-failure: true
       - name: Restore device or source ccache
-        uses: actions/cache/restore@v4
+        uses: actions/cache/restore@v5
         with:
           path: target/ccache
           key: ${{ runner.os }}-kernel-ccache-device-kernel-qcom-apq8016-sbc-d87323486b79a31b9b25eb6fe30f1b503f142ff2-${{ hashFiles('.github/Dockerfile') }}-${{ github.run_id }}-${{ github.run_attempt }}
@@ -158,7 +158,7 @@ jobs:
         run: ccache --show-stats
       - name: Save device ccache
         if: always()
-        uses: actions/cache/save@v4
+        uses: actions/cache/save@v5
         with:
           path: target/ccache
           key: ${{ runner.os }}-kernel-ccache-device-kernel-qcom-apq8016-sbc-d87323486b79a31b9b25eb6fe30f1b503f142ff2-${{ hashFiles('.github/Dockerfile') }}-${{ github.run_id }}-${{ github.run_attempt }}
@@ -194,7 +194,7 @@ jobs:
       HOSTCC: ccache gcc
     steps:
       - name: Checkout pocketboot
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           repository: ${{ github.event.pull_request.head.repo.full_name || github.repository }}
           ref: ${{ github.event.pull_request.head.sha || github.sha }}
@@ -209,7 +209,7 @@ jobs:
           cache-bin: false
           cache-on-failure: true
       - name: Restore device or source ccache
-        uses: actions/cache/restore@v4
+        uses: actions/cache/restore@v5
         with:
           path: target/ccache
           key: ${{ runner.os }}-kernel-ccache-device-kernel-qcom-msm8916-samsung-a5u-eur-d87323486b79a31b9b25eb6fe30f1b503f142ff2-${{ hashFiles('.github/Dockerfile') }}-${{ github.run_id }}-${{ github.run_attempt }}
@@ -230,7 +230,7 @@ jobs:
         run: ccache --show-stats
       - name: Save device ccache
         if: always()
-        uses: actions/cache/save@v4
+        uses: actions/cache/save@v5
         with:
           path: target/ccache
           key: ${{ runner.os }}-kernel-ccache-device-kernel-qcom-msm8916-samsung-a5u-eur-d87323486b79a31b9b25eb6fe30f1b503f142ff2-${{ hashFiles('.github/Dockerfile') }}-${{ github.run_id }}-${{ github.run_attempt }}
@@ -266,7 +266,7 @@ jobs:
       HOSTCC: ccache gcc
     steps:
       - name: Checkout pocketboot
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           repository: ${{ github.event.pull_request.head.repo.full_name || github.repository }}
           ref: ${{ github.event.pull_request.head.sha || github.sha }}
@@ -281,7 +281,7 @@ jobs:
           cache-bin: false
           cache-on-failure: true
       - name: Restore device or source ccache
-        uses: actions/cache/restore@v4
+        uses: actions/cache/restore@v5
         with:
           path: target/ccache
           key: ${{ runner.os }}-kernel-ccache-device-kernel-qcom-msm8916-samsung-gt510-d87323486b79a31b9b25eb6fe30f1b503f142ff2-${{ hashFiles('.github/Dockerfile') }}-${{ github.run_id }}-${{ github.run_attempt }}
@@ -302,7 +302,7 @@ jobs:
         run: ccache --show-stats
       - name: Save device ccache
         if: always()
-        uses: actions/cache/save@v4
+        uses: actions/cache/save@v5
         with:
           path: target/ccache
           key: ${{ runner.os }}-kernel-ccache-device-kernel-qcom-msm8916-samsung-gt510-d87323486b79a31b9b25eb6fe30f1b503f142ff2-${{ hashFiles('.github/Dockerfile') }}-${{ github.run_id }}-${{ github.run_attempt }}
@@ -338,7 +338,7 @@ jobs:
       HOSTCC: ccache gcc
     steps:
       - name: Checkout pocketboot
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           repository: ${{ github.event.pull_request.head.repo.full_name || github.repository }}
           ref: ${{ github.event.pull_request.head.sha || github.sha }}
@@ -353,7 +353,7 @@ jobs:
           cache-bin: false
           cache-on-failure: true
       - name: Restore device or source ccache
-        uses: actions/cache/restore@v4
+        uses: actions/cache/restore@v5
         with:
           path: target/ccache
           key: ${{ runner.os }}-kernel-ccache-device-kernel-qcom-msm8926-sony-xperia-yukon-eagle-a98d1bed283a78ee1bc1e6c6b5654f7ee4e57ab8-${{ hashFiles('.github/Dockerfile') }}-${{ github.run_id }}-${{ github.run_attempt }}
@@ -374,7 +374,7 @@ jobs:
         run: ccache --show-stats
       - name: Save device ccache
         if: always()
-        uses: actions/cache/save@v4
+        uses: actions/cache/save@v5
         with:
           path: target/ccache
           key: ${{ runner.os }}-kernel-ccache-device-kernel-qcom-msm8926-sony-xperia-yukon-eagle-a98d1bed283a78ee1bc1e6c6b5654f7ee4e57ab8-${{ hashFiles('.github/Dockerfile') }}-${{ github.run_id }}-${{ github.run_attempt }}
