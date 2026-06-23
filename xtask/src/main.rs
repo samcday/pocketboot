@@ -39,11 +39,6 @@ enum XtaskCommand {
     #[command(about = "build a pocketboot kernel image for one device")]
     Kernel(commands::kernel::KernelArgs),
     #[command(
-        name = "kernel-matrix",
-        about = "emit the configured kernel build matrix as JSON"
-    )]
-    KernelMatrix(commands::kernel_matrix::KernelMatrixArgs),
-    #[command(
         name = "kernel-prime",
         about = "build a source-scope kernel to warm ccache"
     )]
@@ -67,7 +62,6 @@ fn run() -> Result<()> {
         XtaskCommand::Cpio(args) => commands::cpio::run(args),
         XtaskCommand::CiWorkflows(args) => commands::ci_workflows::run(args),
         XtaskCommand::Kernel(args) => commands::kernel::run(args),
-        XtaskCommand::KernelMatrix(args) => commands::kernel_matrix::run(args),
         XtaskCommand::KernelPrime(args) => commands::kernel_prime::run(args),
         XtaskCommand::KernelSrc(args) => commands::kernel_src::run(args),
         XtaskCommand::Preboot(args) => commands::preboot::run(args),
