@@ -252,7 +252,7 @@ jobs:
           path: target/ccache
           key: ${{ runner.os }}-kernel-ccache-device-kernel-exynos-exynos7870-j7xelte-124f59ceb29a9313306d54f1d1051daf4907e0a5-${{ hashFiles('.github/Dockerfile') }}-${{ github.run_id }}-${{ github.run_attempt }}
       - name: Upload boot artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: kernel-exynos-exynos7870-j7xelte
           path: |
@@ -323,7 +323,7 @@ jobs:
           path: target/ccache
           key: ${{ runner.os }}-kernel-ccache-device-kernel-qcom-apq8016-sbc-d87323486b79a31b9b25eb6fe30f1b503f142ff2-${{ hashFiles('.github/Dockerfile') }}-${{ github.run_id }}-${{ github.run_attempt }}
       - name: Upload boot artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: kernel-qcom-apq8016-sbc
           path: |
@@ -395,7 +395,7 @@ jobs:
           path: target/ccache
           key: ${{ runner.os }}-kernel-ccache-device-kernel-qcom-msm8916-samsung-a5u-eur-d87323486b79a31b9b25eb6fe30f1b503f142ff2-${{ hashFiles('.github/Dockerfile') }}-${{ github.run_id }}-${{ github.run_attempt }}
       - name: Upload boot artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: kernel-qcom-msm8916-samsung-a5u-eur
           path: |
@@ -467,7 +467,7 @@ jobs:
           path: target/ccache
           key: ${{ runner.os }}-kernel-ccache-device-kernel-qcom-msm8916-samsung-gt510-d87323486b79a31b9b25eb6fe30f1b503f142ff2-${{ hashFiles('.github/Dockerfile') }}-${{ github.run_id }}-${{ github.run_attempt }}
       - name: Upload boot artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: kernel-qcom-msm8916-samsung-gt510
           path: |
@@ -539,7 +539,7 @@ jobs:
           path: target/ccache
           key: ${{ runner.os }}-kernel-ccache-device-kernel-qcom-msm8926-sony-xperia-yukon-eagle-a98d1bed283a78ee1bc1e6c6b5654f7ee4e57ab8-${{ hashFiles('.github/Dockerfile') }}-${{ github.run_id }}-${{ github.run_attempt }}
       - name: Upload boot artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: kernel-qcom-msm8926-sony-xperia-yukon-eagle
           path: |
@@ -611,7 +611,7 @@ jobs:
           path: target/ccache
           key: ${{ runner.os }}-kernel-ccache-device-kernel-qcom-sdm845-oneplus-fajita-eff9f2f3acf7429d36e002c822252a96de390c31-${{ hashFiles('.github/Dockerfile') }}-${{ github.run_id }}-${{ github.run_attempt }}
       - name: Upload boot artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: kernel-qcom-sdm845-oneplus-fajita
           path: |

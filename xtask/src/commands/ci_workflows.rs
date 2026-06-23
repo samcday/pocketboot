@@ -293,7 +293,7 @@ fn write_device_job(output: &mut String, device: &DeviceJob) {
     write_show_ccache_step(output);
     write_save_ccache_step(output, "Save device ccache", &device_key);
     output.push_str("      - name: Upload boot artifacts\n");
-    output.push_str("        uses: actions/upload-artifact@v4\n");
+    output.push_str("        uses: actions/upload-artifact@v7\n");
     output.push_str("        with:\n");
     writeln!(output, "          name: {}", device.artifact).unwrap();
     output.push_str("          path: |\n");
