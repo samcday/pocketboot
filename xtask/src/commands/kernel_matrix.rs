@@ -6,7 +6,7 @@ use crate::Result;
 
 use super::{
     KernelDevice,
-    config::{self, KernelSource, KernelSourceScope},
+    config::{self, KernelSource},
     cpio::DEFAULT_TARGET,
     workspace_root,
 };
@@ -72,7 +72,7 @@ fn kernel_matrix(workspace_root: &Path) -> Result<KernelMatrix> {
             devices: Vec::new(),
             bootimg_devices: Vec::new(),
         });
-        push_unique_sorted(&mut group.labels, kernel_source_label(source, &device));
+        push_unique_sorted(&mut group.labels, source.identity.label.clone());
         push_unique_sorted(
             &mut group.cpio_targets,
             device_config
@@ -167,14 +167,6 @@ fn push_unique_sorted(values: &mut Vec<String>, value: String) {
     }
     values.push(value);
     values.sort();
-}
-
-fn kernel_source_label(source: &KernelSource, device: &KernelDevice) -> String {
-    match source.scope {
-        KernelSourceScope::Default => "default devices".to_string(),
-        KernelSourceScope::Soc => format!("{}/{} devices", device.vendor, device.soc),
-        KernelSourceScope::Device => device.id(),
-    }
 }
 
 fn sanitize(value: &str) -> String {

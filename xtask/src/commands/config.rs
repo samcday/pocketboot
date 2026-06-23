@@ -52,8 +52,17 @@ pub(super) enum KernelSourceScope {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(super) struct KernelSource {
     pub(super) scope: KernelSourceScope,
+    pub(super) identity: KernelSourceIdentity,
     pub(super) remote: String,
     pub(super) sha: String,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(super) struct KernelSourceIdentity {
+    pub(super) id: String,
+    pub(super) label: String,
+    pub(super) tree_name: String,
+    pub(super) tree_path: PathBuf,
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -188,6 +197,12 @@ struct ConfigLayer {
     bootimg: Option<BootImgConfig>,
 }
 
+struct ConfigLayerEntry {
+    scope: KernelSourceScope,
+    identity: KernelSourceIdentity,
+    layer: ConfigLayer,
+}
+
 #[derive(Clone, Debug, Default)]
 struct LayerKconfig {
     base: BTreeMap<String, KconfigValue>,
@@ -232,12 +247,24 @@ pub(super) fn load_device_config(
         .join(format!("{}.toml", device.stem));
 
     let common = load_config_layer(&common_path, "common pocketboot config")?;
-    let soc = load_config_layer(&soc_path, "SoC config")?;
+    let soc_layer = load_config_layer(&soc_path, "SoC config")?;
     let device_layer = load_config_layer(&device_path, "device config")?;
     let layers = [
-        (KernelSourceScope::Default, common),
-        (KernelSourceScope::Soc, soc),
-        (KernelSourceScope::Device, device_layer),
+        ConfigLayerEntry {
+            scope: KernelSourceScope::Default,
+            identity: default_kernel_source_identity(),
+            layer: common,
+        },
+        ConfigLayerEntry {
+            scope: KernelSourceScope::Soc,
+            identity: soc_kernel_source_identity(&soc_path, &device.vendor, &device.soc)?,
+            layer: soc_layer,
+        },
+        ConfigLayerEntry {
+            scope: KernelSourceScope::Device,
+            identity: device_kernel_source_identity(device),
+            layer: device_layer,
+        },
     ];
 
     let merged = merge_layers(&layers)?;
@@ -256,7 +283,11 @@ pub(super) fn load_device_config(
 pub(super) fn load_default_config(workspace_root: &Path) -> Result<SourceConfig> {
     let common_path = workspace_root.join("configs/pocketboot.toml");
     let common = load_config_layer(&common_path, "common pocketboot config")?;
-    let layers = [(KernelSourceScope::Default, common)];
+    let layers = [ConfigLayerEntry {
+        scope: KernelSourceScope::Default,
+        identity: default_kernel_source_identity(),
+        layer: common,
+    }];
     let merged = merge_layers(&layers)?;
 
     Ok(SourceConfig {
@@ -278,10 +309,18 @@ pub(super) fn load_soc_config(
         .join(format!("{soc}.toml"));
 
     let common = load_config_layer(&common_path, "common pocketboot config")?;
-    let soc = load_config_layer(&soc_path, "SoC config")?;
+    let soc_layer = load_config_layer(&soc_path, "SoC config")?;
     let layers = [
-        (KernelSourceScope::Default, common),
-        (KernelSourceScope::Soc, soc),
+        ConfigLayerEntry {
+            scope: KernelSourceScope::Default,
+            identity: default_kernel_source_identity(),
+            layer: common,
+        },
+        ConfigLayerEntry {
+            scope: KernelSourceScope::Soc,
+            identity: soc_kernel_source_identity(&soc_path, vendor, soc)?,
+            layer: soc_layer,
+        },
     ];
     let merged = merge_layers(&layers)?;
 
@@ -301,7 +340,7 @@ struct MergedConfig {
     kconfig: BTreeMap<String, KconfigValue>,
 }
 
-fn merge_layers(layers: &[(KernelSourceScope, ConfigLayer)]) -> Result<MergedConfig> {
+fn merge_layers(layers: &[ConfigLayerEntry]) -> Result<MergedConfig> {
     let enabled_features = merge_features(layers)?;
     let mut features = FeatureSet::default();
     for feature in &enabled_features {
@@ -313,17 +352,21 @@ fn merge_layers(layers: &[(KernelSourceScope, ConfigLayer)]) -> Result<MergedCon
     let mut cpio = CpioConfig::default();
     let mut bootimg = None;
     let mut kconfig = BTreeMap::new();
-    for (scope, layer) in layers {
-        if let Some(source) = &layer.kernel_source {
-            kernel_source = Some(parse_kernel_source(*scope, source)?);
+    for entry in layers {
+        if let Some(source) = &entry.layer.kernel_source {
+            kernel_source = Some(parse_kernel_source(
+                entry.scope,
+                entry.identity.clone(),
+                source,
+            )?);
         }
-        merge_kernel(&mut kernel, &layer.kernel);
-        merge_cpio(&mut cpio, &layer.cpio);
-        if let Some(layer_bootimg) = &layer.bootimg {
+        merge_kernel(&mut kernel, &entry.layer.kernel);
+        merge_cpio(&mut cpio, &entry.layer.cpio);
+        if let Some(layer_bootimg) = &entry.layer.bootimg {
             bootimg = Some(layer_bootimg.clone());
         }
 
-        let layer_kconfig = parse_kconfig_layer(layer)?;
+        let layer_kconfig = parse_kconfig_layer(&entry.layer)?;
         for (symbol, value) in layer_kconfig.base {
             kconfig.insert(symbol, value);
         }
@@ -353,10 +396,10 @@ fn load_config_layer(path: &Path, description: &str) -> Result<ConfigLayer> {
     toml::from_str(&contents).map_err(|err| format!("parse {}: {err}", path.display()))
 }
 
-fn merge_features(layers: &[(KernelSourceScope, ConfigLayer)]) -> Result<BTreeSet<String>> {
+fn merge_features(layers: &[ConfigLayerEntry]) -> Result<BTreeSet<String>> {
     let mut merged = BTreeMap::new();
-    for (_, layer) in layers {
-        for (feature, enabled) in &layer.features {
+    for entry in layers {
+        for (feature, enabled) in &entry.layer.features {
             validate_feature(feature)?;
             merged.insert(feature.clone(), *enabled);
         }
@@ -378,6 +421,7 @@ fn kconfig_contents(kconfig: &BTreeMap<String, KconfigValue>) -> Result<String> 
 
 fn parse_kernel_source(
     scope: KernelSourceScope,
+    identity: KernelSourceIdentity,
     source: &KernelSourceLayer,
 ) -> Result<KernelSource> {
     if source.remote.is_empty() {
@@ -395,9 +439,56 @@ fn parse_kernel_source(
 
     Ok(KernelSource {
         scope,
+        identity,
         remote: source.remote.clone(),
         sha: source.sha.clone(),
     })
+}
+
+fn default_kernel_source_identity() -> KernelSourceIdentity {
+    KernelSourceIdentity {
+        id: "default".to_string(),
+        label: "default devices".to_string(),
+        tree_name: "pocketboot".to_string(),
+        tree_path: PathBuf::from("pocketboot"),
+    }
+}
+
+fn soc_kernel_source_identity(
+    soc_path: &Path,
+    vendor: &str,
+    configured_soc: &str,
+) -> Result<KernelSourceIdentity> {
+    let soc = canonical_config_stem(soc_path)?.unwrap_or_else(|| configured_soc.to_string());
+    validate_feature(vendor)?;
+    validate_feature(&soc)?;
+    let id = format!("{vendor}/{soc}");
+    Ok(KernelSourceIdentity {
+        id: id.clone(),
+        label: format!("{id} devices"),
+        tree_name: soc.clone(),
+        tree_path: PathBuf::from(soc),
+    })
+}
+
+fn device_kernel_source_identity(device: &KernelDevice) -> KernelSourceIdentity {
+    let id = device.id();
+    KernelSourceIdentity {
+        id: id.clone(),
+        label: id,
+        tree_name: device.stem.clone(),
+        tree_path: PathBuf::from(&device.soc).join(&device.stem),
+    }
+}
+
+fn canonical_config_stem(path: &Path) -> Result<Option<String>> {
+    let canonical = fs::canonicalize(path)
+        .map_err(|err| format!("canonicalize config path {}: {err}", path.display()))?;
+    canonical
+        .file_stem()
+        .and_then(|stem| stem.to_str())
+        .map(|stem| Ok(stem.to_string()))
+        .transpose()
 }
 
 fn merge_kernel(merged: &mut KernelConfig, layer: &KernelConfig) {
@@ -645,6 +736,12 @@ mod tests {
             let config = load_device_config(&workspace_root, &device).unwrap();
             let kconfig = config.kconfig_contents().unwrap();
             assert!(kconfig.contains("CONFIG_BLK_DEV_INITRD=y"));
+            if device_id == "qcom/apq8016-sbc" {
+                assert_eq!(
+                    config.kernel_source.as_ref().unwrap().identity.id,
+                    "qcom/msm8916"
+                );
+            }
             if device_id == "qemu/aarch64-virt" {
                 assert!(config.features.contains("qemu"));
                 assert!(kconfig.contains("CONFIG_USBIP_VUDC=y"));

@@ -8,7 +8,7 @@ use crate::Result;
 
 use super::{
     KernelDevice,
-    config::{self, KernelSource, KernelSourceScope},
+    config::{self, KernelSource, KernelSourceIdentity},
     run_command, target_dir, workspace_root,
 };
 
@@ -16,12 +16,6 @@ use super::{
 pub(crate) struct KernelSrcArgs {
     #[arg(value_name = "VENDOR/DEVICE")]
     device: KernelDevice,
-}
-
-#[derive(Debug)]
-struct KernelSourceIdentity {
-    name: String,
-    path: PathBuf,
 }
 
 pub(super) struct KernelSourceTree {
@@ -62,12 +56,11 @@ pub(super) fn ensure_device_kernel_source(
             device.vendor, device.stem
         )
     })?;
-    let identity = kernel_source_identity(device, source);
     let source_tree = target_dir(workspace_root)
         .join("kernel")
         .join("src")
-        .join(&identity.path);
-    let status = ensure_kernel_source(&workspace_root, &source_tree, &identity, source)?;
+        .join(&source.identity.tree_path);
+    let status = ensure_kernel_source(&workspace_root, &source_tree, &source.identity, source)?;
 
     Ok(KernelSourceTree {
         path: source_tree,
@@ -76,44 +69,21 @@ pub(super) fn ensure_device_kernel_source(
     })
 }
 
-pub(super) fn ensure_named_kernel_source(
+pub(super) fn ensure_source_kernel_source(
     workspace_root: &Path,
-    name: &str,
-    path: PathBuf,
     source: &KernelSource,
 ) -> Result<KernelSourceTree> {
-    let identity = KernelSourceIdentity {
-        name: name.to_string(),
-        path,
-    };
     let source_tree = target_dir(workspace_root)
         .join("kernel")
         .join("src")
-        .join(&identity.path);
-    let status = ensure_kernel_source(&workspace_root, &source_tree, &identity, source)?;
+        .join(&source.identity.tree_path);
+    let status = ensure_kernel_source(&workspace_root, &source_tree, &source.identity, source)?;
 
     Ok(KernelSourceTree {
         path: source_tree,
         sha: source.sha.clone(),
         status,
     })
-}
-
-fn kernel_source_identity(device: &KernelDevice, source: &KernelSource) -> KernelSourceIdentity {
-    match source.scope {
-        KernelSourceScope::Default => KernelSourceIdentity {
-            name: "pocketboot".to_string(),
-            path: PathBuf::from("pocketboot"),
-        },
-        KernelSourceScope::Soc => KernelSourceIdentity {
-            name: device.soc.clone(),
-            path: PathBuf::from(&device.soc),
-        },
-        KernelSourceScope::Device => KernelSourceIdentity {
-            name: device.stem.clone(),
-            path: PathBuf::from(&device.soc).join(&device.stem),
-        },
-    }
 }
 
 fn ensure_kernel_source(
@@ -142,7 +112,7 @@ fn setup_worktree_source(
     identity: &KernelSourceIdentity,
     source: &KernelSource,
 ) -> Result<()> {
-    let remote_name = remote_name(&identity.name);
+    let remote_name = remote_name(&identity.tree_name);
     ensure_remote(repo, &remote_name, &source.remote, false)?;
     fetch_remote(repo, &remote_name, &source.sha)?;
 
