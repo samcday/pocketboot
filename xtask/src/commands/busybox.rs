@@ -15,11 +15,12 @@ use sha2::{Digest, Sha256};
 use crate::Result;
 
 use super::{
-    FeatureSet, ensure_file, feature_set, parallel_jobs, run_command, target_dir, workspace_root,
+    FeatureSet, ensure_file, feature_set, parallel_jobs, path_command_exists, run_command,
+    target_dir, workspace_root,
 };
 
 pub(super) const BUSYBOX_VERSION: &str = "1.38.0";
-const BUSYBOX_RECIPE_VERSION: u32 = 1;
+const BUSYBOX_RECIPE_VERSION: u32 = 2;
 const BUSYBOX_ARCHIVE_SHA256: &str =
     "34f9ea6ff8636f2c9241153b9114eefa9e65674a45318ae1ef95bb5f31c53bb2";
 const BUSYBOX_SOURCE_URL: &str = "https://busybox.net/downloads/busybox-1.38.0.tar.bz2";
@@ -434,6 +435,7 @@ fn ensure_busybox_source(archive: &Path, source_parent: &Path, source: &Path) ->
 fn configure_busybox(config: &Path, features: &FeatureSet) -> Result<()> {
     const ENABLED: &[&str] = &[
         "STATIC",
+        "LFS",
         "FEATURE_INSTALLER",
         "INSTALL_APPLET_SYMLINKS",
         "ASH",
@@ -713,7 +715,7 @@ fn busybox_make_command(source: &Path, build: &Path, target: &str) -> Command {
             value.push(busybox_cc(target));
             value
         });
-    if let Some(cflags) = busybox_cflags() {
+    if let Some(cflags) = busybox_cflags(target) {
         command.arg({
             let mut value = OsString::from("EXTRA_CFLAGS=");
             value.push(cflags);
@@ -733,8 +735,8 @@ fn ensure_busybox_toolchain(build: &Path, target: &str) -> Result<()> {
     .map_err(|err| format!("write {}: {err}", source.display()))?;
 
     let compiler = busybox_cc(target);
-    let cflags =
-        busybox_cflag_args().map_err(|err| busybox_toolchain_error(target, &compiler, err))?;
+    let cflags = busybox_cflag_args(target)
+        .map_err(|err| busybox_toolchain_error(target, &compiler, err))?;
     let mut command = Command::new(&compiler);
     command
         .arg("-Os")
@@ -768,12 +770,22 @@ fn busybox_toolchain_error(target: &str, compiler: &OsString, reason: impl AsRef
     )
 }
 
-fn busybox_cflags() -> Option<OsString> {
-    env::var_os("BUSYBOX_CFLAGS").filter(|value| !value.as_os_str().is_empty())
+fn busybox_cflags(target: &str) -> Option<OsString> {
+    env::var_os("BUSYBOX_CFLAGS")
+        .filter(|value| !value.as_os_str().is_empty())
+        .or_else(|| default_busybox_cflags(target).map(OsString::from))
 }
 
-fn busybox_cflag_args() -> Result<Vec<OsString>> {
-    let Some(cflags) = busybox_cflags() else {
+fn default_busybox_cflags(target: &str) -> Option<&'static str> {
+    match target {
+        "aarch64-unknown-linux-musl" => Some("-idirafter /usr/aarch64-linux-gnu/include"),
+        "armv7-unknown-linux-musleabihf" => Some("-idirafter /usr/arm-linux-gnueabihf/include"),
+        _ => None,
+    }
+}
+
+fn busybox_cflag_args(target: &str) -> Result<Vec<OsString>> {
+    let Some(cflags) = busybox_cflags(target) else {
         return Ok(Vec::new());
     };
     let cflags = cflags
@@ -786,6 +798,11 @@ fn busybox_cc(target: &str) -> OsString {
     if let Some(value) = env::var_os("BUSYBOX_CC") {
         return value;
     }
+    match target {
+        "aarch64-unknown-linux-musl" => return "aarch64-linux-musl-gcc".into(),
+        "armv7-unknown-linux-musleabihf" => return "arm-linux-musleabihf-gcc".into(),
+        _ => {}
+    }
     let mut value = busybox_cross_compile(target);
     value.push("gcc");
     value
@@ -796,9 +813,26 @@ fn busybox_cross_compile(target: &str) -> OsString {
         return value;
     }
     match target {
-        "aarch64-unknown-linux-musl" => "aarch64-linux-musl-".into(),
+        "aarch64-unknown-linux-musl" => {
+            default_busybox_cross_compile("aarch64-linux-musl-", "aarch64-linux-gnu-")
+        }
+        "armv7-unknown-linux-musleabihf" => {
+            default_busybox_cross_compile("arm-linux-musleabihf-", "arm-linux-gnueabihf-")
+        }
         _ => env::var_os("CROSS_COMPILE").unwrap_or_default(),
     }
+}
+
+fn default_busybox_cross_compile(musl_prefix: &str, gnu_prefix: &str) -> OsString {
+    if prefixed_command_exists(musl_prefix, "strip") {
+        musl_prefix.into()
+    } else {
+        gnu_prefix.into()
+    }
+}
+
+fn prefixed_command_exists(prefix: &str, name: &str) -> bool {
+    path_command_exists(&format!("{prefix}{name}"))
 }
 
 fn strip_busybox(binary: &Path, target: &str) -> Result<()> {
