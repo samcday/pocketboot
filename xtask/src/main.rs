@@ -27,19 +27,19 @@ struct Cli {
 
 #[derive(Debug, Subcommand)]
 enum XtaskCommand {
+    #[command(about = "build all configured pocketboot artifacts for one device")]
+    Build(commands::build::BuildArgs),
     #[command(about = "build BusyBox for initrd use")]
     Busybox(commands::busybox::BusyBoxArgs),
-    #[command(about = "build pocketboot and create an initrd cpio")]
-    Cpio(commands::cpio::CpioArgs),
+    #[command(about = "build pocketboot and create a device initrd cpio")]
+    Initrd(commands::cpio::InitrdArgs),
     #[command(name = "ci-matrix", about = "emit the configured CI matrix as JSON")]
     CiMatrix(commands::ci_matrix::CiMatrixArgs),
-    #[command(about = "build a pocketboot kernel image for one device")]
-    Kernel(commands::kernel::KernelArgs),
     #[command(
-        name = "kernel-src",
-        about = "fetch or update a configured kernel source tree"
+        name = "kernel-build",
+        about = "prepare, module-build, or image-build a pocketboot kernel"
     )]
-    KernelSrc(commands::kernel_src::KernelSrcArgs),
+    KernelBuild(commands::kernel::KernelBuildArgs),
     #[command(about = "build a pocketpreboot shim for one device")]
     Preboot(commands::preboot::PrebootArgs),
     #[command(about = "package an already-built pocketboot kernel as boot.img")]
@@ -50,11 +50,11 @@ enum XtaskCommand {
 
 fn run() -> Result<()> {
     match Cli::parse().command {
+        XtaskCommand::Build(args) => commands::build::run(args),
         XtaskCommand::Busybox(args) => commands::busybox::run(args),
-        XtaskCommand::Cpio(args) => commands::cpio::run(args),
+        XtaskCommand::Initrd(args) => commands::cpio::run(args),
         XtaskCommand::CiMatrix(args) => commands::ci_matrix::run(args),
-        XtaskCommand::Kernel(args) => commands::kernel::run(args),
-        XtaskCommand::KernelSrc(args) => commands::kernel_src::run(args),
+        XtaskCommand::KernelBuild(args) => commands::kernel::run(args),
         XtaskCommand::Preboot(args) => commands::preboot::run(args),
         XtaskCommand::Bootimg(args) => commands::bootimg::run(args),
         XtaskCommand::Qemu(args) => commands::qemu::run(args),

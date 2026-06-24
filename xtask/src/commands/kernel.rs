@@ -4,27 +4,59 @@ use std::{
     process::{Command, Stdio},
 };
 
+use clap::Subcommand;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
 use crate::Result;
 
 use super::{
-    DEFAULT_KERNEL_ARCH, FeatureSet, KernelDevice, canonical_file,
-    config::{self, CpioConfig, KernelConfig},
-    cpio::{DEFAULT_INITRD, DEFAULT_TARGET, build_initrd},
-    ensure_file, kconfig_string, kernel_tree, make_command_for_arch, parallel_jobs, run_command,
-    set_default_kernel_toolchain, target_dir, workspace_root,
+    DEFAULT_KERNEL_ARCH, KernelDevice,
+    config::{self, KernelConfig},
+    cpio, ensure_file, kconfig_string, kernel_tree, make_command_for_arch, parallel_jobs,
+    run_command, set_default_kernel_toolchain, target_dir, workspace_root,
 };
 
 #[derive(clap::Args, Debug)]
-pub(crate) struct KernelArgs {
+pub(crate) struct KernelBuildArgs {
+    #[command(subcommand)]
+    command: KernelBuildCommand,
+}
+
+#[derive(Debug, Subcommand)]
+enum KernelBuildCommand {
+    #[command(about = "fetch or update the configured kernel source tree")]
+    PrepareSource(KernelBuildDeviceArgs),
+    #[command(about = "prepare the kernel .config for one device")]
+    Config(KernelBuildKernelArgs),
+    #[command(about = "build and install kernel modules for one device")]
+    Modules(KernelBuildKernelArgs),
+    #[command(about = "build the configured kernel image and DTB for one device")]
+    Image(KernelBuildImageArgs),
+}
+
+#[derive(clap::Args, Debug)]
+struct KernelBuildDeviceArgs {
     #[arg(value_name = "VENDOR/DEVICE")]
     device: KernelDevice,
-    #[arg(value_name = "KERNEL_TREE")]
-    kernel_tree: Option<PathBuf>,
+}
+
+#[derive(clap::Args, Debug)]
+struct KernelBuildKernelArgs {
+    #[arg(long, value_name = "PATH")]
+    kernel: Option<PathBuf>,
+    #[arg(value_name = "VENDOR/DEVICE")]
+    device: KernelDevice,
+}
+
+#[derive(clap::Args, Debug)]
+struct KernelBuildImageArgs {
+    #[arg(long, value_name = "PATH")]
+    kernel: Option<PathBuf>,
     #[arg(long, value_name = "PATH")]
     initrd: Option<PathBuf>,
+    #[arg(value_name = "VENDOR/DEVICE")]
+    device: KernelDevice,
 }
 
 #[derive(Debug)]
@@ -33,6 +65,19 @@ pub(super) struct KernelBuild {
     pub(super) dtb: Option<PathBuf>,
     pub(super) config: PathBuf,
     pub(super) initrd: PathBuf,
+}
+
+#[derive(Debug)]
+pub(super) struct KernelConfigBuild {
+    pub(super) config: PathBuf,
+    pub(super) initrd: PathBuf,
+    out_dir: PathBuf,
+}
+
+#[derive(Debug)]
+pub(super) struct KernelModulesBuild {
+    pub(super) config: PathBuf,
+    pub(super) modules: PathBuf,
 }
 
 struct KernelTarget {
@@ -63,37 +108,61 @@ struct KernelConfigFile {
 
 const KERNEL_CONFIG_RECIPE_VERSION: u32 = 1;
 
-pub(crate) fn run(args: KernelArgs) -> Result<()> {
-    kernel(args)
+pub(crate) fn run(args: KernelBuildArgs) -> Result<()> {
+    kernel_build(args)
 }
 
-fn kernel(args: KernelArgs) -> Result<()> {
-    let KernelArgs {
-        device,
-        kernel_tree: kernel_tree_arg,
-        initrd,
-    } = args;
+fn kernel_build(args: KernelBuildArgs) -> Result<()> {
     let workspace_root = workspace_root()?;
-    let kernel_tree = match kernel_tree_arg {
-        Some(kernel_tree_arg) => kernel_tree(&kernel_tree_arg)?,
-        None => {
-            let tree = super::kernel_src::ensure_device_kernel_source(&workspace_root, &device)?;
-            println!("kernel source {}", tree.path.display());
-            kernel_tree(&tree.path)?
+    match args.command {
+        KernelBuildCommand::PrepareSource(args) => {
+            prepare_device_kernel_source(&workspace_root, &args.device)?;
         }
-    };
-    let built_initrd = initrd.is_none();
-    let build = build_device_kernel(&workspace_root, &kernel_tree, &device, initrd)?;
-
-    if built_initrd {
-        println!("wrote {}", build.initrd.display());
+        KernelBuildCommand::Config(args) => {
+            let kernel_tree =
+                resolve_device_kernel_tree(&workspace_root, &args.device, args.kernel)?;
+            let build = configure_device_kernel(&workspace_root, &kernel_tree, &args.device, None)?;
+            println!("config {}", build.config.display());
+            println!("initrd {}", build.initrd.display());
+        }
+        KernelBuildCommand::Modules(args) => {
+            let kernel_tree =
+                resolve_device_kernel_tree(&workspace_root, &args.device, args.kernel)?;
+            let build = build_device_modules(&workspace_root, &kernel_tree, &args.device)?;
+            println!("modules {}", build.modules.display());
+            println!("config {}", build.config.display());
+        }
+        KernelBuildCommand::Image(args) => {
+            let kernel_tree =
+                resolve_device_kernel_tree(&workspace_root, &args.device, args.kernel)?;
+            let build =
+                build_device_image(&workspace_root, &kernel_tree, &args.device, args.initrd)?;
+            println!("image {}", build.image.display());
+            if let Some(dtb) = &build.dtb {
+                println!("dtb {}", dtb.display());
+            }
+            println!("initrd {}", build.initrd.display());
+            println!("config {}", build.config.display());
+        }
     }
-    println!("image {}", build.image.display());
-    if let Some(dtb) = &build.dtb {
-        println!("dtb {}", dtb.display());
-    }
-    println!("config {}", build.config.display());
     Ok(())
+}
+
+pub(super) fn prepare_device_kernel_source(
+    workspace_root: &Path,
+    device: &KernelDevice,
+) -> Result<PathBuf> {
+    let tree = super::kernel_src::ensure_device_kernel_source(workspace_root, device)?;
+    match tree.status {
+        super::kernel_src::KernelSourceStatus::Current => {
+            println!("kernel source current {}", tree.path.display())
+        }
+        super::kernel_src::KernelSourceStatus::Updated => {
+            println!("kernel source updated {}", tree.path.display())
+        }
+    }
+    println!("sha {}", tree.sha);
+    kernel_tree(&tree.path)
 }
 
 pub(super) fn build_device_kernel_id(
@@ -103,15 +172,40 @@ pub(super) fn build_device_kernel_id(
     initrd: Option<PathBuf>,
 ) -> Result<KernelBuild> {
     let device = KernelDevice::parse(device_id)?;
-    build_device_kernel(workspace_root, kernel_tree, &device, initrd)
+    let target_dir = target_dir(workspace_root);
+    let config = config::load_device_config(workspace_root, &device)?;
+    let initrd = match initrd {
+        Some(initrd) => initrd,
+        None => cpio::build_device_initrd(
+            workspace_root,
+            &target_dir,
+            &device,
+            &config.cpio,
+            &config.features,
+            None,
+            true,
+        )?,
+    };
+    build_device_image(workspace_root, kernel_tree, &device, Some(initrd))
 }
 
-fn build_device_kernel(
+pub(super) fn resolve_device_kernel_tree(
+    workspace_root: &Path,
+    device: &KernelDevice,
+    kernel_tree_arg: Option<PathBuf>,
+) -> Result<PathBuf> {
+    match kernel_tree_arg {
+        Some(kernel_tree_arg) => kernel_tree(&kernel_tree_arg),
+        None => prepare_device_kernel_source(workspace_root, device),
+    }
+}
+
+pub(super) fn configure_device_kernel(
     workspace_root: &Path,
     kernel_tree: &Path,
     device: &KernelDevice,
     initrd: Option<PathBuf>,
-) -> Result<KernelBuild> {
+) -> Result<KernelConfigBuild> {
     let target_dir = target_dir(workspace_root);
     let config = config::load_device_config(workspace_root, device)?;
     let arch = kernel_arch(&config.kernel)?;
@@ -133,14 +227,9 @@ fn build_device_kernel(
     }
 
     let initrd = match initrd {
-        Some(initrd) => canonical_file(&initrd, "initrd cpio")?,
-        None => build_device_initrd(
-            workspace_root,
-            &target_dir,
-            device,
-            &config.cpio,
-            &config.features,
-        )?,
+        Some(initrd) if initrd.is_absolute() => initrd,
+        Some(initrd) => workspace_root.join(initrd),
+        None => cpio::device_initrd_path(&target_dir, device),
     };
 
     let pocketboot_config = out_dir.join("pocketboot.config");
@@ -163,10 +252,70 @@ fn build_device_kernel(
         &arch,
     )?;
 
+    Ok(KernelConfigBuild {
+        config: out_dir.join(".config"),
+        initrd,
+        out_dir,
+    })
+}
+
+pub(super) fn build_device_modules(
+    workspace_root: &Path,
+    kernel_tree: &Path,
+    device: &KernelDevice,
+) -> Result<KernelModulesBuild> {
+    let configured = configure_device_kernel(workspace_root, kernel_tree, device, None)?;
+    let config = config::load_device_config(workspace_root, device)?;
+    let arch = kernel_arch(&config.kernel)?;
+    let modules = configured.out_dir.join("modules");
+    if !kernel_config_enabled(&configured.config, "MODULES")? {
+        println!("modules skipped: CONFIG_MODULES is not enabled");
+        return Ok(KernelModulesBuild {
+            config: configured.config,
+            modules,
+        });
+    }
+    if modules.exists() {
+        fs::remove_dir_all(&modules)
+            .map_err(|err| format!("remove {}: {err}", modules.display()))?;
+    }
+    fs::create_dir_all(&modules).map_err(|err| format!("create {}: {err}", modules.display()))?;
+
+    let mut build = make_command_for_arch(kernel_tree, &configured.out_dir, &arch)?;
+    build.arg(format!("-j{}", parallel_jobs())).arg("modules");
+    run_command(build, "make kernel modules")?;
+
+    let mut install = make_command_for_arch(kernel_tree, &configured.out_dir, &arch)?;
+    install
+        .arg(format!("INSTALL_MOD_PATH={}", modules.display()))
+        .arg("INSTALL_MOD_STRIP=1")
+        .arg("modules_install");
+    run_command(install, "make kernel modules_install")?;
+
+    Ok(KernelModulesBuild {
+        config: configured.config,
+        modules,
+    })
+}
+
+pub(super) fn build_device_image(
+    workspace_root: &Path,
+    kernel_tree: &Path,
+    device: &KernelDevice,
+    initrd: Option<PathBuf>,
+) -> Result<KernelBuild> {
+    let configured = configure_device_kernel(workspace_root, kernel_tree, device, initrd)?;
+    ensure_file(&configured.initrd, "initrd cpio")?;
+
+    let config = config::load_device_config(workspace_root, device)?;
+    let arch = kernel_arch(&config.kernel)?;
+    let dtb_stem = kernel_dtb_stem(&config.kernel, device)?;
+    let target = kernel_target(&config.kernel, &arch)?;
+
     let dtb_target = target
         .build_dtb
         .then(|| format!("{}/{dtb_stem}.dtb", device.vendor));
-    let mut build = make_command_for_arch(kernel_tree, &out_dir, &arch)?;
+    let mut build = make_command_for_arch(kernel_tree, &configured.out_dir, &arch)?;
     build
         .arg(format!("-j{}", parallel_jobs()))
         .arg(&target.image_make_target);
@@ -180,15 +329,22 @@ fn build_device_kernel(
     };
     run_command(build, action)?;
 
-    let image = out_dir.join(&target.image_path);
+    let image = configured.out_dir.join(&target.image_path);
     let dtb = target.build_dtb.then(|| {
-        out_dir
+        configured
+            .out_dir
             .join(format!("arch/{arch}/boot/dts"))
             .join(&device.vendor)
             .join(format!("{dtb_stem}.dtb"))
     });
     ensure_file(&image, "kernel image")?;
-    write_bootimg_kernel_artifact(config.bootimg.as_ref(), &out_dir, &arch, &image, &target)?;
+    write_bootimg_kernel_artifact(
+        config.bootimg.as_ref(),
+        &configured.out_dir,
+        &arch,
+        &image,
+        &target,
+    )?;
     if let Some(dtb) = &dtb {
         ensure_file(dtb, "device tree blob")?;
     }
@@ -196,8 +352,8 @@ fn build_device_kernel(
     Ok(KernelBuild {
         image,
         dtb,
-        config: out_dir.join(".config"),
-        initrd,
+        config: configured.config,
+        initrd: configured.initrd,
     })
 }
 
@@ -278,33 +434,6 @@ fn write_bootimg_kernel_artifact(
     run_command(gzip, "gzip kernel Image")
 }
 
-fn build_device_initrd(
-    workspace_root: &Path,
-    target_dir: &Path,
-    device: &KernelDevice,
-    config: &CpioConfig,
-    features: &FeatureSet,
-) -> Result<PathBuf> {
-    let target = config.target.as_deref().unwrap_or(DEFAULT_TARGET);
-    if target.is_empty() {
-        return Err("cpio target must not be empty".to_string());
-    }
-
-    build_initrd(
-        workspace_root,
-        target,
-        Some(
-            target_dir
-                .join("cpio")
-                .join(&device.vendor)
-                .join(&device.stem)
-                .join(DEFAULT_INITRD),
-        ),
-        features.contains("busybox"),
-        features,
-    )
-}
-
 fn ensure_kernel_config(
     kernel_tree: &Path,
     out_dir: &Path,
@@ -359,6 +488,14 @@ fn kernel_config_file(path: &Path) -> Result<KernelConfigFile> {
         path: path_stamp_value(path),
         sha256: hash_file(path)?,
     })
+}
+
+fn kernel_config_enabled(path: &Path, symbol: &str) -> Result<bool> {
+    let contents =
+        fs::read_to_string(path).map_err(|err| format!("read {}: {err}", path.display()))?;
+    Ok(contents
+        .lines()
+        .any(|line| line == format!("CONFIG_{symbol}=y")))
 }
 
 fn kernel_config_stamp_matches(path: &Path, input: &KernelConfigInput) -> Result<bool> {

@@ -1,4 +1,5 @@
 pub(crate) mod bootimg;
+pub(crate) mod build;
 pub(crate) mod busybox;
 pub(crate) mod ci_matrix;
 mod config;
@@ -146,13 +147,6 @@ fn kernel_tree(path: &Path) -> Result<PathBuf> {
         &path.join("scripts/kconfig/merge_config.sh"),
         "merge_config.sh",
     )?;
-    Ok(path)
-}
-
-fn canonical_file(path: &Path, description: &str) -> Result<PathBuf> {
-    let path =
-        fs::canonicalize(path).map_err(|err| format!("canonicalize {}: {err}", path.display()))?;
-    ensure_file(&path, description)?;
     Ok(path)
 }
 

@@ -10,9 +10,10 @@ use std::{
 use crate::Result;
 
 use super::{
-    FeatureSet,
+    FeatureSet, KernelDevice,
     busybox::{BusyBoxInstall, build as build_busybox},
-    feature_set, target_dir, workspace_root,
+    config::CpioConfig,
+    target_dir, workspace_root,
 };
 
 pub(super) const DEFAULT_TARGET: &str = "aarch64-unknown-linux-musl";
@@ -21,49 +22,87 @@ pub(super) const DEFAULT_INITRD: &str = "pocketboot-initrd.cpio";
 const INIT_BINARY: &str = "pocketboot";
 
 #[derive(clap::Args, Debug)]
-pub(crate) struct CpioArgs {
-    #[arg(long, default_value_t = DEFAULT_TARGET.to_string())]
-    target: String,
-    #[arg(short, long, value_name = "PATH", conflicts_with = "positional_output")]
+pub(crate) struct InitrdArgs {
+    #[arg(value_name = "VENDOR/DEVICE")]
+    device: KernelDevice,
+    #[arg(long, value_name = "TARGET")]
+    target: Option<String>,
+    #[arg(short, long, value_name = "PATH")]
     output: Option<PathBuf>,
-    #[arg(long = "no-busybox", action = clap::ArgAction::SetFalse, default_value_t = true)]
-    busybox: bool,
-    #[arg(long, value_name = "FEATURES")]
-    features: Vec<String>,
-    #[arg(value_name = "OUTPUT")]
-    positional_output: Option<PathBuf>,
 }
 
-pub(crate) fn run(args: CpioArgs) -> Result<()> {
-    cpio(args)
+pub(crate) fn run(args: InitrdArgs) -> Result<()> {
+    initrd(args)
 }
 
-fn cpio(args: CpioArgs) -> Result<()> {
+fn initrd(args: InitrdArgs) -> Result<()> {
     let workspace_root = workspace_root()?;
-    let mut features = feature_set(&args.features)?;
-    if args.busybox {
-        features.add("busybox")?;
+    let target_dir = target_dir(&workspace_root);
+    let config = super::config::load_device_config(&workspace_root, &args.device)?;
+    let mut cpio_config = config.cpio.clone();
+    if let Some(target) = args.target {
+        cpio_config.target = Some(target);
     }
-    let output = args.output.or(args.positional_output);
-    let output = build_initrd(
+    let output = build_device_initrd(
         &workspace_root,
-        &args.target,
-        output,
-        args.busybox,
-        &features,
+        &target_dir,
+        &args.device,
+        &cpio_config,
+        &config.features,
+        args.output,
+        true,
     )?;
     println!("wrote {}", output.display());
     Ok(())
 }
 
-pub(super) fn build_initrd(
+pub(super) fn device_initrd_path(target_dir: &Path, device: &KernelDevice) -> PathBuf {
+    target_dir
+        .join("initrd")
+        .join(&device.vendor)
+        .join(&device.stem)
+        .join(DEFAULT_INITRD)
+}
+
+pub(super) fn device_initrd_target(config: &CpioConfig) -> Result<String> {
+    let target = config.target.as_deref().unwrap_or(DEFAULT_TARGET);
+    if target.is_empty() {
+        return Err("initrd target must not be empty".to_string());
+    }
+    Ok(target.to_string())
+}
+
+pub(super) fn build_device_initrd(
+    workspace_root: &Path,
+    target_dir: &Path,
+    device: &KernelDevice,
+    config: &CpioConfig,
+    features: &FeatureSet,
+    output: Option<PathBuf>,
+    build_binary: bool,
+) -> Result<PathBuf> {
+    let target = device_initrd_target(config)?;
+    build_initrd_with_options(
+        workspace_root,
+        &target,
+        output.or_else(|| Some(device_initrd_path(target_dir, device))),
+        features.contains("busybox"),
+        features,
+        build_binary,
+    )
+}
+
+fn build_initrd_with_options(
     workspace_root: &Path,
     target: &str,
     output: Option<PathBuf>,
     include_busybox: bool,
     features: &FeatureSet,
+    build_binary: bool,
 ) -> Result<PathBuf> {
-    build_release(workspace_root, target, features)?;
+    if build_binary {
+        build_release(workspace_root, target, features)?;
+    }
 
     let target_dir = target_dir(workspace_root);
     let init = target_dir.join(target).join("release").join(INIT_BINARY);
@@ -86,7 +125,11 @@ pub(super) fn build_initrd(
     Ok(output)
 }
 
-fn build_release(workspace_root: &Path, target: &str, features: &FeatureSet) -> Result<()> {
+pub(super) fn build_release(
+    workspace_root: &Path,
+    target: &str,
+    features: &FeatureSet,
+) -> Result<()> {
     let cargo = env::var_os("CARGO").unwrap_or_else(|| "cargo".into());
     let mut command = Command::new(cargo);
     command.current_dir(workspace_root).args([

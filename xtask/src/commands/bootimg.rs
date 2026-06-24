@@ -40,25 +40,29 @@ pub(crate) struct BootImgArgs {
 }
 
 pub(crate) fn run(args: BootImgArgs) -> Result<()> {
-    bootimg(args)
+    let workspace_root = workspace_root()?;
+    build_device_bootimg(&workspace_root, &args.device, args.output)
 }
 
-fn bootimg(args: BootImgArgs) -> Result<()> {
-    let workspace_root = workspace_root()?;
-    let target_dir = target_dir(&workspace_root);
+pub(super) fn build_device_bootimg(
+    workspace_root: &Path,
+    device: &KernelDevice,
+    output: Option<PathBuf>,
+) -> Result<()> {
+    let target_dir = target_dir(workspace_root);
 
-    let device_config = config::load_device_config(&workspace_root, &args.device)?;
+    let device_config = config::load_device_config(workspace_root, device)?;
     let arch = kernel_arch(&device_config.kernel)?;
-    let dtb_stem = kernel_dtb_stem(&device_config.kernel, &args.device)?;
+    let dtb_stem = kernel_dtb_stem(&device_config.kernel, device)?;
     let out_dir = target_dir
         .join("kernel")
-        .join(&args.device.vendor)
-        .join(&args.device.stem);
+        .join(&device.vendor)
+        .join(&device.stem);
     let dtb = out_dir
         .join(format!("arch/{arch}/boot/dts"))
-        .join(&args.device.vendor)
+        .join(&device.vendor)
         .join(format!("{dtb_stem}.dtb"));
-    let output = args.output.unwrap_or_else(|| out_dir.join("boot.img"));
+    let output = output.unwrap_or_else(|| out_dir.join("boot.img"));
     let config = device_config.bootimg.as_ref().ok_or_else(|| {
         format!(
             "missing [bootimg] table in {}",
@@ -70,8 +74,8 @@ fn bootimg(args: BootImgArgs) -> Result<()> {
     ensure_file(&dtb, "device tree blob")?;
     let image = if let Some(preboot) = &config.preboot {
         stage_preboot_kernel(
-            &workspace_root,
-            &args.device,
+            workspace_root,
+            device,
             preboot,
             &payload_image,
             &out_dir.join("pocketpreboot-kernel.img"),

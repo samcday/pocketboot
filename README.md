@@ -37,41 +37,57 @@ The current beachhead is a tiny `/init` binary that mounts `/proc`, `/sys`,
 so PID 1 death trips the kernel panic/reboot path.
 
 ```sh
-cargo xtask cpio
+cargo xtask initrd qcom/sdm845-oneplus-fajita
 ```
 
-This builds `target/aarch64-unknown-linux-musl/release/pocketboot` and writes an
-initrd-ready `newc` archive to `target/pocketboot-initrd.cpio` with the binary
+This builds `target/aarch64-unknown-linux-musl/release/pocketboot` and writes a
+device initrd-ready `newc` archive to
+`target/initrd/<vendor>/<device>/pocketboot-initrd.cpio` with the binary
 installed as `/init`.
 
-By default, the initrd also includes BusyBox built from the official 1.38.0
-source release with applet symlinks installed under `/bin`, `/sbin`, `/usr/bin`
-and `/usr/sbin`. The known musl targets use the matching `*-linux-musl*-gcc`
-wrapper by default; set `BUSYBOX_CC` or `BUSYBOX_CROSS_COMPILE` to use another
-static libc-capable target C toolchain, or pass `--no-busybox` to build only the
-Rust `/init`. BusyBox is cached under `target/busybox`; use `cargo xtask busybox`
-to build it without creating an initrd.
+When enabled by device config, the initrd also includes BusyBox built from the
+official 1.38.0 source release with applet symlinks installed under `/bin`,
+`/sbin`, `/usr/bin` and `/usr/sbin`. The known musl targets use the matching
+`*-linux-musl*-gcc` wrapper by default; set `BUSYBOX_CC` or
+`BUSYBOX_CROSS_COMPILE` to use another static libc-capable target C toolchain.
+BusyBox is cached under `target/busybox`; use `cargo xtask busybox` to build it
+without creating an initrd.
 
-To build a pocketboot kernel for a supported device, pass the canonical arm64
-DTB path without the `.dtb` suffix and a kernel tree:
+To build all configured pocketboot artifacts for a supported device, pass the
+canonical arm64 DTB path without the `.dtb` suffix:
 
 ```sh
-cargo xtask kernel qcom/msm8916-samsung-a5u-eur ./linux
-cargo xtask kernel exynos/exynos7870-j7xelte ~/tmp/linux-pocketboot-exynos7870
+cargo xtask build qcom/msm8916-samsung-a5u-eur
+cargo xtask build exynos/exynos7870-j7xelte
+```
+
+Pass `--kernel PATH` to use an existing kernel tree instead of materializing the
+configured `[kernel-source]` tree:
+
+```sh
+cargo xtask build --kernel ./linux qcom/msm8916-samsung-a5u-eur
 ```
 
 The kernel build uses `target/kernel/<vendor>/<device>` as `O=`, embeds a
-per-device pocketboot initramfs from `target/cpio/<vendor>/<device>`, and builds
-`Image.gz` plus the inferred DTB by default. This also leaves the uncompressed
-`Image` prerequisite in the build output. Pass `--initrd PATH` to embed an
-existing cpio archive. Kernel configuration is assembled from
+per-device pocketboot initramfs from `target/initrd/<vendor>/<device>`, and builds
+the configured kernel image target plus the inferred DTB. This also leaves normal
+intermediate image prerequisites in the build output. Kernel configuration is assembled from
 `configs/pocketboot.toml`, `configs/soc/<vendor>/<soc>.toml` and
 `configs/device/<vendor>/<device>.toml`.
 
 Pinned kernel sources can be described with an inherited `[kernel-source]` table
-containing `remote` and `sha` fields. `cargo xtask kernel-src <vendor/device>`
-materializes that source under `target/kernel/src`; this is not wired into
-`cargo xtask kernel` yet.
+containing `remote` and `sha` fields. `cargo xtask kernel-build prepare-source
+<vendor/device>` materializes that source under `target/kernel/src`.
+
+The low-level build phases are composable:
+
+```sh
+cargo xtask kernel-build prepare-source qcom/msm8916-samsung-a5u-eur
+cargo xtask kernel-build config qcom/msm8916-samsung-a5u-eur
+cargo xtask kernel-build modules qcom/msm8916-samsung-a5u-eur
+cargo xtask initrd qcom/msm8916-samsung-a5u-eur
+cargo xtask kernel-build image qcom/msm8916-samsung-a5u-eur
+```
 
 Once the kernel is built, package those artifacts as an Android boot image:
 

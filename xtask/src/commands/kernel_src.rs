@@ -9,14 +9,8 @@ use crate::Result;
 use super::{
     KernelDevice,
     config::{self, KernelSource, KernelSourceIdentity},
-    run_command, target_dir, workspace_root,
+    run_command, target_dir,
 };
-
-#[derive(clap::Args, Debug)]
-pub(crate) struct KernelSrcArgs {
-    #[arg(value_name = "VENDOR/DEVICE")]
-    device: KernelDevice,
-}
 
 pub(super) struct KernelSourceTree {
     pub(super) path: PathBuf,
@@ -27,22 +21,6 @@ pub(super) struct KernelSourceTree {
 pub(super) enum KernelSourceStatus {
     Current,
     Updated,
-}
-
-pub(crate) fn run(args: KernelSrcArgs) -> Result<()> {
-    kernel_src(args)
-}
-
-fn kernel_src(args: KernelSrcArgs) -> Result<()> {
-    let workspace_root = workspace_root()?;
-    let tree = ensure_device_kernel_source(&workspace_root, &args.device)?;
-
-    match tree.status {
-        KernelSourceStatus::Current => println!("kernel source current {}", tree.path.display()),
-        KernelSourceStatus::Updated => println!("kernel source updated {}", tree.path.display()),
-    }
-    println!("sha {}", tree.sha);
-    Ok(())
 }
 
 pub(super) fn ensure_device_kernel_source(

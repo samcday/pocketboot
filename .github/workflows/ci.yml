@@ -179,12 +179,8 @@ jobs:
       - name: Build kernel and boot image
         env:
           DEVICE: ${{ matrix.device }}
-          BOOTIMG: ${{ matrix.bootimg }}
         run: |
-          cargo xtask kernel "$DEVICE"
-          if [ "$BOOTIMG" = "true" ]; then
-            cargo xtask bootimg "$DEVICE"
-          fi
+          cargo xtask build "$DEVICE"
 
       - name: Show ccache stats
         if: always()
