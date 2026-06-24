@@ -1,6 +1,7 @@
 use std::{
     fs::{self, File},
     io::{self, Read, Seek, SeekFrom, Write},
+    os::fd::AsRawFd,
     path::Path,
 };
 
@@ -8,9 +9,11 @@ use crate::fastboot::{CommandContext, CommandResult};
 
 use super::partitions;
 
-const COMMAND_PREFIX: &str = "flash:";
+const FLASH_COMMAND_PREFIX: &str = "flash:";
+const ERASE_COMMAND_PREFIX: &str = "erase:";
 const PROC_SELF_MOUNTINFO: &str = "/proc/self/mountinfo";
 const COPY_CHUNK: usize = 1024 * 1024;
+const BLKDISCARD: libc::Ioctl = 0x1277;
 const ANDROID_SPARSE_MAGIC: [u8; 4] = [0x3a, 0xff, 0x26, 0xed];
 const ANDROID_SPARSE_MAGIC_LE: u32 = 0xed26_ff3a;
 const SPARSE_HEADER_SIZE: u16 = 28;
@@ -32,9 +35,8 @@ const ALLOWED_PARTITION_BASES: [&str; 7] = [
 ];
 
 pub(super) fn handle(context: &mut CommandContext<'_>, command: &str) -> io::Result<CommandResult> {
-    let requested = parse_partition(command)?;
-    let partition = partitions::find(requested)?;
-    validate_target(requested, &partition)?;
+    let requested = parse_flash_partition(command)?;
+    let partition = writable_target(requested, "flashing")?;
 
     let size = context.staged_len()?;
     if size == 0 {
@@ -76,20 +78,60 @@ pub(super) fn handle(context: &mut CommandContext<'_>, command: &str) -> io::Res
     Ok(CommandResult::continue_())
 }
 
-fn parse_partition(command: &str) -> io::Result<&str> {
+pub(super) fn handle_erase(
+    context: &mut CommandContext<'_>,
+    command: &str,
+) -> io::Result<CommandResult> {
+    let requested = parse_erase_partition(command)?;
+    let partition = writable_target(requested, "erasing")?;
+
+    context.info(format!(
+        "erasing {} ({})",
+        partition.fastboot_name(),
+        partition.dev_path.display()
+    ))?;
+    let stats = erase_partition(&partition.dev_path, partition.size_bytes)?;
+    context.info(format!(
+        "erased {} bytes using {}",
+        stats.erased_size,
+        stats.method.label()
+    ))?;
+    context.okay(format!("erased {}", partition.fastboot_name()))?;
+    Ok(CommandResult::continue_())
+}
+
+fn parse_flash_partition(command: &str) -> io::Result<&str> {
+    parse_partition(command, FLASH_COMMAND_PREFIX, "flash")
+}
+
+fn parse_erase_partition(command: &str) -> io::Result<&str> {
+    parse_partition(command, ERASE_COMMAND_PREFIX, "erase")
+}
+
+fn parse_partition<'a>(command: &'a str, prefix: &str, label: &str) -> io::Result<&'a str> {
     let partition = command
-        .strip_prefix(COMMAND_PREFIX)
-        .ok_or_else(|| invalid_input("invalid flash command"))?;
+        .strip_prefix(prefix)
+        .ok_or_else(|| invalid_input(format!("invalid {label} command")))?;
     if partition.is_empty() {
-        return Err(invalid_input("flash partition is empty"));
+        return Err(invalid_input(format!("{label} partition is empty")));
     }
     Ok(partition)
 }
 
-fn validate_target(requested: &str, partition: &partitions::Partition) -> io::Result<()> {
+fn writable_target(requested: &str, action: &str) -> io::Result<partitions::Partition> {
+    let partition = partitions::find(requested)?;
+    validate_target(requested, &partition, action)?;
+    Ok(partition)
+}
+
+fn validate_target(
+    requested: &str,
+    partition: &partitions::Partition,
+    action: &str,
+) -> io::Result<()> {
     if !is_allowed_partition(requested, partition) {
         return Err(invalid_input(format!(
-            "flashing partition {requested:?} is not allowed"
+            "{action} partition {requested:?} is not allowed"
         )));
     }
     if partition.read_only {
@@ -163,6 +205,85 @@ fn flash_raw(source: &mut File, target: &Path, mut remaining: u64) -> io::Result
     }
 
     target.sync_all()?;
+    Ok(written)
+}
+
+#[derive(Debug, Eq, PartialEq)]
+struct EraseStats {
+    erased_size: u64,
+    method: EraseMethod,
+}
+
+#[derive(Debug, Eq, PartialEq)]
+enum EraseMethod {
+    Discard,
+    ZeroFill,
+}
+
+impl EraseMethod {
+    fn label(&self) -> &'static str {
+        match self {
+            Self::Discard => "discard",
+            Self::ZeroFill => "zero-fill",
+        }
+    }
+}
+
+fn erase_partition(target: &Path, size: u64) -> io::Result<EraseStats> {
+    let mut target = File::options()
+        .write(true)
+        .open(target)
+        .map_err(|err| io::Error::new(err.kind(), format!("open {}: {err}", target.display())))?;
+
+    match discard_partition(&target, size) {
+        Ok(()) => {
+            target.sync_all()?;
+            Ok(EraseStats {
+                erased_size: size,
+                method: EraseMethod::Discard,
+            })
+        }
+        Err(err) if is_discard_unsupported(&err) => {
+            target.seek(SeekFrom::Start(0))?;
+            let erased_size = write_zeroes(&mut target, size)?;
+            target.sync_all()?;
+            Ok(EraseStats {
+                erased_size,
+                method: EraseMethod::ZeroFill,
+            })
+        }
+        Err(err) => Err(err),
+    }
+}
+
+fn discard_partition(target: &File, size: u64) -> io::Result<()> {
+    let range = [0u64, size];
+    let rc = unsafe { libc::ioctl(target.as_raw_fd(), BLKDISCARD, range.as_ptr()) };
+    if rc < 0 {
+        Err(io::Error::last_os_error())
+    } else {
+        Ok(())
+    }
+}
+
+fn is_discard_unsupported(err: &io::Error) -> bool {
+    matches!(
+        err.raw_os_error(),
+        Some(libc::ENOTTY | libc::EOPNOTSUPP | libc::EINVAL | libc::ENOSYS)
+    )
+}
+
+fn write_zeroes(target: &mut File, mut remaining: u64) -> io::Result<u64> {
+    let buffer = vec![0; COPY_CHUNK];
+    let mut written = 0;
+    while remaining > 0 {
+        let chunk_len = usize::try_from(remaining.min(buffer.len() as u64))
+            .map_err(|_| invalid_input("erase chunk is too large for this platform"))?;
+        target.write_all(&buffer[..chunk_len])?;
+        remaining -= chunk_len as u64;
+        written += chunk_len as u64;
+    }
+
     Ok(written)
 }
 
@@ -433,12 +554,24 @@ mod tests {
 
     #[test]
     fn parses_flash_partition() {
-        assert_eq!(parse_partition("flash:boot").unwrap(), "boot");
+        assert_eq!(parse_flash_partition("flash:boot").unwrap(), "boot");
+    }
+
+    #[test]
+    fn parses_erase_partition() {
+        assert_eq!(parse_erase_partition("erase:userdata").unwrap(), "userdata");
     }
 
     #[test]
     fn rejects_empty_flash_partition() {
-        let err = parse_partition("flash:").unwrap_err();
+        let err = parse_flash_partition("flash:").unwrap_err();
+
+        assert_eq!(err.kind(), io::ErrorKind::InvalidInput);
+    }
+
+    #[test]
+    fn rejects_empty_erase_partition() {
+        let err = parse_erase_partition("erase:").unwrap_err();
 
         assert_eq!(err.kind(), io::ErrorKind::InvalidInput);
     }
@@ -585,6 +718,25 @@ mod tests {
         let err = flash_sparse(&mut source, &target, 4096, image.len() as u64).unwrap_err();
 
         assert_eq!(err.kind(), io::ErrorKind::InvalidInput);
+    }
+
+    #[test]
+    fn erases_partition_with_zero_fill_fallback() {
+        let temp = TempDir::new();
+        let target = temp.file("userdata.img");
+        fs::write(&target, vec![0x5a; 128]).unwrap();
+
+        let stats = erase_partition(&target, 128).unwrap();
+        let erased = fs::read(&target).unwrap();
+
+        assert_eq!(
+            stats,
+            EraseStats {
+                erased_size: 128,
+                method: EraseMethod::ZeroFill,
+            }
+        );
+        assert!(erased.iter().all(|byte| *byte == 0));
     }
 
     fn payload_file(data: &[u8]) -> File {

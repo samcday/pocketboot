@@ -33,7 +33,10 @@ pub(crate) fn getvar_commands(serialno: String, slots: crate::ab_slots::Slots) -
 }
 
 pub(crate) fn flash_commands() -> CommandMap {
-    vec![Command::prefix("flash:", flash::handle)]
+    vec![
+        Command::prefix("flash:", flash::handle),
+        Command::prefix("erase:", flash::handle_erase),
+    ]
 }
 
 pub(crate) fn slot_commands(slots: crate::ab_slots::Slots) -> CommandMap {
