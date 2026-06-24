@@ -1425,7 +1425,7 @@ fn bls_dtb_path(
             return Ok(Some(path));
         }
 
-        tracing::warn!(source = %source.display(), dtb = %path.display(), "BLS devicetree payload is missing");
+        tracing::warn!(source = %source.display(), dtb = %path.display(), "BLS DTB payload is missing");
         return Ok(None);
     }
 
@@ -1601,7 +1601,7 @@ impl BlsSnippet {
                 "architecture" => snippet.architecture = Some(value.to_string()),
                 "linux" => snippet.linux = Some(value.to_string()),
                 "initrd" => snippet.initrds.push(value.to_string()),
-                "devicetree" => snippet.devicetree = Some(value.to_string()),
+                "devicetree" | "fdt" | "fdtfile" => snippet.devicetree = Some(value.to_string()),
                 "fdtdir" => snippet.fdtdirs.push(value.to_string()),
                 "options" => snippet.options.push(value.to_string()),
                 "machine-id" | "machine_id" | "sort-key" | "sort_key" | "efi"
@@ -2000,6 +2000,16 @@ mod tests {
         assert_eq!(snippet.initrds, ["/initrd.img"]);
         assert_eq!(snippet.fdtdirs, ["/dtb"]);
         assert_eq!(snippet.options, ["root=UUID=abc quiet"]);
+    }
+
+    #[test]
+    fn parses_bls_devicetree_aliases() {
+        for key in ["devicetree", "fdt", "fdtfile"] {
+            let snippet = BlsSnippet::parse(&format!("{key} /dtbs/board.dtb\n"));
+
+            assert_eq!(snippet.devicetree.as_deref(), Some("/dtbs/board.dtb"));
+            assert!(snippet.requires_dtb());
+        }
     }
 
     #[test]
