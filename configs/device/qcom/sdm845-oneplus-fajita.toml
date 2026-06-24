@@ -9,8 +9,8 @@ INPUT_MISC = true
 INPUT_TOUCHSCREEN = true
 KEYBOARD_GPIO = true
 INPUT_PM8941_PWRKEY = true
-RMI4_CORE = true
-RMI4_I2C = true
+RMI4_CORE = "m"
+RMI4_I2C = "m"
 RMI4_F12 = true
 
 # Board GPIO-controlled rails
@@ -18,12 +18,21 @@ REGULATOR_FIXED_VOLTAGE = true
 
 # Battery, fuel gauge and PMI8998 charger
 POWER_SUPPLY = true
-BATTERY_BQ27XXX = true
-BATTERY_BQ27XXX_I2C = true
+BATTERY_BQ27XXX = "m"
+BATTERY_BQ27XXX_I2C = "m"
 IIO = true
-QCOM_SPMI_RRADC = true
-QCOM_SPMI_ADC5 = true
-CHARGER_QCOM_SMB2 = true
+QCOM_SPMI_RRADC = "m"
+QCOM_SPMI_ADC5 = "m"
+CHARGER_QCOM_SMB2 = "m"
+
+[bootmenu]
+modules = [
+  "rmi_i2c",
+  "bq27xxx_battery_i2c",
+  "qcom-spmi-adc5",
+  "qcom-spmi-rradc",
+  "qcom_smbx",
+]
 
 [bootimg]
 header_version = 2

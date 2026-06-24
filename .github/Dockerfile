@@ -18,6 +18,7 @@ RUN set -eux; \
         gcc-aarch64-linux-gnu \
         gcc-arm-linux-gnueabihf \
         git \
+        kmod \
         libclang-19-dev \
         libelf-dev \
         libfontconfig1-dev \
@@ -30,7 +31,8 @@ RUN set -eux; \
         musl-dev:armhf \
         llvm \
         pkg-config \
-        python3; \
+        python3 \
+        xz-utils; \
     rm -rf /var/lib/apt/lists/*
 
 RUN set -eux; \

@@ -1,4 +1,5 @@
 use std::{
+    collections::{BTreeMap, BTreeSet},
     env,
     fs::{self, File},
     io::Write,
@@ -12,7 +13,7 @@ use crate::Result;
 use super::{
     FeatureSet, KernelDevice,
     busybox::{BusyBoxInstall, build as build_busybox},
-    config::CpioConfig,
+    config::{BootMenuConfig, CpioConfig},
     target_dir, workspace_root,
 };
 
@@ -20,6 +21,7 @@ pub(super) const DEFAULT_TARGET: &str = "aarch64-unknown-linux-musl";
 pub(super) const DEFAULT_INITRD: &str = "pocketboot-initrd.cpio";
 
 const INIT_BINARY: &str = "pocketboot";
+const BOOTMENU_MODULE_MANIFEST: &str = "etc/pocketboot/modules/bootmenu.list";
 
 #[derive(clap::Args, Debug)]
 pub(crate) struct InitrdArgs {
@@ -49,6 +51,7 @@ fn initrd(args: InitrdArgs) -> Result<()> {
         &args.device,
         &cpio_config,
         &config.features,
+        &config.bootmenu,
         args.output,
         true,
     )?;
@@ -78,16 +81,19 @@ pub(super) fn build_device_initrd(
     device: &KernelDevice,
     config: &CpioConfig,
     features: &FeatureSet,
+    bootmenu: &BootMenuConfig,
     output: Option<PathBuf>,
     build_binary: bool,
 ) -> Result<PathBuf> {
     let target = device_initrd_target(config)?;
+    let module_archive = ModuleArchive::for_bootmenu(target_dir, device, bootmenu)?;
     build_initrd_with_options(
         workspace_root,
         &target,
         output.or_else(|| Some(device_initrd_path(target_dir, device))),
         features.contains("busybox"),
         features,
+        module_archive.as_ref(),
         build_binary,
     )
 }
@@ -98,6 +104,7 @@ fn build_initrd_with_options(
     output: Option<PathBuf>,
     include_busybox: bool,
     features: &FeatureSet,
+    modules: Option<&ModuleArchive>,
     build_binary: bool,
 ) -> Result<PathBuf> {
     if build_binary {
@@ -121,7 +128,7 @@ fn build_initrd_with_options(
     let busybox = include_busybox
         .then(|| build_busybox(&target_dir, target, features))
         .transpose()?;
-    write_initrd(&init, busybox.as_ref(), &output)?;
+    write_initrd(&init, busybox.as_ref(), modules, &output)?;
     Ok(output)
 }
 
@@ -153,18 +160,30 @@ pub(super) fn build_release(
     Ok(())
 }
 
-fn write_initrd(init: &Path, busybox: Option<&BusyBoxInstall>, output: &Path) -> Result<()> {
+fn write_initrd(
+    init: &Path,
+    busybox: Option<&BusyBoxInstall>,
+    modules: Option<&ModuleArchive>,
+    output: &Path,
+) -> Result<()> {
     let tmp = output.with_extension("cpio.tmp");
     let mut writer = NewcWriter::create(&tmp)?;
+    let mut dirs = BTreeSet::new();
     writer.dir("dev", 0o755)?;
+    dirs.insert("dev".to_string());
     writer.char_dev("dev/console", 0o600, 5, 1)?;
     writer.char_dev("dev/kmsg", 0o600, 1, 11)?;
     writer.char_dev("dev/null", 0o666, 1, 3)?;
     writer.dir("etc", 0o755)?;
+    dirs.insert("etc".to_string());
     writer.dir("proc", 0o755)?;
+    dirs.insert("proc".to_string());
     writer.dir("run", 0o755)?;
+    dirs.insert("run".to_string());
     writer.dir("sys", 0o755)?;
+    dirs.insert("sys".to_string());
     writer.dir("tmp", 0o1777)?;
+    dirs.insert("tmp".to_string());
     if let Some(busybox) = busybox {
         writer.tree(&busybox.root)?;
         println!(
@@ -174,6 +193,9 @@ fn write_initrd(init: &Path, busybox: Option<&BusyBoxInstall>, output: &Path) ->
                 .map_err(|err| format!("stat {}: {err}", busybox.binary.display()))?
                 .len()
         );
+    }
+    if let Some(modules) = modules {
+        writer.modules(modules, &mut dirs)?;
     }
     writer.file("init", init, 0o755)?;
     writer.finish()?;
@@ -185,6 +207,228 @@ fn write_initrd(init: &Path, busybox: Option<&BusyBoxInstall>, output: &Path) ->
             .map_err(|err| format!("rename {} to {}: {err}", tmp.display(), output.display()))?;
     }
     Ok(())
+}
+
+#[derive(Debug)]
+struct ModuleArchive {
+    entries: Vec<ModuleEntry>,
+    manifest: String,
+}
+
+#[derive(Debug)]
+struct ModuleEntry {
+    source: PathBuf,
+    cpio_name: String,
+}
+
+impl ModuleArchive {
+    fn for_bootmenu(
+        target_dir: &Path,
+        device: &KernelDevice,
+        bootmenu: &BootMenuConfig,
+    ) -> Result<Option<Self>> {
+        if bootmenu.modules.is_empty() {
+            return Ok(None);
+        }
+
+        let installed = InstalledModules::load(target_dir, device)?;
+        let modules = installed.resolve_modules(&bootmenu.modules)?;
+        let mut manifest = String::new();
+        let mut entries = Vec::new();
+        for module in modules {
+            let module_name = module
+                .to_str()
+                .ok_or_else(|| format!("module path is not valid UTF-8: {}", module.display()))?;
+            let cpio_name = format!("lib/modules/{}/{module_name}", installed.release);
+            manifest.push('/');
+            manifest.push_str(&cpio_name);
+            manifest.push('\n');
+            entries.push(ModuleEntry {
+                source: installed.release_dir.join(module),
+                cpio_name,
+            });
+        }
+
+        Ok(Some(Self { entries, manifest }))
+    }
+}
+
+#[derive(Debug)]
+struct InstalledModules {
+    release: String,
+    release_dir: PathBuf,
+    deps: BTreeMap<PathBuf, Vec<PathBuf>>,
+    names: BTreeMap<String, PathBuf>,
+}
+
+impl InstalledModules {
+    fn load(target_dir: &Path, device: &KernelDevice) -> Result<Self> {
+        let modules_root = target_dir
+            .join("kernel")
+            .join(&device.vendor)
+            .join(&device.stem)
+            .join("modules/lib/modules");
+        let releases = module_release_dirs(&modules_root)?;
+        let [(release, release_dir)] = releases.as_slice() else {
+            return Err(format!(
+                "expected exactly one installed kernel module release under {}, found {}",
+                modules_root.display(),
+                releases.len()
+            ));
+        };
+        let release = release.clone();
+        let release_dir = release_dir.clone();
+        let modules_dep = release_dir.join("modules.dep");
+        let contents = fs::read_to_string(&modules_dep)
+            .map_err(|err| format!("read {}: {err}", modules_dep.display()))?;
+        let mut deps = BTreeMap::new();
+        let mut names = BTreeMap::new();
+
+        for (line_index, line) in contents.lines().enumerate() {
+            let (module, module_deps) = line.split_once(':').ok_or_else(|| {
+                format!(
+                    "{}:{}: invalid modules.dep line",
+                    modules_dep.display(),
+                    line_index + 1
+                )
+            })?;
+            let module = module_path(module, &release_dir)?;
+            let module_deps = module_deps
+                .split_whitespace()
+                .map(|dep| module_path(dep, &release_dir))
+                .collect::<Result<Vec<_>>>()?;
+            let name = module_name(&module).ok_or_else(|| {
+                format!(
+                    "installed module path has no .ko suffix: {}",
+                    module.display()
+                )
+            })?;
+            if let Some(existing) = names.insert(name.clone(), module.clone()) {
+                return Err(format!(
+                    "duplicate installed module name {name}: {} and {}",
+                    existing.display(),
+                    module.display()
+                ));
+            }
+            deps.insert(module, module_deps);
+        }
+
+        Ok(Self {
+            release,
+            release_dir,
+            deps,
+            names,
+        })
+    }
+
+    fn resolve_modules(&self, modules: &[String]) -> Result<Vec<PathBuf>> {
+        let mut resolved = Vec::new();
+        let mut visited = BTreeSet::new();
+        for module in modules {
+            let path = self.module_by_name(module)?;
+            self.resolve_module_path(&path, &mut visited, &mut resolved)?;
+        }
+        Ok(resolved)
+    }
+
+    fn module_by_name(&self, module: &str) -> Result<PathBuf> {
+        if let Some(path) = self.names.get(module) {
+            return Ok(path.clone());
+        }
+
+        let normalized = normalized_module_name(module);
+        let matches = self
+            .names
+            .iter()
+            .filter(|(name, _)| normalized_module_name(name) == normalized)
+            .collect::<Vec<_>>();
+        match matches.as_slice() {
+            [(_, path)] => Ok((*path).clone()),
+            [] => Err(format!(
+                "requested bootmenu module was not installed: {module}"
+            )),
+            matches => Err(format!(
+                "requested bootmenu module name is ambiguous: {module} matches {} modules",
+                matches.len()
+            )),
+        }
+    }
+
+    fn resolve_module_path(
+        &self,
+        module: &PathBuf,
+        visited: &mut BTreeSet<PathBuf>,
+        resolved: &mut Vec<PathBuf>,
+    ) -> Result<()> {
+        if visited.contains(module) {
+            return Ok(());
+        }
+        let deps = self.deps.get(module).ok_or_else(|| {
+            format!(
+                "installed module is missing from modules.dep: {}",
+                module.display()
+            )
+        })?;
+        for dep in deps {
+            self.resolve_module_path(dep, visited, resolved)?;
+        }
+        visited.insert(module.clone());
+        resolved.push(module.clone());
+        Ok(())
+    }
+}
+
+fn module_release_dirs(modules_root: &Path) -> Result<Vec<(String, PathBuf)>> {
+    let entries = fs::read_dir(modules_root)
+        .map_err(|err| format!("read {}: {err}", modules_root.display()))?;
+    let mut releases = Vec::new();
+    for entry in entries {
+        let entry = entry.map_err(|err| format!("read {} entry: {err}", modules_root.display()))?;
+        let path = entry.path();
+        if !path.is_dir() {
+            continue;
+        }
+        let release = entry
+            .file_name()
+            .into_string()
+            .map_err(|name| format!("kernel release is not valid UTF-8: {name:?}"))?;
+        releases.push((release, path));
+    }
+    releases.sort_by(|left, right| left.0.cmp(&right.0));
+    Ok(releases)
+}
+
+fn module_path(value: &str, release_dir: &Path) -> Result<PathBuf> {
+    let path = PathBuf::from(value);
+    if path.is_absolute()
+        || path
+            .components()
+            .any(|component| !matches!(component, std::path::Component::Normal(_)))
+    {
+        return Err(format!("invalid module path in modules.dep: {value}"));
+    }
+    let source = release_dir.join(&path);
+    if !source.is_file() {
+        return Err(format!(
+            "missing installed module file: {}",
+            source.display()
+        ));
+    }
+    Ok(path)
+}
+
+fn module_name(path: &Path) -> Option<String> {
+    let file_name = path.file_name()?.to_str()?;
+    for suffix in [".ko.xz", ".ko.gz", ".ko.zst", ".ko"] {
+        if let Some(name) = file_name.strip_suffix(suffix) {
+            return Some(name.to_string());
+        }
+    }
+    None
+}
+
+fn normalized_module_name(name: &str) -> String {
+    name.replace('-', "_")
 }
 
 fn same_contents(left: &Path, right: &Path) -> Result<bool> {
@@ -219,12 +463,16 @@ impl NewcWriter {
 
     fn file(&mut self, name: &str, path: &Path, mode: u32) -> Result<()> {
         let contents = fs::read(path).map_err(|err| format!("read {}: {err}", path.display()))?;
-        self.entry(name, 0o100000 | mode, 1, 0, 0, &contents)
+        self.file_bytes(name, &contents, mode)
     }
 
     fn file_with_mode(&mut self, name: &str, path: &Path, mode: u32) -> Result<()> {
         let contents = fs::read(path).map_err(|err| format!("read {}: {err}", path.display()))?;
-        self.entry(name, 0o100000 | mode, 1, 0, 0, &contents)
+        self.file_bytes(name, &contents, mode)
+    }
+
+    fn file_bytes(&mut self, name: &str, contents: &[u8], mode: u32) -> Result<()> {
+        self.entry(name, 0o100000 | mode, 1, 0, 0, contents)
     }
 
     fn symlink(&mut self, name: &str, target: &Path) -> Result<()> {
@@ -244,6 +492,35 @@ impl NewcWriter {
 
     fn tree(&mut self, root: &Path) -> Result<()> {
         self.tree_dir(root, root)
+    }
+
+    fn modules(&mut self, modules: &ModuleArchive, dirs: &mut BTreeSet<String>) -> Result<()> {
+        for entry in &modules.entries {
+            self.ensure_parent_dirs(&entry.cpio_name, dirs)?;
+            self.file(&entry.cpio_name, &entry.source, 0o644)?;
+        }
+
+        self.ensure_parent_dirs(BOOTMENU_MODULE_MANIFEST, dirs)?;
+        self.file_bytes(BOOTMENU_MODULE_MANIFEST, modules.manifest.as_bytes(), 0o644)?;
+        Ok(())
+    }
+
+    fn ensure_parent_dirs(&mut self, name: &str, dirs: &mut BTreeSet<String>) -> Result<()> {
+        let mut current = String::new();
+        let mut parts = name.split('/').peekable();
+        while let Some(part) = parts.next() {
+            if parts.peek().is_none() {
+                break;
+            }
+            if !current.is_empty() {
+                current.push('/');
+            }
+            current.push_str(part);
+            if dirs.insert(current.clone()) {
+                self.dir(&current, 0o755)?;
+            }
+        }
+        Ok(())
     }
 
     fn tree_dir(&mut self, root: &Path, dir: &Path) -> Result<()> {

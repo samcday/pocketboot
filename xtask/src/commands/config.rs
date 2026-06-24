@@ -31,6 +31,7 @@ pub(super) struct DeviceConfig {
     pub(super) kernel_source: Option<KernelSource>,
     pub(super) kernel: KernelConfig,
     pub(super) cpio: CpioConfig,
+    pub(super) bootmenu: BootMenuConfig,
     pub(super) bootimg: Option<BootImgConfig>,
     kconfig: BTreeMap<String, KconfigValue>,
 }
@@ -79,6 +80,12 @@ pub(super) struct KernelConfig {
 #[serde(deny_unknown_fields)]
 pub(super) struct CpioConfig {
     pub(super) target: Option<String>,
+}
+
+#[derive(Clone, Debug, Default, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub(super) struct BootMenuConfig {
+    pub(super) modules: Vec<String>,
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -187,6 +194,8 @@ struct ConfigLayer {
     kernel_source: Option<KernelSourceLayer>,
     #[serde(default)]
     cpio: CpioConfig,
+    #[serde(default)]
+    bootmenu: BootMenuConfig,
     bootimg: Option<BootImgConfig>,
 }
 
@@ -262,6 +271,7 @@ pub(super) fn load_device_config(
         kernel_source: merged.kernel_source,
         kernel: merged.kernel,
         cpio: merged.cpio,
+        bootmenu: merged.bootmenu,
         bootimg: merged.bootimg,
         kconfig: merged.kconfig,
     })
@@ -272,6 +282,7 @@ struct MergedConfig {
     kernel_source: Option<KernelSource>,
     kernel: KernelConfig,
     cpio: CpioConfig,
+    bootmenu: BootMenuConfig,
     bootimg: Option<BootImgConfig>,
     kconfig: BTreeMap<String, KconfigValue>,
 }
@@ -286,6 +297,7 @@ fn merge_layers(layers: &[ConfigLayerEntry]) -> Result<MergedConfig> {
     let mut kernel = KernelConfig::default();
     let mut kernel_source = None;
     let mut cpio = CpioConfig::default();
+    let mut bootmenu = BootMenuConfig::default();
     let mut bootimg = None;
     let mut kconfig = BTreeMap::new();
     for entry in layers {
@@ -298,6 +310,7 @@ fn merge_layers(layers: &[ConfigLayerEntry]) -> Result<MergedConfig> {
         }
         merge_kernel(&mut kernel, &entry.layer.kernel);
         merge_cpio(&mut cpio, &entry.layer.cpio);
+        merge_bootmenu(&mut bootmenu, &entry.layer.bootmenu)?;
         if let Some(layer_bootimg) = &entry.layer.bootimg {
             bootimg = Some(layer_bootimg.clone());
         }
@@ -320,6 +333,7 @@ fn merge_layers(layers: &[ConfigLayerEntry]) -> Result<MergedConfig> {
         kernel_source,
         kernel,
         cpio,
+        bootmenu,
         bootimg,
         kconfig,
     })
@@ -449,6 +463,28 @@ fn merge_kernel(merged: &mut KernelConfig, layer: &KernelConfig) {
 fn merge_cpio(merged: &mut CpioConfig, layer: &CpioConfig) {
     if layer.target.is_some() {
         merged.target = layer.target.clone();
+    }
+}
+
+fn merge_bootmenu(merged: &mut BootMenuConfig, layer: &BootMenuConfig) -> Result<()> {
+    for module in &layer.modules {
+        validate_module_name(module)?;
+        if !merged.modules.iter().any(|existing| existing == module) {
+            merged.modules.push(module.clone());
+        }
+    }
+    Ok(())
+}
+
+fn validate_module_name(module: &str) -> Result<()> {
+    if module.is_empty()
+        || !module
+            .chars()
+            .all(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '_' | '-'))
+    {
+        Err(format!("invalid module name: {module}"))
+    } else {
+        Ok(())
     }
 }
 

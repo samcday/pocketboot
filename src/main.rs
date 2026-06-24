@@ -18,6 +18,7 @@ mod kexec;
 mod kmsg;
 #[path = "kmsg-forwarder.rs"]
 mod kmsg_forwarder;
+mod modules;
 mod pe;
 mod power;
 #[cfg(feature = "qemu")]
@@ -81,6 +82,9 @@ async fn run() -> Result<()> {
     let serialno = detect_serial(&cmdline);
     tracing::info!(serialno = %serialno, "selected device serialno");
     let system_info = detect_system_info(&serialno);
+    if let Err(err) = modules::load_bootmenu() {
+        tracing::warn!(error = %err, "failed to load bootmenu kernel modules");
+    }
     reaper::spawn();
     let battery = match battery::spawn() {
         Ok(updates) => Some(updates),

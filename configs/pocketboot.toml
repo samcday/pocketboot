@@ -10,6 +10,11 @@ SLUB = true
 RUST = true
 NET = true
 UNIX = true
+MODULES = true
+MODULE_COMPRESS = true
+MODULE_COMPRESS_XZ = true
+MODULE_COMPRESS_ALL = true
+MODULE_DECOMPRESS = true
 
 # BusyBox initramfs/initrd
 BLK_DEV_INITRD = true

@@ -182,6 +182,7 @@ pub(super) fn build_device_kernel_id(
             &device,
             &config.cpio,
             &config.features,
+            &config.bootmenu,
             None,
             true,
         )?,
@@ -275,6 +276,7 @@ pub(super) fn build_device_modules(
             modules,
         });
     }
+    ensure_initrd_placeholder(&configured.initrd)?;
     if modules.exists() {
         fs::remove_dir_all(&modules)
             .map_err(|err| format!("remove {}: {err}", modules.display()))?;
@@ -282,7 +284,9 @@ pub(super) fn build_device_modules(
     fs::create_dir_all(&modules).map_err(|err| format!("create {}: {err}", modules.display()))?;
 
     let mut build = make_command_for_arch(kernel_tree, &configured.out_dir, &arch)?;
-    build.arg(format!("-j{}", parallel_jobs())).arg("modules");
+    build
+        .arg(format!("-j{}", parallel_jobs()))
+        .args(["vmlinux", "modules"]);
     run_command(build, "make kernel modules")?;
 
     let mut install = make_command_for_arch(kernel_tree, &configured.out_dir, &arch)?;
@@ -508,6 +512,19 @@ fn kernel_config_stamp_matches(path: &Path, input: &KernelConfigInput) -> Result
         return Ok(false);
     };
     Ok(stamp.input == *input)
+}
+
+fn ensure_initrd_placeholder(path: &Path) -> Result<()> {
+    if path.exists() {
+        return Ok(());
+    }
+    if let Some(parent) = path
+        .parent()
+        .filter(|parent| !parent.as_os_str().is_empty())
+    {
+        fs::create_dir_all(parent).map_err(|err| format!("create {}: {err}", parent.display()))?;
+    }
+    fs::write(path, [0]).map_err(|err| format!("write {}: {err}", path.display()))
 }
 
 fn write_kernel_config_stamp(path: &Path, input: &KernelConfigInput) -> Result<()> {

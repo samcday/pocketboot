@@ -485,6 +485,7 @@ fn configure_busybox(config: &Path, features: &FeatureSet) -> Result<()> {
         "LN",
         "LOSETUP",
         "LS",
+        "LSMOD",
         "MKDIR",
         "MKNOD",
         "MKTEMP",

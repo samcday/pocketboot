@@ -9,8 +9,8 @@ INPUT_MISC = true
 INPUT_TOUCHSCREEN = true
 KEYBOARD_GPIO = true
 INPUT_PM8941_PWRKEY = true
-TOUCHSCREEN_MMS114 = true
-KEYBOARD_TM2_TOUCHKEY = true
+TOUCHSCREEN_MMS114 = "m"
+KEYBOARD_TM2_TOUCHKEY = "m"
 
 # Touchkey LEDs and board GPIO-controlled rails
 NEW_LEDS = true
@@ -20,18 +20,30 @@ REGULATOR_FIXED_VOLTAGE = true
 # Bitbanged I2C sideband buses and USB MUIC
 I2C_GPIO = true
 EXTCON = true
-EXTCON_SM5502 = true
+EXTCON_SM5502 = "m"
 
 # RT5033 PMIC, charger, fuel gauge and board regulators
-MFD_RT5033 = true
-REGULATOR_RT5033 = true
-CHARGER_RT5033 = true
-BATTERY_RT5033 = true
+POWER_SUPPLY = true
+MFD_RT5033 = "m"
+REGULATOR_RT5033 = "m"
+CHARGER_RT5033 = "m"
+BATTERY_RT5033 = "m"
 
 # Vibrator on the GCC GP2 clock PWM
 PWM = true
 PWM_CLK = true
 INPUT_PWM_VIBRA = true
+
+[bootmenu]
+modules = [
+  "mms114",
+  "tm2-touchkey",
+  "extcon-sm5502",
+  "rt5033",
+  "rt5033-regulator",
+  "rt5033_charger",
+  "rt5033_battery",
+]
 
 [bootimg]
 header_version = 0

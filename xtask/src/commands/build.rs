@@ -42,6 +42,7 @@ fn build(args: BuildArgs) -> Result<()> {
         &args.device,
         &device_config.cpio,
         &device_config.features,
+        &device_config.bootmenu,
         None,
         false,
     )?;
