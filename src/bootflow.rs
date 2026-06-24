@@ -19,6 +19,7 @@ const SYS_BLOCK: &str = "/sys/block";
 const DEV: &str = "/dev";
 const DEV_LOOP_CONTROL: &str = "/dev/loop-control";
 const BOOT_MOUNT_ROOT: &str = "/run/pocketboot/boot";
+const FDT_COMPATIBLE_PATH: &str = "/sys/firmware/devicetree/base/compatible";
 const EXTLINUX_CONFIG_PATHS: [&str; 2] = ["extlinux/extlinux.conf", "boot/extlinux/extlinux.conf"];
 const GPT_SIGNATURE: &[u8; 8] = b"EFI PART";
 const GPT_MIN_HEADER_SIZE: usize = 92;
@@ -1056,8 +1057,7 @@ fn mount_fs(source: &Path, target: &Path, fstype: &'static str) -> io::Result<()
     let source = cstring_path(source)?;
     let target = cstring_path(target)?;
     let fstype = CString::new(fstype).expect("static fstype has no NUL");
-    let flags =
-        libc::MS_RDONLY | libc::MS_NOSUID | libc::MS_NODEV | libc::MS_NOEXEC;
+    let flags = libc::MS_RDONLY | libc::MS_NOSUID | libc::MS_NODEV | libc::MS_NOEXEC;
     let rc = unsafe {
         libc::mount(
             source.as_ptr(),
@@ -1370,6 +1370,11 @@ fn parse_bls_file(
         initrds.push(path);
     }
 
+    let dtb = bls_dtb_path(root, source, &bls, context)?;
+    if dtb.is_none() && bls.requires_dtb() {
+        return Ok(None);
+    }
+
     let filename = source
         .file_name()
         .map(|name| name.to_string_lossy().into_owned())
@@ -1396,10 +1401,161 @@ fn parse_bls_file(
         preferred,
         linux,
         initrds,
-        dtb: None,
+        dtb,
         options,
         boot_order: u32::from(preferred_entry.is_some() && !preferred),
     }))
+}
+
+fn bls_dtb_path(
+    root: &Path,
+    source: &Path,
+    bls: &BlsSnippet,
+    context: &BlsContext,
+) -> io::Result<Option<PathBuf>> {
+    if let Some(devicetree) = bls
+        .devicetree
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    {
+        let devicetree = context.expand(devicetree);
+        let path = resolve_boot_path(root, &devicetree)?;
+        if path.is_file() {
+            return Ok(Some(path));
+        }
+
+        tracing::warn!(source = %source.display(), dtb = %path.display(), "BLS devicetree payload is missing");
+        return Ok(None);
+    }
+
+    if bls.fdtdirs.is_empty() {
+        return Ok(None);
+    }
+
+    let compatibles = match read_fdt_compatibles() {
+        Ok(compatibles) => compatibles,
+        Err(err) => {
+            tracing::warn!(source = %source.display(), path = FDT_COMPATIBLE_PATH, error = ?err, "cannot resolve BLS fdtdir without live FDT compatibles");
+            return Ok(None);
+        }
+    };
+
+    for fdtdir in bls
+        .fdtdirs
+        .iter()
+        .map(|value| context.expand(value))
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+    {
+        let path = resolve_boot_path(root, &fdtdir)?;
+        if !path.is_dir() {
+            tracing::warn!(source = %source.display(), fdtdir = %path.display(), "BLS fdtdir is missing");
+            continue;
+        }
+
+        if let Some(dtb) = select_fdtdir_dtb(&path, &compatibles) {
+            tracing::info!(source = %source.display(), fdtdir = %path.display(), dtb = %dtb.display(), compatible = %compatibles.join("|"), "selected BLS fdtdir DTB");
+            return Ok(Some(dtb));
+        }
+    }
+
+    tracing::warn!(source = %source.display(), compatible = %compatibles.join("|"), "no BLS fdtdir DTB matches live device");
+    Ok(None)
+}
+
+fn read_fdt_compatibles() -> io::Result<Vec<String>> {
+    let values = fs::read(FDT_COMPATIBLE_PATH).map(|bytes| parse_fdt_strings(&bytes))?;
+    if values.is_empty() {
+        Err(invalid_data("live FDT compatible list is empty"))
+    } else {
+        Ok(values)
+    }
+}
+
+fn parse_fdt_strings(bytes: &[u8]) -> Vec<String> {
+    bytes
+        .split(|byte| *byte == 0)
+        .filter(|value| !value.is_empty())
+        .filter_map(|value| std::str::from_utf8(value).ok())
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(str::to_string)
+        .collect()
+}
+
+fn select_fdtdir_dtb(fdtdir: &Path, compatibles: &[String]) -> Option<PathBuf> {
+    fdtdir_candidate_paths(compatibles)
+        .into_iter()
+        .map(|relative| fdtdir.join(relative))
+        .find(|path| path.is_file())
+}
+
+fn fdtdir_candidate_paths(compatibles: &[String]) -> Vec<PathBuf> {
+    let compatible_names = compatibles
+        .iter()
+        .filter_map(|compatible| parse_compatible_name(compatible))
+        .collect::<Vec<_>>();
+    let mut paths = Vec::new();
+
+    for (board_index, board) in compatible_names.iter().enumerate() {
+        push_dtb_candidate_paths(&mut paths, board);
+        for soc in compatible_names.iter().skip(board_index + 1) {
+            push_unique_path(
+                &mut paths,
+                PathBuf::from(&soc.vendor)
+                    .join(format!("{}-{}-{}.dtb", soc.name, board.vendor, board.name)),
+            );
+            push_unique_path(
+                &mut paths,
+                PathBuf::from(&soc.vendor).join(format!("{}-{}.dtb", soc.name, board.name)),
+            );
+        }
+    }
+
+    paths
+}
+
+fn push_dtb_candidate_paths(paths: &mut Vec<PathBuf>, compatible: &CompatibleName) {
+    push_unique_path(
+        paths,
+        PathBuf::from(&compatible.vendor).join(format!("{}.dtb", compatible.name)),
+    );
+    push_unique_path(paths, PathBuf::from(format!("{}.dtb", compatible.name)));
+    push_unique_path(
+        paths,
+        PathBuf::from(format!("{},{}.dtb", compatible.vendor, compatible.name)),
+    );
+}
+
+fn push_unique_path(paths: &mut Vec<PathBuf>, path: PathBuf) {
+    if !paths.iter().any(|existing| existing == &path) {
+        paths.push(path);
+    }
+}
+
+#[derive(Clone, Debug)]
+struct CompatibleName {
+    vendor: String,
+    name: String,
+}
+
+fn parse_compatible_name(compatible: &str) -> Option<CompatibleName> {
+    let (vendor, name) = compatible.split_once(',')?;
+    let vendor = safe_dtb_name_part(vendor)?;
+    let name = safe_dtb_name_part(name)?;
+    Some(CompatibleName { vendor, name })
+}
+
+fn safe_dtb_name_part(value: &str) -> Option<String> {
+    let value = value.trim();
+    (!value.is_empty()
+        && value != "."
+        && value != ".."
+        && value
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_' | b'.')))
+    .then(|| value.to_string())
 }
 
 #[derive(Debug, Default)]
@@ -1409,10 +1565,19 @@ struct BlsSnippet {
     architecture: Option<String>,
     linux: Option<String>,
     initrds: Vec<String>,
+    devicetree: Option<String>,
+    fdtdirs: Vec<String>,
     options: Vec<String>,
 }
 
 impl BlsSnippet {
+    fn requires_dtb(&self) -> bool {
+        self.devicetree
+            .as_deref()
+            .is_some_and(|value| !value.trim().is_empty())
+            || self.fdtdirs.iter().any(|value| !value.trim().is_empty())
+    }
+
     fn parse(text: &str) -> Self {
         let mut snippet = Self::default();
         for line in text.lines() {
@@ -1436,8 +1601,10 @@ impl BlsSnippet {
                 "architecture" => snippet.architecture = Some(value.to_string()),
                 "linux" => snippet.linux = Some(value.to_string()),
                 "initrd" => snippet.initrds.push(value.to_string()),
+                "devicetree" => snippet.devicetree = Some(value.to_string()),
+                "fdtdir" => snippet.fdtdirs.push(value.to_string()),
                 "options" => snippet.options.push(value.to_string()),
-                "machine-id" | "machine_id" | "sort-key" | "sort_key" | "efi" | "devicetree"
+                "machine-id" | "machine_id" | "sort-key" | "sort_key" | "efi"
                 | "devicetree-overlay" | "devicetree_overlay" | "grub_class" | "grub_users"
                 | "grub_hotkey" | "grub_arg" => {}
                 _ => tracing::debug!(key, "ignoring unsupported BLS key"),
@@ -1824,13 +1991,14 @@ mod tests {
     #[test]
     fn parses_minimal_bls_entry() {
         let snippet = BlsSnippet::parse(
-            "title Test OS\nversion 1.2.3\nlinux /vmlinuz\ninitrd /initrd.img\noptions root=UUID=abc quiet\n",
+            "title Test OS\nversion 1.2.3\nlinux /vmlinuz\ninitrd /initrd.img\nfdtdir /dtb\noptions root=UUID=abc quiet\n",
         );
 
         assert_eq!(snippet.title.as_deref(), Some("Test OS"));
         assert_eq!(snippet.version.as_deref(), Some("1.2.3"));
         assert_eq!(snippet.linux.as_deref(), Some("/vmlinuz"));
         assert_eq!(snippet.initrds, ["/initrd.img"]);
+        assert_eq!(snippet.fdtdirs, ["/dtb"]);
         assert_eq!(snippet.options, ["root=UUID=abc quiet"]);
     }
 
@@ -1968,6 +2136,39 @@ mod tests {
             split_bls_words("/initramfs.img  /tuned.img"),
             ["/initramfs.img", "/tuned.img"]
         );
+    }
+
+    #[test]
+    fn fdtdir_candidates_prefer_board_specific_dtb() {
+        let candidates =
+            fdtdir_candidate_paths(&["oneplus,fajita".to_string(), "qcom,sdm845".to_string()]);
+        let board = PathBuf::from("qcom").join("sdm845-oneplus-fajita.dtb");
+        let generic = PathBuf::from("qcom").join("sdm845.dtb");
+        let board_index = candidates.iter().position(|path| path == &board).unwrap();
+        let generic_index = candidates.iter().position(|path| path == &generic).unwrap();
+
+        assert!(board_index < generic_index);
+    }
+
+    #[test]
+    fn selects_fdtdir_dtb_from_live_compatibles() {
+        let root =
+            std::env::temp_dir().join(format!("pocketboot-fdtdir-test-{}", std::process::id()));
+        let qcom = root.join("qcom");
+        let dtb = qcom.join("sdm845-oneplus-fajita.dtb");
+        let _ = fs::remove_dir_all(&root);
+        fs::create_dir_all(&qcom).unwrap();
+        File::create(&dtb).unwrap();
+
+        assert_eq!(
+            select_fdtdir_dtb(
+                &root,
+                &["oneplus,fajita".to_string(), "qcom,sdm845".to_string()]
+            ),
+            Some(dtb)
+        );
+
+        fs::remove_dir_all(&root).unwrap();
     }
 
     #[test]
