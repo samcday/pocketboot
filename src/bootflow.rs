@@ -31,7 +31,6 @@ const MBR_PRIMARY_PARTITIONS: usize = 4;
 const GPT_PROTECTIVE_MBR_TYPE: u8 = 0xee;
 const MBR_XBOOTLDR_TYPE: u8 = 0xea;
 const DEFAULT_LOGICAL_BLOCK_SIZE: u64 = 512;
-const MS_NOSYMFOLLOW: libc::c_ulong = 256;
 const USERDATA_PARTNAME: &str = "userdata";
 const MBR_LINUX_PARTITION_TYPE: u8 = 0x83;
 const LOOP_CTL_GET_FREE: libc::Ioctl = 0x4c82;
@@ -1058,7 +1057,7 @@ fn mount_fs(source: &Path, target: &Path, fstype: &'static str) -> io::Result<()
     let target = cstring_path(target)?;
     let fstype = CString::new(fstype).expect("static fstype has no NUL");
     let flags =
-        libc::MS_RDONLY | libc::MS_NOSUID | libc::MS_NODEV | libc::MS_NOEXEC | MS_NOSYMFOLLOW;
+        libc::MS_RDONLY | libc::MS_NOSUID | libc::MS_NODEV | libc::MS_NOEXEC;
     let rc = unsafe {
         libc::mount(
             source.as_ptr(),
