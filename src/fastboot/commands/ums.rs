@@ -67,13 +67,6 @@ impl FastbootUms {
                 ))?;
                 Ok(CommandResult::continue_())
             }
-            Ok(MassStorageStart::AfterResponse { lun, action }) => {
-                context.okay(format!(
-                    "UMS start scheduled for {} on LUN {lun}",
-                    backing.display()
-                ))?;
-                Ok(CommandResult::continue_then(action))
-            }
             Err(err) => {
                 context.fail(format!("UMS start failed: {err}"))?;
                 Ok(CommandResult::continue_())
@@ -95,13 +88,6 @@ impl FastbootUms {
                     backing.display()
                 ))?;
                 Ok(CommandResult::continue_())
-            }
-            Ok(MassStorageStop::AfterResponse { lun, action }) => {
-                context.okay(format!(
-                    "UMS stopped for {} from LUN {lun}",
-                    backing.display()
-                ))?;
-                Ok(CommandResult::continue_then(action))
             }
             Err(err) => {
                 context.fail(stop_failure_message(&backing, &err))?;

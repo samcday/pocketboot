@@ -58,32 +58,19 @@ impl UmsState {
         self.slots.clear();
     }
 
-    fn active_count(&self) -> usize {
-        self.slots.iter().flatten().count()
+    fn set_function(&mut self, function_dir: PathBuf) {
+        self.function_dir = Some(function_dir);
+        self.slots = vec![None; MAX_UMS_LUNS];
     }
 }
 
 pub(crate) enum MassStorageStart {
-    Started {
-        lun: usize,
-    },
-    AlreadyStarted {
-        lun: usize,
-    },
-    AfterResponse {
-        lun: usize,
-        action: PostResponseAction,
-    },
+    Started { lun: usize },
+    AlreadyStarted { lun: usize },
 }
 
 pub(crate) enum MassStorageStop {
-    Stopped {
-        lun: usize,
-    },
-    AfterResponse {
-        lun: usize,
-        action: PostResponseAction,
-    },
+    Stopped { lun: usize },
 }
 
 #[allow(dead_code)]
@@ -177,14 +164,6 @@ impl Gadget {
             return Ok(MassStorageStart::AlreadyStarted { lun });
         }
 
-        if state.ums.function_dir.is_none() {
-            let gadget = self.clone();
-            return Ok(MassStorageStart::AfterResponse {
-                lun: 0,
-                action: Box::new(move || gadget.activate_mass_storage(backing)),
-            });
-        }
-
         let lun = attach_mass_storage_slot(&mut state, backing)?;
         Ok(MassStorageStart::Started { lun })
     }
@@ -199,98 +178,7 @@ impl Gadget {
         })?;
 
         detach_mass_storage_slot(&mut state, lun)?;
-        if state.ums.active_count() == 0 {
-            let gadget = self.clone();
-            Ok(MassStorageStop::AfterResponse {
-                lun,
-                action: Box::new(move || gadget.deactivate_mass_storage()),
-            })
-        } else {
-            Ok(MassStorageStop::Stopped { lun })
-        }
-    }
-
-    fn activate_mass_storage(&self, backing: PathBuf) -> io::Result<()> {
-        let mut state = self.state.lock().unwrap();
-        if mass_storage_lun(&state.ums, &backing).is_some() {
-            tracing::info!(backing = %backing.display(), "UMS backing already active after response");
-            return Ok(());
-        }
-        if state.ums.function_dir.is_some() {
-            attach_mass_storage_slot(&mut state, backing)?;
-            return Ok(());
-        }
-
-        let reg = state.reg.as_ref().ok_or_else(|| {
-            io::Error::new(io::ErrorKind::NotConnected, "USB gadget is not registered")
-        })?;
-        let udc = state.udc.clone().ok_or_else(|| {
-            io::Error::new(io::ErrorKind::NotConnected, "USB gadget is not bound")
-        })?;
-        let udc_name = udc.name().to_string_lossy().into_owned();
-        let gadget_path = reg.path().to_path_buf();
-
-        tracing::info!(backing = %backing.display(), udc = %udc_name, "adding UMS function");
-        reg.bind(None)?;
-        tracing::info!(udc = %udc_name, "USB gadget unbound for UMS add");
-
-        let function_dir = match create_mass_storage_function(&gadget_path) {
-            Ok(function_dir) => function_dir,
-            Err(add_err) => return rebind_after_error(reg, &udc, add_err, "UMS add"),
-        };
-
-        if let Err(attach_err) = attach_mass_storage_lun(&lun_dir(&function_dir, 0), &backing) {
-            cleanup_mass_storage_function(&gadget_path);
-            return rebind_after_error(reg, &udc, attach_err, "UMS attach");
-        }
-
-        if let Err(bind_err) = reg.bind(Some(&udc)) {
-            cleanup_mass_storage_function(&gadget_path);
-            return rebind_after_error(reg, &udc, bind_err, "UMS bind");
-        }
-
-        state.ums.function_dir = Some(function_dir);
-        state.ums.slots = vec![None; MAX_UMS_LUNS];
-        state.ums.slots[0] = Some(backing.clone());
-        tracing::info!(backing = %backing.display(), lun = 0, udc = %udc_name, "USB gadget rebound with UMS function");
-        Ok(())
-    }
-
-    fn deactivate_mass_storage(&self) -> io::Result<()> {
-        let mut state = self.state.lock().unwrap();
-        if state.ums.function_dir.is_none() {
-            tracing::info!("UMS function already removed");
-            return Ok(());
-        }
-        if state.ums.active_count() != 0 {
-            tracing::info!(
-                active = state.ums.active_count(),
-                "keeping UMS function with active LUNs"
-            );
-            return Ok(());
-        }
-
-        let reg = state.reg.as_ref().ok_or_else(|| {
-            io::Error::new(io::ErrorKind::NotConnected, "USB gadget is not registered")
-        })?;
-        let udc = state.udc.clone().ok_or_else(|| {
-            io::Error::new(io::ErrorKind::NotConnected, "USB gadget is not bound")
-        })?;
-        let udc_name = udc.name().to_string_lossy().into_owned();
-        let gadget_path = reg.path().to_path_buf();
-
-        tracing::info!(udc = %udc_name, "removing idle UMS function");
-        reg.bind(None)?;
-        tracing::info!(udc = %udc_name, "USB gadget unbound for UMS removal");
-
-        if let Err(remove_err) = remove_mass_storage_function(&gadget_path) {
-            return rebind_after_error(reg, &udc, remove_err, "UMS removal");
-        }
-
-        reg.bind(Some(&udc))?;
-        state.ums.clear();
-        tracing::info!(udc = %udc_name, "USB gadget rebound without UMS function");
-        Ok(())
+        Ok(MassStorageStop::Stopped { lun })
     }
 
     fn run(&self, mode: Mode) -> ThreadResult {
@@ -310,7 +198,7 @@ impl Gadget {
     fn setup_console_gadget(&self) -> ThreadResult {
         let serial = AcmFunction::new();
         let config = config_with_functions(&[&serial]);
-        self.register_and_bind(config)?;
+        self.register_and_bind(config, false)?;
         Ok(None)
     }
 
@@ -323,7 +211,7 @@ impl Gadget {
         } else {
             config_with_functions(&[&fastboot_function, &adb_function])
         };
-        self.register_and_bind(config)?;
+        self.register_and_bind(config, true)?;
 
         let (server, event_loop) = fastboot_function.start()?;
         let (adb_server, adb_event_loop) = adb_function.start()?;
@@ -357,7 +245,7 @@ impl Gadget {
         Ok(action)
     }
 
-    fn register_and_bind(&self, config: Config) -> io::Result<()> {
+    fn register_and_bind(&self, config: Config, include_mass_storage: bool) -> io::Result<()> {
         let gadget = RawGadget::new(
             Class::INTERFACE_SPECIFIC,
             Id::new(VENDOR_ID, PRODUCT_ID),
@@ -367,6 +255,14 @@ impl Gadget {
 
         let reg = gadget.register()?;
         tracing::info!(path = %reg.path().display(), "USB gadget registered");
+
+        let mass_storage_function_dir = if include_mass_storage {
+            let function_dir = create_mass_storage_function(reg.path())?;
+            tracing::info!(path = %function_dir.display(), luns = MAX_UMS_LUNS, "UMS function registered");
+            Some(function_dir)
+        } else {
+            None
+        };
 
         let udc = wait_for_udc(Duration::from_secs(10))?;
         let udc_name = udc.name().to_string_lossy().into_owned();
@@ -381,7 +277,11 @@ impl Gadget {
             ));
         }
         state.udc = Some(udc);
-        state.ums.clear();
+        if let Some(function_dir) = mass_storage_function_dir {
+            state.ums.set_function(function_dir);
+        } else {
+            state.ums.clear();
+        }
         state.reg = Some(reg);
         Ok(())
     }
@@ -549,28 +449,6 @@ fn remove_optional_dir(path: &Path) -> io::Result<()> {
         Ok(()) => Ok(()),
         Err(err) if err.kind() == io::ErrorKind::NotFound => Ok(()),
         Err(err) => Err(err),
-    }
-}
-
-fn rebind_after_error(
-    reg: &RegGadget,
-    udc: &Udc,
-    err: io::Error,
-    operation: &str,
-) -> io::Result<()> {
-    let udc_name = udc.name().to_string_lossy();
-    match reg.bind(Some(udc)) {
-        Ok(()) => {
-            tracing::info!(udc = %udc_name, operation, "USB gadget rebound after UMS error");
-            Err(err)
-        }
-        Err(rebind_err) => {
-            tracing::error!(udc = %udc_name, operation, error = ?rebind_err, "USB rebind failed after UMS error");
-            Err(io::Error::new(
-                rebind_err.kind(),
-                format!("{operation} failed: {err}; USB rebind failed: {rebind_err}"),
-            ))
-        }
     }
 }
 
