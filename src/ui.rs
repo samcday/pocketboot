@@ -154,10 +154,11 @@ fn run(
         .map_err(|err| format!("show Slint window: {err}"))?;
 
     let mut touch = TouchInput::new();
-    let mut power_key = PowerKeyInput::new();
+    let mut buttons = ButtonInput::new();
     let mut battery = battery.map(BatteryUpdates::new);
     let mut commands = UiCommands::new(commands);
     let mut pointer_down = false;
+    let mut power_press_context = PowerPressContext::BootMenu;
     let display_path = kms_display.path.display().to_string();
     let connector = kms_display.connector.to_string();
     tracing::info!(
@@ -203,9 +204,31 @@ fn run(
             }
         }
 
-        for event in power_key.poll() {
+        for event in buttons.poll() {
             match event {
-                PowerKeyEvent::OpenMenu => main_window.invoke_show_power_menu(),
+                ButtonEvent::Previous => main_window.invoke_hardware_nav_previous(),
+                ButtonEvent::Next => main_window.invoke_hardware_nav_next(),
+                ButtonEvent::PowerPressed => {
+                    power_press_context = if main_window.get_power_menu_open() {
+                        PowerPressContext::PowerMenu
+                    } else {
+                        PowerPressContext::BootMenu
+                    };
+                    main_window.invoke_hardware_power_pressed();
+                }
+                ButtonEvent::PowerReleased => main_window.invoke_hardware_power_released(),
+                ButtonEvent::PowerShortPress => {
+                    if matches!(power_press_context, PowerPressContext::BootMenu) {
+                        main_window.invoke_hardware_power_short_press();
+                    }
+                }
+                ButtonEvent::OpenMenu => {
+                    if matches!(power_press_context, PowerPressContext::BootMenu)
+                        && !main_window.get_power_menu_open()
+                    {
+                        main_window.invoke_show_power_menu();
+                    }
+                }
             }
         }
 
@@ -272,6 +295,7 @@ fn apply_boot_entries(window: &MainWindow, entries: Vec<BootMenuEntryInfo>, scan
     window.set_boot_entry_count(i32::try_from(count).unwrap_or(i32::MAX));
     window.set_boot_scan_complete(scan_complete);
     window.set_booting_index(-1);
+    window.invoke_refresh_boot_selection();
 }
 
 struct BatteryUpdates {
@@ -895,13 +919,13 @@ impl TouchInput {
     }
 }
 
-struct PowerKeyInput {
-    devices: Vec<PowerKeyDevice>,
+struct ButtonInput {
+    devices: Vec<ButtonDevice>,
     ignored_devices: Vec<PathBuf>,
     next_scan: Instant,
 }
 
-impl PowerKeyInput {
+impl ButtonInput {
     fn new() -> Self {
         let mut input = Self {
             devices: Vec::new(),
@@ -912,7 +936,7 @@ impl PowerKeyInput {
         input
     }
 
-    fn poll(&mut self) -> Vec<PowerKeyEvent> {
+    fn poll(&mut self) -> Vec<ButtonEvent> {
         if Instant::now() >= self.next_scan {
             self.rescan();
         }
@@ -923,7 +947,7 @@ impl PowerKeyInput {
             match self.devices[index].poll(&mut events) {
                 Ok(()) => index += 1,
                 Err(err) => {
-                    tracing::warn!(path = %self.devices[index].path.display(), error = %err, "dropping power-key input device");
+                    tracing::warn!(path = %self.devices[index].path.display(), error = %err, "dropping hardware button input device");
                     self.devices.swap_remove(index);
                 }
             }
@@ -954,9 +978,9 @@ impl PowerKeyInput {
             if self.ignored_devices.iter().any(|ignored| *ignored == path) {
                 continue;
             }
-            match PowerKeyDevice::open(&path) {
+            match ButtonDevice::open(&path) {
                 Ok(device) => {
-                    tracing::info!(path = %path.display(), "opened power-key input device");
+                    tracing::info!(path = %path.display(), "opened hardware button input device");
                     self.devices.push(device);
                 }
                 Err(err) => {
@@ -971,13 +995,13 @@ impl PowerKeyInput {
     }
 }
 
-struct PowerKeyDevice {
+struct ButtonDevice {
     file: File,
     path: PathBuf,
-    state: PowerKeyState,
+    state: ButtonState,
 }
 
-impl PowerKeyDevice {
+impl ButtonDevice {
     fn open(path: &Path) -> Result<Self, String> {
         let file = OpenOptions::new()
             .read(true)
@@ -986,18 +1010,19 @@ impl PowerKeyDevice {
             .map_err(|err| format!("open: {err}"))?;
         let fd = file.as_raw_fd();
 
-        if !query_key(fd, KEY_POWER).map_err(|err| format!("query KEY_POWER: {err}"))? {
-            return Err("device does not advertise KEY_POWER".to_string());
+        let keys = query_button_keys(fd).map_err(|err| format!("query navigation keys: {err}"))?;
+        if !keys.any() {
+            return Err("device does not advertise hardware navigation keys".to_string());
         }
 
         Ok(Self {
             file,
             path: path.to_path_buf(),
-            state: PowerKeyState::default(),
+            state: ButtonState::default(),
         })
     }
 
-    fn poll(&mut self, events: &mut Vec<PowerKeyEvent>) -> io::Result<()> {
+    fn poll(&mut self, events: &mut Vec<ButtonEvent>) -> io::Result<()> {
         let mut buffer = [0u8; mem::size_of::<InputEvent>() * 32];
         loop {
             match self.file.read(&mut buffer) {
@@ -1009,7 +1034,7 @@ impl PowerKeyDevice {
                     {
                         let event =
                             unsafe { ptr::read_unaligned(chunk.as_ptr().cast::<InputEvent>()) };
-                        self.state.handle(event);
+                        self.state.handle(event, events);
                     }
                 }
                 Err(err) if err.kind() == io::ErrorKind::WouldBlock => break,
@@ -1018,50 +1043,92 @@ impl PowerKeyDevice {
             }
         }
 
-        if let Some(event) = self.state.poll() {
-            events.push(event);
-        }
+        self.state.poll(events);
         Ok(())
     }
 }
 
 #[derive(Default)]
-struct PowerKeyState {
-    pressed_since: Option<Instant>,
-    reported: bool,
+struct ButtonState {
+    power_pressed_since: Option<Instant>,
+    power_long_reported: bool,
 }
 
-impl PowerKeyState {
-    fn handle(&mut self, event: InputEvent) {
-        if event.type_ != EV_KEY || event.code != KEY_POWER {
+impl ButtonState {
+    fn handle(&mut self, event: InputEvent, events: &mut Vec<ButtonEvent>) {
+        if event.type_ != EV_KEY {
             return;
         }
 
-        match event.value {
+        match event.code {
+            KEY_VOLUMEUP if matches!(event.value, 1 | 2) => events.push(ButtonEvent::Previous),
+            KEY_VOLUMEDOWN if matches!(event.value, 1 | 2) => events.push(ButtonEvent::Next),
+            KEY_POWER => self.handle_power(event.value, events),
+            _ => {}
+        }
+    }
+
+    fn handle_power(&mut self, value: i32, events: &mut Vec<ButtonEvent>) {
+        match value {
             0 => {
-                self.pressed_since = None;
-                self.reported = false;
+                let was_pressed = self.power_pressed_since.take().is_some();
+                let was_long = self.power_long_reported;
+                self.power_long_reported = false;
+                if was_pressed {
+                    events.push(ButtonEvent::PowerReleased);
+                    if !was_long {
+                        events.push(ButtonEvent::PowerShortPress);
+                    }
+                }
             }
             1 => {
-                self.pressed_since = Some(Instant::now());
-                self.reported = false;
+                self.power_pressed_since = Some(Instant::now());
+                self.power_long_reported = false;
+                events.push(ButtonEvent::PowerPressed);
             }
             _ => {}
         }
     }
 
-    fn poll(&mut self) -> Option<PowerKeyEvent> {
-        let pressed_since = self.pressed_since?;
-        if self.reported || pressed_since.elapsed() < POWER_KEY_HOLD {
-            return None;
+    fn poll(&mut self, events: &mut Vec<ButtonEvent>) {
+        let Some(pressed_since) = self.power_pressed_since else {
+            return;
+        };
+        if self.power_long_reported || pressed_since.elapsed() < POWER_KEY_HOLD {
+            return;
         }
 
-        self.reported = true;
-        Some(PowerKeyEvent::OpenMenu)
+        self.power_long_reported = true;
+        events.push(ButtonEvent::OpenMenu);
     }
 }
 
-enum PowerKeyEvent {
+#[derive(Clone, Copy, Default)]
+struct ButtonKeys {
+    volume_up: bool,
+    volume_down: bool,
+    power: bool,
+}
+
+impl ButtonKeys {
+    fn any(self) -> bool {
+        self.volume_up || self.volume_down || self.power
+    }
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum PowerPressContext {
+    BootMenu,
+    PowerMenu,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum ButtonEvent {
+    Previous,
+    Next,
+    PowerPressed,
+    PowerReleased,
+    PowerShortPress,
     OpenMenu,
 }
 
@@ -1322,10 +1389,14 @@ fn query_axis(fd: i32, code: u16) -> io::Result<Axis> {
     })
 }
 
-fn query_key(fd: i32, code: u16) -> io::Result<bool> {
-    let mut bits = [0u8; KEY_POWER_BITS_BYTES];
+fn query_button_keys(fd: i32) -> io::Result<ButtonKeys> {
+    let mut bits = [0u8; KEY_BITS_BYTES];
     ioctl_read(fd, eviocgbit(EV_KEY, bits.len()), &mut bits)?;
-    Ok(test_bit(&bits, code))
+    Ok(ButtonKeys {
+        volume_up: test_bit(&bits, KEY_VOLUMEUP),
+        volume_down: test_bit(&bits, KEY_VOLUMEDOWN),
+        power: test_bit(&bits, KEY_POWER),
+    })
 }
 
 fn test_bit(bits: &[u8], bit: u16) -> bool {
@@ -1376,8 +1447,10 @@ const EV_SYN: u16 = 0x00;
 const EV_KEY: u16 = 0x01;
 const EV_ABS: u16 = 0x03;
 const SYN_REPORT: u16 = 0x00;
+const KEY_VOLUMEDOWN: u16 = 0x72;
+const KEY_VOLUMEUP: u16 = 0x73;
 const KEY_POWER: u16 = 0x74;
-const KEY_POWER_BITS_BYTES: usize = KEY_POWER as usize / 8 + 1;
+const KEY_BITS_BYTES: usize = KEY_POWER as usize / 8 + 1;
 const BTN_TOUCH: u16 = 0x14a;
 const ABS_X: u16 = 0x00;
 const ABS_Y: u16 = 0x01;
@@ -1404,6 +1477,97 @@ struct InputAbsInfo {
     fuzz: i32,
     flat: i32,
     resolution: i32,
+}
+
+#[cfg(test)]
+mod button_tests {
+    use super::*;
+
+    fn event(type_: u16, code: u16, value: i32) -> InputEvent {
+        InputEvent {
+            time: libc::timeval {
+                tv_sec: 0,
+                tv_usec: 0,
+            },
+            type_,
+            code,
+            value,
+        }
+    }
+
+    #[test]
+    fn volume_buttons_emit_navigation_on_press_and_repeat() {
+        let mut state = ButtonState::default();
+        let mut events = Vec::new();
+
+        state.handle(event(EV_KEY, KEY_VOLUMEUP, 1), &mut events);
+        state.handle(event(EV_KEY, KEY_VOLUMEUP, 2), &mut events);
+        state.handle(event(EV_KEY, KEY_VOLUMEDOWN, 1), &mut events);
+        state.handle(event(EV_KEY, KEY_VOLUMEDOWN, 2), &mut events);
+
+        assert_eq!(
+            events,
+            vec![
+                ButtonEvent::Previous,
+                ButtonEvent::Previous,
+                ButtonEvent::Next,
+                ButtonEvent::Next,
+            ]
+        );
+    }
+
+    #[test]
+    fn short_power_press_reports_press_release_and_short_press() {
+        let mut state = ButtonState::default();
+        let mut events = Vec::new();
+
+        state.handle(event(EV_KEY, KEY_POWER, 1), &mut events);
+        state.handle(event(EV_KEY, KEY_POWER, 0), &mut events);
+
+        assert_eq!(
+            events,
+            vec![
+                ButtonEvent::PowerPressed,
+                ButtonEvent::PowerReleased,
+                ButtonEvent::PowerShortPress,
+            ]
+        );
+    }
+
+    #[test]
+    fn long_power_hold_opens_menu_once() {
+        let mut state = ButtonState::default();
+        let mut events = Vec::new();
+
+        state.handle(event(EV_KEY, KEY_POWER, 1), &mut events);
+        events.clear();
+        state.power_pressed_since =
+            Some(Instant::now() - POWER_KEY_HOLD - Duration::from_millis(1));
+
+        state.poll(&mut events);
+        state.poll(&mut events);
+
+        assert_eq!(events, vec![ButtonEvent::OpenMenu]);
+    }
+
+    #[test]
+    fn long_power_hold_suppresses_short_press_on_release() {
+        let mut state = ButtonState::default();
+        let mut events = Vec::new();
+
+        state.handle(event(EV_KEY, KEY_POWER, 1), &mut events);
+        events.clear();
+        state.power_pressed_since =
+            Some(Instant::now() - POWER_KEY_HOLD - Duration::from_millis(1));
+
+        state.poll(&mut events);
+        state.handle(event(EV_KEY, KEY_POWER, 0), &mut events);
+
+        assert_eq!(
+            events,
+            vec![ButtonEvent::OpenMenu, ButtonEvent::PowerReleased]
+        );
+    }
 }
 
 #[cfg(test)]

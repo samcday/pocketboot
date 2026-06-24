@@ -21,10 +21,12 @@ export component MainWindow inherits Window {
     in-out property <int> boot-entry-count: 0;
     in-out property <bool> boot-scan-complete: false;
     in-out property <int> booting-index: -1;
+    in-out property <int> hardware-selected-index: -1;
     in-out property <bool> battery-known: false;
     in-out property <int> battery-percent: 0;
     in-out property <BatteryStatus> battery-status: BatteryStatus.Unknown;
     in-out property <bool> power-menu-open: false;
+    in-out property <int> power-menu-selection: 0;
     in-out property <int> hold-action: 0;
     in-out property <float> hold-progress: 0;
 
@@ -33,6 +35,7 @@ export component MainWindow inherits Window {
 
     public function show-power-menu() {
         root.power-menu-open = true;
+        root.power-menu-selection = 0;
         root.hold-action = 0;
         root.hold-progress = 0;
     }
@@ -40,6 +43,7 @@ export component MainWindow inherits Window {
     function hide-power-menu() {
         if (root.hold-action == 0) {
             root.power-menu-open = false;
+            root.power-menu-selection = 0;
             root.hold-progress = 0;
         }
     }
@@ -66,6 +70,125 @@ export component MainWindow inherits Window {
         root.power-menu-open = false;
         root.hold-action = 0;
         root.hold-progress = 0;
+    }
+
+    function clamp-boot-selection() {
+        if (root.boot-entry-count <= 0 || root.booting-index >= 0) {
+            root.hardware-selected-index = -1;
+            return;
+        }
+
+        if (root.hardware-selected-index < 0) {
+            root.hardware-selected-index = 0;
+        }
+        if (root.hardware-selected-index >= root.boot-entry-count) {
+            root.hardware-selected-index = root.boot-entry-count - 1;
+        }
+        root.scroll-boot-selection-into-view();
+    }
+
+    function scroll-boot-selection-into-view() {
+        if (root.hardware-selected-index < 0 || root.boot-entry-count <= 0) {
+            return;
+        }
+
+        let row-y = root.hardware-selected-index * 126px;
+        let row-height = 112px;
+        let visible-y = boot_list.viewport-y + row-y;
+        if (visible-y < 0px) {
+            boot_list.viewport-y += 0px - visible-y;
+        }
+        if (visible-y + row-height > boot_list.height) {
+            boot_list.viewport-y -= visible-y + row-height - boot_list.height;
+        }
+    }
+
+    public function refresh-boot-selection() {
+        root.clamp-boot-selection();
+    }
+
+    function activate-boot-selection() {
+        if (root.booting-index >= 0 || root.boot-entry-count <= 0) {
+            return;
+        }
+
+        root.clamp-boot-selection();
+        if (root.hardware-selected-index >= 0) {
+            root.booting-index = root.hardware-selected-index;
+            root.boot-entry-selected(root.hardware-selected-index);
+        }
+    }
+
+    function set-power-menu-selection(selection: int) {
+        root.hold-action = 0;
+        root.hold-progress = 0;
+        root.power-menu-selection = Math.max(0, Math.min(selection, 2));
+    }
+
+    public function hardware-nav-previous() {
+        if (root.power-menu-open) {
+            root.set-power-menu-selection(root.power-menu-selection - 1);
+            return;
+        }
+        if (root.booting-index >= 0 || root.boot-entry-count <= 0) {
+            return;
+        }
+
+        root.clamp-boot-selection();
+        if (root.hardware-selected-index > 0) {
+            root.hardware-selected-index -= 1;
+        }
+        root.scroll-boot-selection-into-view();
+    }
+
+    public function hardware-nav-next() {
+        if (root.power-menu-open) {
+            root.set-power-menu-selection(root.power-menu-selection + 1);
+            return;
+        }
+        if (root.booting-index >= 0 || root.boot-entry-count <= 0) {
+            return;
+        }
+
+        root.clamp-boot-selection();
+        if (root.hardware-selected-index < root.boot-entry-count - 1) {
+            root.hardware-selected-index += 1;
+        }
+        root.scroll-boot-selection-into-view();
+    }
+
+    public function hardware-power-pressed() {
+        if (!root.power-menu-open) {
+            return;
+        }
+
+        if (root.power-menu-selection == 0) {
+            root.hide-power-menu();
+            return;
+        }
+
+        root.begin-power-hold(root.power-menu-selection);
+    }
+
+    public function hardware-power-released() {
+        if (root.power-menu-open && root.hold-action != 0) {
+            root.hold-action = 0;
+            root.hold-progress = 0;
+        }
+    }
+
+    public function hardware-power-short-press() {
+        if (!root.power-menu-open) {
+            root.activate-boot-selection();
+        }
+    }
+
+    changed boot-entry-count => {
+        root.clamp-boot-selection();
+    }
+
+    changed hardware-selected-index => {
+        root.scroll-boot-selection-into-view();
     }
 
     Timer {
@@ -276,7 +399,7 @@ export component MainWindow inherits Window {
             height: 32px;
             x: 24px;
             y: 68px;
-            text: root.booting-index >= 0 ? "Loading kernel and preparing kexec" : root.boot-scan-complete ? "Tap a bootable entry to start it" : "Scanning continues in the background";
+            text: root.booting-index >= 0 ? "Loading kernel and preparing kexec" : root.boot-scan-complete ? "Tap an entry or use volume + power" : "Scanning continues in the background";
             color: #94a3b8;
             font-size: 22px;
             horizontal-alignment: left;
@@ -322,8 +445,8 @@ export component MainWindow inherits Window {
                 width: boot_list.width;
                 height: 112px;
                 y: index * 126px;
-                background: root.booting-index == index ? #123047 : row_touch.pressed ? #1e293b : #111827;
-                border-color: root.booting-index == index ? #38bdf8 : #334155;
+                background: root.booting-index == index ? #123047 : row_touch.pressed ? #1e293b : root.hardware-selected-index == index ? #172033 : #111827;
+                border-color: root.booting-index == index ? #38bdf8 : root.hardware-selected-index == index ? #7dd3fc : #334155;
                 border-width: 2px;
                 border-radius: 22px;
 
@@ -345,7 +468,7 @@ export component MainWindow inherits Window {
                     height: 34px;
                     x: parent.width - self.width - 20px;
                     y: 16px;
-                    background: root.booting-index == index ? #075985 : #1e3a5f;
+                    background: root.booting-index == index ? #075985 : root.hardware-selected-index == index ? #164e63 : #1e3a5f;
                     border-radius: 17px;
 
                     Text {
@@ -417,7 +540,7 @@ export component MainWindow inherits Window {
 
         card := Rectangle {
             width: root.width > 624px ? 560px : root.width - 64px;
-            height: 474px;
+            height: 526px;
             x: (parent.width - self.width) / 2;
             y: (parent.height - self.height) / 2;
             background: #111827;
@@ -443,20 +566,51 @@ export component MainWindow inherits Window {
                 height: 48px;
                 x: 36px;
                 y: 92px;
-                text: "Press and hold an action";
+                text: "Hold an action; Vol keys navigate";
                 color: #94a3b8;
                 font-size: 26px;
                 horizontal-alignment: center;
                 vertical-alignment: center;
             }
 
+            cancel := Rectangle {
+                width: parent.width - 72px;
+                height: 54px;
+                x: 36px;
+                y: 156px;
+                background: root.power-menu-selection == 0 ? #334155 : #1f2937;
+                border-color: root.power-menu-selection == 0 ? #e2e8f0 : #475569;
+                border-width: 2px;
+                border-radius: 18px;
+
+                Text {
+                    width: parent.width;
+                    height: parent.height;
+                    text: "Cancel";
+                    color: #f8fafc;
+                    font-size: 26px;
+                    font-weight: 700;
+                    horizontal-alignment: center;
+                    vertical-alignment: center;
+                }
+
+                cancel-touch := TouchArea {
+                    width: parent.width;
+                    height: parent.height;
+
+                    clicked => {
+                        root.hide-power-menu();
+                    }
+                }
+            }
+
             shutdown := Rectangle {
                 width: parent.width - 72px;
                 height: 116px;
                 x: 36px;
-                y: 166px;
-                background: root.hold-action == 1 ? #3f1f24 : #1f2937;
-                border-color: root.hold-action == 1 ? #f97373 : #475569;
+                y: 234px;
+                background: root.hold-action == 1 ? #3f1f24 : root.power-menu-selection == 1 ? #332b36 : #1f2937;
+                border-color: root.hold-action == 1 || root.power-menu-selection == 1 ? #f97373 : #475569;
                 border-width: 2px;
                 border-radius: 22px;
 
@@ -508,9 +662,9 @@ export component MainWindow inherits Window {
                 width: parent.width - 72px;
                 height: 116px;
                 x: 36px;
-                y: 306px;
-                background: root.hold-action == 2 ? #142c44 : #1f2937;
-                border-color: root.hold-action == 2 ? #38bdf8 : #475569;
+                y: 374px;
+                background: root.hold-action == 2 ? #142c44 : root.power-menu-selection == 2 ? #17324a : #1f2937;
+                border-color: root.hold-action == 2 || root.power-menu-selection == 2 ? #38bdf8 : #475569;
                 border-width: 2px;
                 border-radius: 22px;
 
@@ -562,6 +716,6 @@ export component MainWindow inherits Window {
 
     Text {
         visible: false;
-        text: "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789%+-:/.()_ Welcome to serial Boot Menu Booting selected entry Loading kernel and preparing kexec Tap a bootable entry to start it Scanning local boot media No directly bootable entries found Power Shutdown Reboot Press and hold action seconds Keep holding";
+        text: "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789%+-:/.()_ Welcome to serial Boot Menu Booting selected entry Loading kernel and preparing kexec Tap a bootable entry to start it use volume power Scanning local boot media No directly bootable entries found Power Cancel Shutdown Reboot Press and hold action seconds Keep holding navigate";
     }
 }
