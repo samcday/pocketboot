@@ -1,4 +1,5 @@
 use std::{
+    env,
     fs::{self, File},
     path::{Path, PathBuf},
     process::{Command, Stdio},
@@ -62,6 +63,7 @@ struct KernelConfigFile {
 }
 
 const KERNEL_CONFIG_RECIPE_VERSION: u32 = 1;
+const PROCESSED_DTB: &str = "pocketboot.dtb";
 
 pub(crate) fn run(args: KernelArgs) -> Result<()> {
     kernel(args)
@@ -181,17 +183,18 @@ fn build_device_kernel(
     run_command(build, action)?;
 
     let image = out_dir.join(&target.image_path);
-    let dtb = target.build_dtb.then(|| {
-        out_dir
-            .join(format!("arch/{arch}/boot/dts"))
-            .join(&device.vendor)
-            .join(format!("{dtb_stem}.dtb"))
-    });
+    let dtb = target
+        .build_dtb
+        .then(|| built_kernel_dtb_path(&out_dir, &arch, device, &dtb_stem));
     ensure_file(&image, "kernel image")?;
-    write_bootimg_kernel_artifact(config.bootimg.as_ref(), &out_dir, &arch, &image, &target)?;
     if let Some(dtb) = &dtb {
         ensure_file(dtb, "device tree blob")?;
     }
+    let dtb = dtb
+        .as_ref()
+        .map(|dtb| process_device_dtb(&workspace_root, kernel_tree, &out_dir, &arch, device, dtb))
+        .transpose()?;
+    write_bootimg_kernel_artifact(config.bootimg.as_ref(), &out_dir, &arch, &image, &target)?;
 
     Ok(KernelBuild {
         image,
@@ -231,6 +234,20 @@ pub(super) fn kernel_dtb_stem(config: &KernelConfig, device: &KernelDevice) -> R
         return Err(format!("invalid kernel DTB stem: {stem}"));
     }
     Ok(stem)
+}
+
+pub(super) fn kernel_dtb_path(
+    workspace_root: &Path,
+    out_dir: &Path,
+    arch: &str,
+    device: &KernelDevice,
+    dtb_stem: &str,
+) -> PathBuf {
+    if dt_overlay_source(workspace_root, device).is_file() {
+        processed_kernel_dtb_path(out_dir)
+    } else {
+        built_kernel_dtb_path(out_dir, arch, device, dtb_stem)
+    }
 }
 
 fn kernel_target(config: &KernelConfig, arch: &str) -> Result<KernelTarget> {
@@ -276,6 +293,152 @@ fn write_bootimg_kernel_artifact(
         .arg(image)
         .stdout(Stdio::from(output_file));
     run_command(gzip, "gzip kernel Image")
+}
+
+fn process_device_dtb(
+    workspace_root: &Path,
+    kernel_tree: &Path,
+    out_dir: &Path,
+    arch: &str,
+    device: &KernelDevice,
+    base_dtb: &Path,
+) -> Result<PathBuf> {
+    let overlay_source = dt_overlay_source(workspace_root, device);
+    if !overlay_source.is_file() {
+        return Ok(base_dtb.to_path_buf());
+    }
+
+    let overlay_dir = out_dir.join("dt-overlays");
+    fs::create_dir_all(&overlay_dir)
+        .map_err(|err| format!("create {}: {err}", overlay_dir.display()))?;
+
+    build_dtc_tools(kernel_tree, out_dir, arch)?;
+
+    let preprocessed = overlay_dir.join(format!("{}.dts", device.stem));
+    let overlay_dtbo = overlay_dir.join(format!("{}.dtbo", device.stem));
+    compile_dt_overlay(
+        kernel_tree,
+        out_dir,
+        &overlay_source,
+        &preprocessed,
+        &overlay_dtbo,
+    )?;
+
+    let processed_dtb = processed_kernel_dtb_path(out_dir);
+    apply_dt_overlay(out_dir, base_dtb, &overlay_dtbo, &processed_dtb)?;
+    ensure_file(&processed_dtb, "processed device tree blob")?;
+    Ok(processed_dtb)
+}
+
+fn build_dtc_tools(kernel_tree: &Path, out_dir: &Path, arch: &str) -> Result<()> {
+    let mut build = make_command_for_arch(kernel_tree, out_dir, arch)?;
+    build.arg("scripts_dtc");
+    run_command(build, "make scripts_dtc")?;
+
+    ensure_file(&dtc_path(out_dir), "device tree compiler")?;
+    ensure_file(&fdtoverlay_path(out_dir), "device tree overlay tool")
+}
+
+fn compile_dt_overlay(
+    kernel_tree: &Path,
+    out_dir: &Path,
+    source: &Path,
+    preprocessed: &Path,
+    output: &Path,
+) -> Result<()> {
+    let include_prefixes = kernel_tree.join("scripts/dtc/include-prefixes");
+    let source_dir = source.parent().unwrap_or_else(|| Path::new("."));
+    let hostcc = env::var_os("HOSTCC").unwrap_or_else(|| "cc".into());
+
+    let mut preprocess = Command::new(hostcc);
+    preprocess
+        .arg("-E")
+        .arg("-nostdinc")
+        .arg("-I")
+        .arg(&include_prefixes)
+        .arg("-I")
+        .arg(source_dir)
+        .arg("-undef")
+        .arg("-D__DTS__")
+        .arg("-x")
+        .arg("assembler-with-cpp")
+        .arg("-o")
+        .arg(preprocessed)
+        .arg(source);
+    run_command(preprocess, "preprocess device tree overlay")?;
+
+    let mut dtc = Command::new(dtc_path(out_dir));
+    dtc.arg("-I")
+        .arg("dts")
+        .arg("-O")
+        .arg("dtb")
+        .arg("-o")
+        .arg(output)
+        .arg("-b")
+        .arg("0")
+        .arg("-i")
+        .arg(source_dir)
+        .arg("-i")
+        .arg(&include_prefixes)
+        .arg(preprocessed);
+    run_command(dtc, "compile device tree overlay")
+}
+
+fn apply_dt_overlay(
+    out_dir: &Path,
+    base_dtb: &Path,
+    overlay_dtbo: &Path,
+    output: &Path,
+) -> Result<()> {
+    let tmp = out_dir.join(format!("{PROCESSED_DTB}.tmp"));
+    match fs::remove_file(&tmp) {
+        Ok(()) => {}
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => {}
+        Err(err) => return Err(format!("remove {}: {err}", tmp.display())),
+    }
+
+    let mut fdtoverlay = Command::new(fdtoverlay_path(out_dir));
+    fdtoverlay
+        .arg("-i")
+        .arg(base_dtb)
+        .arg("-o")
+        .arg(&tmp)
+        .arg(overlay_dtbo);
+    run_command(fdtoverlay, "apply device tree overlay")?;
+
+    fs::rename(&tmp, output)
+        .map_err(|err| format!("rename {} to {}: {err}", tmp.display(), output.display()))
+}
+
+fn dt_overlay_source(workspace_root: &Path, device: &KernelDevice) -> PathBuf {
+    workspace_root
+        .join("configs/dt-overlays")
+        .join(&device.vendor)
+        .join(format!("{}.dtso", device.stem))
+}
+
+fn built_kernel_dtb_path(
+    out_dir: &Path,
+    arch: &str,
+    device: &KernelDevice,
+    dtb_stem: &str,
+) -> PathBuf {
+    out_dir
+        .join(format!("arch/{arch}/boot/dts"))
+        .join(&device.vendor)
+        .join(format!("{dtb_stem}.dtb"))
+}
+
+fn processed_kernel_dtb_path(out_dir: &Path) -> PathBuf {
+    out_dir.join(PROCESSED_DTB)
+}
+
+fn dtc_path(out_dir: &Path) -> PathBuf {
+    out_dir.join("scripts/dtc/dtc")
+}
+
+fn fdtoverlay_path(out_dir: &Path) -> PathBuf {
+    out_dir.join("scripts/dtc/fdtoverlay")
 }
 
 fn build_device_initrd(

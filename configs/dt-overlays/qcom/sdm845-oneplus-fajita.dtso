@@ -1,0 +1,62 @@
+/dts-v1/;
+/plugin/;
+
+&{/soc@0/rng@793000} {
+	status = "disabled";
+};
+
+&{/soc@0/pmu@114a000} {
+	status = "disabled";
+};
+
+&{/soc@0/pmu@1436400} {
+	status = "disabled";
+};
+
+&{/soc@0/ipa@1e40000} {
+	status = "disabled";
+};
+
+&{/soc@0/remoteproc@4080000} {
+	status = "disabled";
+};
+
+&{/soc@0/clock-controller@5090000} {
+	status = "disabled";
+};
+
+&{/soc@0/remoteproc@5c00000} {
+	status = "disabled";
+};
+
+&{/soc@0/video-codec@aa00000} {
+	status = "disabled";
+};
+
+&{/soc@0/camss@acb3000} {
+	status = "disabled";
+};
+
+&{/soc@0/display-subsystem@ae00000} {
+	status = "disabled";
+};
+
+&{/soc@0/gpu@5000000} {
+	status = "disabled";
+};
+
+&{/soc@0/iommu@5040000} {
+	status = "disabled";
+};
+
+&{/soc@0/gmu@506a000} {
+	status = "disabled";
+};
+
+&{/soc@0/clock-controller@af00000} {
+	status = "disabled";
+};
+
+&{/soc@0/cpufreq@17d43000} {
+	status = "disabled";
+};

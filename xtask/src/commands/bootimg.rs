@@ -14,7 +14,7 @@ use super::{
     FeatureSet, KernelDevice,
     config::{self, BootImgConfig, DtbhConfig, PrebootConfig, QcdtConfig},
     ensure_file,
-    kernel::{kernel_arch, kernel_dtb_stem},
+    kernel::{kernel_arch, kernel_dtb_path, kernel_dtb_stem},
     target_dir, workspace_root,
 };
 
@@ -54,10 +54,7 @@ fn bootimg(args: BootImgArgs) -> Result<()> {
         .join("kernel")
         .join(&args.device.vendor)
         .join(&args.device.stem);
-    let dtb = out_dir
-        .join(format!("arch/{arch}/boot/dts"))
-        .join(&args.device.vendor)
-        .join(format!("{dtb_stem}.dtb"));
+    let dtb = kernel_dtb_path(&workspace_root, &out_dir, &arch, &args.device, &dtb_stem);
     let output = args.output.unwrap_or_else(|| out_dir.join("boot.img"));
     let config = device_config.bootimg.as_ref().ok_or_else(|| {
         format!(

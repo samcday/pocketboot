@@ -68,6 +68,12 @@ existing cpio archive. Kernel configuration is assembled from
 `configs/pocketboot.toml`, `configs/soc/<vendor>/<soc>.toml` and
 `configs/device/<vendor>/<device>.toml`.
 
+If `configs/dt-overlays/<vendor>/<device>.dtso` exists, `cargo xtask kernel`
+compiles it with the kernel tree's DTC tools and applies it to the built DTB.
+The raw kbuild DTB is left untouched and the final DTB used by pocketboot build
+artifacts is written as `target/kernel/<vendor>/<device>/pocketboot.dtb`.
+Overlays should use explicit path targets so the base DTB does not need symbols.
+
 Pinned kernel sources can be described with an inherited `[kernel-source]` table
 containing `remote` and `sha` fields. `cargo xtask kernel-src <vendor/device>`
 materializes that source under `target/kernel/src`; this is not wired into

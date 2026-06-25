@@ -1,0 +1,74 @@
+/dts-v1/;
+/plugin/;
+
+&{/reserved-memory/mpss@86800000} {
+	status = "disabled";
+};
+
+&{/reserved-memory/mba} {
+	status = "disabled";
+};
+
+&{/reserved-memory/venus} {
+	status = "disabled";
+};
+
+&{/reserved-memory/wcnss} {
+	status = "disabled";
+};
+
+&{/soc@0/dma-controller@4044000} {
+	status = "disabled";
+};
+
+&{/soc@0/rng@22000} {
+	status = "disabled";
+};
+
+&{/soc@0/iommu@1ef0000} {
+	status = "disabled";
+};
+
+&{/soc@0/iommu@1f08000} {
+	status = "disabled";
+};
+
+&{/soc@0/remoteproc@4080000} {
+	status = "disabled";
+};
+
+&{/soc@0/remoteproc@4080000/bam-dmux} {
+	status = "disabled";
+};
+
+&{/soc@0/remoteproc@4080000/smd-edge/apr} {
+	status = "disabled";
+};
+
+&{/soc@0/display-subsystem@1a00000} {
+	status = "disabled";
+};
+
+&{/soc@0/gpu@1c00000} {
+	status = "disabled";
+};
+
+&{/soc@0/video-codec@1d00000} {
+	status = "disabled";
+};
+
+&{/soc@0/sound@7702000} {
+	status = "disabled";
+};
+
+&{/soc@0/audio-controller@7708000} {
+	status = "disabled";
+};
+
+&{/soc@0/audio-codec@771c000} {
+	status = "disabled";
+};
+
+&{/soc@0/remoteproc@a204000} {
+	status = "disabled";
+};
