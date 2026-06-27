@@ -30,8 +30,10 @@ impl<'a> Image<'a> {
         if data.get(..DOS_SIGNATURE.len()) != Some(DOS_SIGNATURE)
             || data.get(4..8) != Some(ZBOOT_MAGIC)
         {
+            tracing::debug!(bytes = data.len(), "PE image is not Linux EFI zboot");
             return Ok(None);
         }
+        tracing::debug!(bytes = data.len(), "found Linux EFI zboot header");
         if data.len() < ZBOOT_MIN_HEADER_SIZE {
             return invalid_data("zboot header is truncated");
         }
@@ -60,6 +62,12 @@ impl<'a> Image<'a> {
             "zstd" => Compression::Zstd,
             _ => Compression::Unsupported,
         };
+        tracing::debug!(
+            compression = compression_name.as_str(),
+            payload_offset,
+            payload_size,
+            "parsed Linux EFI zboot payload"
+        );
 
         Ok(Some(Self {
             payload,

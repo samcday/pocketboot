@@ -19,10 +19,16 @@ pub(crate) struct Image<'a> {
 impl<'a> Image<'a> {
     pub(crate) fn parse(data: &'a [u8]) -> io::Result<Option<Self>> {
         if data.get(..DOS_MAGIC.len()) != Some(DOS_MAGIC) {
+            tracing::debug!(bytes = data.len(), "kernel payload is not a DOS/PE image");
             return Ok(None);
         }
 
         let pe_offset = read_u32(data, DOS_E_LFANEW_OFFSET, "DOS e_lfanew")? as usize;
+        tracing::debug!(
+            bytes = data.len(),
+            pe_offset,
+            "found DOS header for PE image"
+        );
         let signature = checked_slice(data, pe_offset, PE_SIGNATURE.len(), "PE signature")?;
         if signature != PE_SIGNATURE {
             return invalid_data("MZ image does not contain a PE/COFF signature");
@@ -34,6 +40,12 @@ impl<'a> Image<'a> {
         let section_count = read_u16(data, coff_offset + 2, "COFF section count")? as usize;
         let optional_header_size =
             read_u16(data, coff_offset + 16, "COFF optional header size")? as usize;
+        tracing::debug!(
+            machine = %format_args!("0x{machine:04x}"),
+            section_count,
+            optional_header_size,
+            "parsed PE/COFF header"
+        );
 
         let optional_header_offset =
             checked_add(coff_offset, COFF_HEADER_SIZE, "optional header offset")?;
@@ -73,6 +85,13 @@ impl<'a> Image<'a> {
             let size = u32::from_le_bytes(raw[16..20].try_into().unwrap()) as usize;
             let data_offset = u32::from_le_bytes(raw[20..24].try_into().unwrap()) as usize;
             let section_data = checked_slice(data, data_offset, size, "section data")?;
+            tracing::debug!(
+                index,
+                name = %section_name(&name),
+                raw_offset = data_offset,
+                bytes = size,
+                "parsed PE/COFF section"
+            );
 
             sections.push(Section {
                 name,
@@ -101,6 +120,14 @@ impl<'a> Image<'a> {
     }
 }
 
+fn section_name(name: &[u8; 8]) -> String {
+    let len = name
+        .iter()
+        .position(|byte| *byte == 0)
+        .unwrap_or(name.len());
+    String::from_utf8_lossy(&name[..len]).into_owned()
+}
+
 #[derive(Debug)]
 pub(crate) struct Section<'a> {
     name: [u8; 8],
@@ -110,12 +137,7 @@ pub(crate) struct Section<'a> {
 
 impl<'a> Section<'a> {
     pub(crate) fn name(&self) -> String {
-        let len = self
-            .name
-            .iter()
-            .position(|byte| *byte == 0)
-            .unwrap_or(self.name.len());
-        String::from_utf8_lossy(&self.name[..len]).into_owned()
+        section_name(&self.name)
     }
 
     pub(crate) fn data(&self) -> &'a [u8] {

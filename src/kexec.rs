@@ -2,6 +2,7 @@ use std::{
     fs::{self, File},
     io::{self, Read, Seek, SeekFrom},
     os::fd::{AsRawFd, FromRawFd},
+    time::Instant,
 };
 
 use flate2::read::{GzDecoder, MultiGzDecoder};
@@ -121,13 +122,28 @@ fn memfd_payload(name: &str, data: &[u8]) -> io::Result<File> {
 }
 
 fn prepare_kernel_payload_bytes(payload: &[u8]) -> io::Result<Option<Vec<u8>>> {
+    tracing::debug!(bytes = payload.len(), "preparing kernel payload");
     if payload.starts_with(&GZIP_MAGIC) {
+        tracing::debug!(
+            bytes = payload.len(),
+            "detected top-level gzip kernel payload"
+        );
         return decompress_toplevel_gzip(payload).map(Some);
     }
 
     let Some(pe) = pe::Image::parse(payload)? else {
+        tracing::debug!(
+            bytes = payload.len(),
+            "kernel payload does not need PE/gzip preparation"
+        );
         return Ok(None);
     };
+    tracing::debug!(
+        machine = %format_args!("0x{:04x}", pe.machine()),
+        sections = pe.sections().len(),
+        bytes = pe.data().len(),
+        "detected PE/COFF kernel payload"
+    );
 
     if pe.machine() != pe::IMAGE_FILE_MACHINE_ARM64 {
         return Err(io::Error::new(
@@ -140,17 +156,28 @@ fn prepare_kernel_payload_bytes(payload: &[u8]) -> io::Result<Option<Vec<u8>>> {
 }
 
 fn decompress_toplevel_gzip(payload: &[u8]) -> io::Result<Vec<u8>> {
-    tracing::info!("decompressing gzip kernel image");
+    tracing::info!(bytes = payload.len(), "decompressing gzip kernel image");
+    let started = Instant::now();
     let mut decoder = MultiGzDecoder::new(payload);
     let mut decompressed = Vec::new();
     decoder.read_to_end(&mut decompressed).map_err(|err| {
         io::Error::new(err.kind(), format!("decompress gzip kernel image: {err}"))
     })?;
-    tracing::info!(bytes = decompressed.len(), "decompressed gzip kernel image");
+    tracing::info!(
+        compressed_bytes = payload.len(),
+        bytes = decompressed.len(),
+        elapsed_ms = started.elapsed().as_millis(),
+        "decompressed gzip kernel image"
+    );
     Ok(decompressed)
 }
 
 fn extract_pe_arm64_kernel(pe: &pe::Image<'_>) -> io::Result<Vec<u8>> {
+    tracing::debug!(
+        sections = pe.sections().len(),
+        bytes = pe.data().len(),
+        "extracting arm64 Image from PE/COFF kernel"
+    );
     if let Some(zboot) = zboot::Image::parse(pe.data())? {
         let image = decompress_zboot_payload(&zboot)?;
         if !is_raw_arm64_image(&image) {
@@ -168,8 +195,15 @@ fn extract_pe_arm64_kernel(pe: &pe::Image<'_>) -> io::Result<Vec<u8>> {
         );
         return Ok(image);
     }
+    tracing::debug!("PE/COFF kernel is not a Linux EFI zboot image");
 
     for section in pe.sections() {
+        tracing::debug!(
+            section = %section.name(),
+            raw_offset = section.raw_offset(),
+            bytes = section.data().len(),
+            "scanning PE/COFF section for raw arm64 Image"
+        );
         if let Some((offset, image)) = find_raw_arm64_image(section.data()) {
             tracing::info!(
                 section = %section.name(),
@@ -182,6 +216,12 @@ fn extract_pe_arm64_kernel(pe: &pe::Image<'_>) -> io::Result<Vec<u8>> {
     }
 
     for section in pe.sections() {
+        tracing::debug!(
+            section = %section.name(),
+            raw_offset = section.raw_offset(),
+            bytes = section.data().len(),
+            "scanning PE/COFF section for gzipped arm64 Image"
+        );
         if let Some((offset, image)) = find_gzipped_arm64_image(section.data())? {
             tracing::info!(
                 section = %section.name(),
@@ -200,11 +240,38 @@ fn extract_pe_arm64_kernel(pe: &pe::Image<'_>) -> io::Result<Vec<u8>> {
 }
 
 fn decompress_zboot_payload(image: &zboot::Image<'_>) -> io::Result<Vec<u8>> {
+    tracing::debug!(
+        compression = image.compression_name(),
+        payload_offset = image.payload_offset(),
+        compressed_bytes = image.payload().len(),
+        "decompressing Linux EFI zboot payload"
+    );
+    let started = Instant::now();
     match image.compression() {
-        zboot::Compression::Gzip => decompress_embedded_gzip(image.payload()).map_err(|err| {
-            io::Error::new(err.kind(), format!("decompress gzip zboot payload: {err}"))
-        }),
-        zboot::Compression::Zstd => decompress_zstd(image.payload()),
+        zboot::Compression::Gzip => {
+            let decompressed = decompress_embedded_gzip(image.payload()).map_err(|err| {
+                io::Error::new(err.kind(), format!("decompress gzip zboot payload: {err}"))
+            })?;
+            tracing::debug!(
+                compression = image.compression_name(),
+                compressed_bytes = image.payload().len(),
+                bytes = decompressed.len(),
+                elapsed_ms = started.elapsed().as_millis(),
+                "decompressed Linux EFI zboot payload"
+            );
+            Ok(decompressed)
+        }
+        zboot::Compression::Zstd => {
+            let decompressed = decompress_zstd(image.payload())?;
+            tracing::debug!(
+                compression = image.compression_name(),
+                compressed_bytes = image.payload().len(),
+                bytes = decompressed.len(),
+                elapsed_ms = started.elapsed().as_millis(),
+                "decompressed Linux EFI zboot payload"
+            );
+            Ok(decompressed)
+        }
         zboot::Compression::Unsupported => Err(io::Error::new(
             io::ErrorKind::InvalidData,
             format!(
@@ -216,6 +283,7 @@ fn decompress_zboot_payload(image: &zboot::Image<'_>) -> io::Result<Vec<u8>> {
 }
 
 fn decompress_zstd(payload: &[u8]) -> io::Result<Vec<u8>> {
+    tracing::debug!(compressed_bytes = payload.len(), "creating zstd decoder");
     let mut source = payload;
     let mut decoder = StreamingDecoder::new(&mut source).map_err(|err| {
         io::Error::new(
@@ -231,30 +299,90 @@ fn decompress_zstd(payload: &[u8]) -> io::Result<Vec<u8>> {
 }
 
 fn find_raw_arm64_image(payload: &[u8]) -> Option<(usize, &[u8])> {
-    payload
+    let started = Instant::now();
+    let image = payload
         .windows(ARM64_IMAGE_MAGIC_BYTES.len())
         .position(|window| window == ARM64_IMAGE_MAGIC_BYTES)
         .and_then(|magic_offset| {
             let start = magic_offset.checked_sub(ARM64_IMAGE_MAGIC_OFFSET)?;
             let image = &payload[start..];
             is_raw_arm64_image(image).then_some((start, image))
-        })
+        });
+    match image {
+        Some((offset, image)) => tracing::debug!(
+            offset,
+            scanned_bytes = payload.len(),
+            bytes = image.len(),
+            elapsed_ms = started.elapsed().as_millis(),
+            "found raw arm64 Image"
+        ),
+        None => tracing::debug!(
+            scanned_bytes = payload.len(),
+            elapsed_ms = started.elapsed().as_millis(),
+            "finished raw arm64 Image scan"
+        ),
+    }
+    image
 }
 
 fn find_gzipped_arm64_image(payload: &[u8]) -> io::Result<Option<(usize, Vec<u8>)>> {
     let mut search_offset = 0;
+    let mut candidates = 0usize;
+    let started = Instant::now();
     while let Some(relative_offset) = payload[search_offset..]
         .windows(GZIP_MAGIC.len())
         .position(|window| window == GZIP_MAGIC)
     {
         let offset = search_offset + relative_offset;
+        candidates += 1;
+        tracing::debug!(
+            offset,
+            remaining_bytes = payload.len() - offset,
+            candidates,
+            "trying embedded gzip candidate"
+        );
+        let candidate_started = Instant::now();
         match decompress_embedded_gzip(&payload[offset..]) {
             Ok(decompressed) if is_raw_arm64_image(&decompressed) => {
+                tracing::debug!(
+                    offset,
+                    candidates,
+                    compressed_bytes = payload.len() - offset,
+                    bytes = decompressed.len(),
+                    elapsed_ms = candidate_started.elapsed().as_millis(),
+                    total_elapsed_ms = started.elapsed().as_millis(),
+                    "embedded gzip candidate is an arm64 Image"
+                );
                 return Ok(Some((offset, decompressed)));
             }
-            Ok(_) | Err(_) => search_offset = offset + 1,
+            Ok(decompressed) => {
+                tracing::debug!(
+                    offset,
+                    candidates,
+                    bytes = decompressed.len(),
+                    elapsed_ms = candidate_started.elapsed().as_millis(),
+                    "embedded gzip candidate did not contain an arm64 Image"
+                );
+                search_offset = offset + 1;
+            }
+            Err(err) => {
+                tracing::debug!(
+                    offset,
+                    candidates,
+                    elapsed_ms = candidate_started.elapsed().as_millis(),
+                    error = %err,
+                    "embedded gzip candidate failed to decompress"
+                );
+                search_offset = offset + 1;
+            }
         }
     }
+    tracing::debug!(
+        bytes = payload.len(),
+        candidates,
+        elapsed_ms = started.elapsed().as_millis(),
+        "finished embedded gzip scan"
+    );
     Ok(None)
 }
 
