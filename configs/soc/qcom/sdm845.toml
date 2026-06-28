@@ -3,7 +3,7 @@ name = "Qualcomm SDM845"
 [kernel-source]
 remote = "https://github.com/samcday/linux.git"
 # https://github.com/samcday/linux/tree/pocketboot/sdm845
-sha = "eff9f2f3acf7429d36e002c822252a96de390c31"
+sha = "5b6c600d82be23e7a4a817425d4727ecddc6aaa1"
 
 [kconfig]
 # Platform sizing
@@ -93,3 +93,5 @@ USB_QCOM_EUD = true
 SERIAL_QCOM_EUD = true
 SERIAL_QCOM_EUD_CONSOLE = true
 SERIAL_QCOM_EUD_EARLYCON = true
+
+DRM_PANIC_SCREEN_QR_VERSION = { raw = "40" }
