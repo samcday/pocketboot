@@ -11,6 +11,8 @@ QCOM_SCM = true
 QCOM_COMMAND_DB = true
 QCOM_RPMH = true
 QCOM_RPMHPD = true
+# QCOM_RPMHPD needs the OPP core for RPMh performance-state tables.
+QCOM_CPR = true
 QCOM_CLK_RPMH = true
 QCOM_SMEM = true
 QCOM_SOCINFO = true
