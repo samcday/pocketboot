@@ -42,7 +42,6 @@ DRM_PANIC_SCREEN_QR_CODE = "omit"
 DRM_PANIC_SCREEN = { string = "user" }
 
 # Core Qualcomm firmware/resource plumbing
-PM = true
 QCOM_SCM = true
 QCOM_SMEM = true
 QCOM_SOCINFO = true
@@ -86,29 +85,20 @@ QCOM_SPMI_IADC = true
 QCOM_SPMI_VADC = true
 
 # BLSP UART/I2C/SPI buses
-TTY = true
 SERIAL_MSM = true
 SERIAL_MSM_CONSOLE = true
-I2C = true
 I2C_QUP = true
-SPI = true
 SPI_QUP = true
 DMADEVICES = true
 QCOM_BAM_DMA = true
 
 # eMMC/SD storage
-BLOCK = true
-MMC = true
-MMC_BLOCK = true
 MMC_SDHCI = true
 MMC_SDHCI_PLTFM = true
 MMC_SDHCI_MSM = true
 
 # USB HS controller/PHY for the configfs gadget UDC.
-USB_SUPPORT = true
-USB = true
 USB_EHCI_HCD = true
-USB_GADGET = true
 USB_CHIPIDEA = true
 USB_CHIPIDEA_UDC = true
 USB_CHIPIDEA_HOST = true

@@ -38,7 +38,6 @@ DRM_PANIC_SCREEN_QR_CODE = "omit"
 DRM_PANIC_SCREEN = { string = "user" }
 
 # Core Qualcomm firmware/resource plumbing
-PM = true
 QCOM_SCM = true
 QCOM_SMEM = true
 QCOM_SOCINFO = true
@@ -64,19 +63,14 @@ POWER_RESET = true
 POWER_RESET_MSM = true
 
 # BLSP UART/I2C and DMA
-TTY = true
 SERIAL_MSM = true
 SERIAL_MSM_CONSOLE = true
-I2C = true
 I2C_QUP = true
 DMADEVICES = true
 QCOM_BAM_DMA = true
 QCOM_GSBI = true
 
 # eMMC/SD storage on MSM8930 is PL18x/AMBA, not SDHCI.
-BLOCK = true
-MMC = true
-MMC_BLOCK = true
 MMC_ARMMMCI = true
 MMC_QCOM_DML = true
 
@@ -87,14 +81,10 @@ MMC_QCOM_DML = true
 #FRAMEBUFFER_CONSOLE = true
 
 # touch
-INPUT_TOUCHSCREEN = true
 TOUCHSCREEN_ATMEL_MXT = true
 
 # USB HS controller/PHY for the configfs gadget UDC.
-USB_SUPPORT = true
-USB = true
 USB_EHCI_HCD = true
-USB_GADGET = true
 USB_CHIPIDEA = true
 USB_CHIPIDEA_UDC = true
 USB_CHIPIDEA_HOST = true

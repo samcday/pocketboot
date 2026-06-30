@@ -10,6 +10,9 @@ SLUB = true
 RUST = true
 NET = true
 UNIX = true
+I2C = true
+SPI = true
+PM = true
 
 # BusyBox initramfs/initrd
 BLK_DEV_INITRD = true
@@ -92,7 +95,11 @@ DRM_PANIC = true
 DRM_PANIC_SCREEN_QR_CODE = true
 DRM_PANIC_SCREEN = { string = "qr_code" }
 
-# filesystem support for bootflows
+# block/filesystem support
+BLOCK = true
+MMC = true
+MMC_BLOCK = true
+SCSI = true
 MISC_FILESYSTEMS = true
 MSDOS_PARTITION = true
 EFI_PARTITION = true
@@ -105,3 +112,11 @@ BLK_DEV = true
 BLK_DEV_LOOP = true
 EXT4_FS = true
 EXT4_USE_FOR_EXT2 = true
+
+# input
+INPUT = true
+INPUT_EVDEV = true
+INPUT_KEYBOARD = true
+INPUT_MISC = true
+INPUT_TOUCHSCREEN = true
+KEYBOARD_GPIO = true

@@ -2,11 +2,6 @@ name = "Google Pixel 3a (sargo)"
 
 [kconfig]
 # Buttons and touchscreen input
-INPUT = true
-INPUT_EVDEV = true
-INPUT_KEYBOARD = true
-INPUT_MISC = true
-KEYBOARD_GPIO = true
 RMI4_CORE = true
 RMI4_I2C = true
 RMI4_F12 = true

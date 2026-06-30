@@ -1,12 +1,6 @@
 name = "DragonBoard 410c"
 
 [kconfig]
-# Buttons
-INPUT = true
-INPUT_EVDEV = true
-INPUT_KEYBOARD = true
-KEYBOARD_GPIO = true
-
 # User LEDs
 NEW_LEDS = true
 LEDS_CLASS = true

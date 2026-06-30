@@ -11,7 +11,6 @@ ARCH_QCOM = true
 NR_CPUS = 8
 
 # Core Qualcomm firmware/resource plumbing
-PM = true
 QCOM_SCM = true
 QCOM_COMMAND_DB = true
 QCOM_RPMH = true
@@ -55,18 +54,14 @@ ARM_SMMU = true
 ARM_SMMU_QCOM = true
 
 # GENI UART/I2C/SPI buses
-TTY = true
 SERIAL_QCOM_GENI = true
 SERIAL_QCOM_GENI_CONSOLE = true
-I2C = true
 I2C_QCOM_GENI = true
-SPI = true
 SPI_QCOM_GENI = true
 DMADEVICES = true
 QCOM_GPI_DMA = true
 
 # UFS storage
-BLOCK = true
 SCSI = true
 BLK_DEV_SD = true
 SCSI_UFSHCD = true
@@ -80,9 +75,6 @@ PHY_QCOM_QMP_USB = false
 PHY_QCOM_QMP_USB_LEGACY = false
 
 # USB HS PHY and DWC3 gadget controller
-USB_SUPPORT = true
-USB = true
-USB_GADGET = true
 USB_DWC3 = true
 USB_DWC3_GADGET = true
 USB_DWC3_QCOM = true

@@ -2,12 +2,6 @@ name = "Samsung Galaxy Tab A 9.7 (2015)"
 
 [kconfig]
 # Buttons, Hall sensor and touchscreen
-INPUT = true
-INPUT_EVDEV = true
-INPUT_KEYBOARD = true
-INPUT_MISC = true
-INPUT_TOUCHSCREEN = true
-KEYBOARD_GPIO = true
 INPUT_PM8941_PWRKEY = true
 TOUCHSCREEN_ATMEL_MXT = true
 

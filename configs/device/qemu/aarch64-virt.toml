@@ -9,8 +9,6 @@ dtb = false
 
 [kconfig.qemu]
 # Virtio block device for a small local test disk.
-BLOCK = true
-BLK_DEV = true
 VIRTIO_BLK = true
 
 # Virtio networking used to reach the guest USB/IP vUDC server.

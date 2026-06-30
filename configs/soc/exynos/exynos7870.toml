@@ -11,7 +11,6 @@ ARCH_EXYNOS = true
 NR_CPUS = 8
 
 # Core Samsung clocks, pinctrl, GPIO, PMU and reboot plumbing
-PM = true
 COMMON_CLK_SAMSUNG = true
 EXYNOS_ARM64_COMMON_CLK = true
 PINCTRL_EXYNOS = true
@@ -25,17 +24,12 @@ POWER_RESET_SYSCON_POWEROFF = true
 SYSCON_REBOOT_MODE = true
 
 # UART and I2C buses
-TTY = true
 SERIAL_SAMSUNG = true
 SERIAL_SAMSUNG_CONSOLE = true
-I2C = true
 I2C_EXYNOS5 = true
 I2C_S3C2410 = true
 
 # eMMC/SD storage
-BLOCK = true
-MMC = true
-MMC_BLOCK = true
 MMC_DW = true
 MMC_DW_PLTFM = true
 MMC_DW_EXYNOS = true
@@ -43,9 +37,6 @@ MMC_DW_EXYNOS = true
 # USB DRD controller/PHY. Gadget functions belong in userland config.
 GENERIC_PHY = true
 PHY_EXYNOS5_USBDRD = true
-USB_SUPPORT = true
-USB = true
-USB_GADGET = true
 USB_DWC3 = true
 USB_DWC3_GADGET = true
 USB_DWC3_EXYNOS = true

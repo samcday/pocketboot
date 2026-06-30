@@ -7,11 +7,6 @@ dtb_stem = "qcom-msm8930-samsung-expressltexx"
 target = "armv7-unknown-linux-musleabihf"
 
 [kconfig]
-# Buttons are useful for local UI bring-up once simplefb is alive.
-INPUT = true
-INPUT_EVDEV = true
-INPUT_KEYBOARD = true
-KEYBOARD_GPIO = true
 
 [bootimg]
 header_version = 0

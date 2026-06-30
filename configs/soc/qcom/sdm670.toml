@@ -6,7 +6,6 @@ ARCH_QCOM = true
 NR_CPUS = 8
 
 # Core Qualcomm firmware/resource plumbing
-PM = true
 QCOM_SCM = true
 QCOM_COMMAND_DB = true
 QCOM_RPMH = true
@@ -47,19 +46,14 @@ IOMMU_SUPPORT = true
 ARM_SMMU = true
 
 # GENI UART/I2C buses used by sargo console and board peripherals
-TTY = true
 SERIAL_QCOM_GENI = true
 SERIAL_QCOM_GENI_CONSOLE = true
-I2C = true
 QCOM_GENI_SE = true
 I2C_QCOM_GENI = true
 DMADEVICES = true
 QCOM_GPI_DMA = true
 
 # eMMC storage
-BLOCK = true
-MMC = true
-MMC_BLOCK = true
 MMC_SDHCI = true
 MMC_SDHCI_PLTFM = true
 MMC_SDHCI_MSM = true
@@ -70,7 +64,6 @@ NVMEM_QCOM_QFPROM = true
 GENERIC_PHY = true
 PHY_QCOM_QUSB2 = true
 USB_SUPPORT = true
-USB_GADGET = true
 USB_DWC3 = true
 USB_DWC3_GADGET = true
 USB_DWC3_QCOM = true

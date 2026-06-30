@@ -2,12 +2,6 @@ name = "Xiaomi Mi A2 Lite (daisy)"
 
 [kconfig]
 # Buttons and touchscreen
-INPUT = true
-INPUT_EVDEV = true
-INPUT_KEYBOARD = true
-INPUT_MISC = true
-INPUT_TOUCHSCREEN = true
-KEYBOARD_GPIO = true
 INPUT_PM8941_PWRKEY = true
 TOUCHSCREEN_EDT_FT5X06 = true
 

@@ -2,12 +2,6 @@ name = "Samsung Galaxy A5U (EUR)"
 
 [kconfig]
 # Buttons, touchscreen and touchkeys
-INPUT = true
-INPUT_EVDEV = true
-INPUT_KEYBOARD = true
-INPUT_MISC = true
-INPUT_TOUCHSCREEN = true
-KEYBOARD_GPIO = true
 INPUT_PM8941_PWRKEY = true
 TOUCHSCREEN_MMS114 = true
 KEYBOARD_TM2_TOUCHKEY = true
