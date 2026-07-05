@@ -665,6 +665,7 @@ mod tests {
             "qcom/msm8916-samsung-gt510",
             "qcom/msm8953-xiaomi-daisy",
             "qcom/sdm670-google-sargo",
+            "qcom/sdm845-google-crosshatch",
             "qcom/sdm845-oneplus-fajita",
             "qemu/aarch64-virt",
         ] {

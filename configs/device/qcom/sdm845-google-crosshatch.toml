@@ -1,0 +1,34 @@
+name = "Google Pixel 3 XL (crosshatch)"
+
+[kconfig]
+# The reference sdm845-next tree does not have the pocketboot EUD serial driver.
+SERIAL_QCOM_EUD = "omit"
+SERIAL_QCOM_EUD_CONSOLE = "omit"
+SERIAL_QCOM_EUD_EARLYCON = "omit"
+
+# Crosshatch enables the USB3/DP QMP PHY for USB peripheral mode.
+PHY_QCOM_QMP_COMBO = true
+
+# Buttons and PMIC input
+INPUT_PM8941_PWRKEY = true
+
+# Board GPIO-controlled rails
+REGULATOR_FIXED_VOLTAGE = true
+
+# Battery, fuel gauge and PMI8998 charger
+POWER_SUPPLY = true
+BATTERY_PMI8998_FG = true
+IIO = true
+QCOM_SPMI_RRADC = true
+CHARGER_QCOM_SMB2 = true
+
+[bootimg]
+header_version = 2
+page_size = 4096
+base = 0x0
+kernel_offset = 0x00008000
+ramdisk_offset = 0x01000000
+second_offset = 0x00f00000
+tags_offset = 0x00000100
+dtb_offset = 0x01f00000
+cmdline = ""
