@@ -3484,6 +3484,7 @@ dependencies = [
  "gadgetry-most-foul",
  "libc",
  "mbrman",
+ "qbootctl",
  "rustix 1.1.4",
  "ruzstd",
  "slint",
@@ -3628,6 +3629,14 @@ name = "pxfm"
 version = "0.1.29"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e0c5ccf5294c6ccd63a74f1565028353830a9c2f5eb0c682c355c471726a6e3f"
+
+[[package]]
+name = "qbootctl"
+version = "0.1.0"
+dependencies = [
+ "libc",
+ "tracing",
+]
 
 [[package]]
 name = "qoi"
