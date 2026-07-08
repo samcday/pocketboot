@@ -36,6 +36,7 @@ MFD_SPMI_PMIC = true
 REGULATOR = true
 REGULATOR_FIXED_VOLTAGE = true
 REGULATOR_QCOM_RPMH = true
+REGULATOR_QCOM_SPMI = true
 POWER_RESET_QCOM_PON = true
 
 # Interconnects and IOMMU required by on-SoC bus/storage devices
@@ -58,12 +59,22 @@ MMC_SDHCI = true
 MMC_SDHCI_PLTFM = true
 MMC_SDHCI_MSM = true
 
-# USB peripheral controller and HS PHY. Gadget functions belong in userland config.
+# USB DRD controller, HS PHY, and PM660 Type-C/charger blocks.
 NVMEM = true
 NVMEM_QCOM_QFPROM = true
 GENERIC_PHY = true
 PHY_QCOM_QUSB2 = true
+IIO = true
+QCOM_SPMI_RRADC = true
+POWER_SUPPLY = true
+CHARGER_QCOM_SMB2 = true
 USB_SUPPORT = true
 USB_DWC3 = true
-USB_DWC3_GADGET = true
+USB_DWC3_GADGET = false
+USB_DWC3_DUAL_ROLE = true
 USB_DWC3_QCOM = true
+USB_XHCI_HCD = true
+USB_ROLE_SWITCH = true
+TYPEC = true
+TYPEC_TCPM = true
+TYPEC_QCOM_PMIC = true
