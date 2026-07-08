@@ -34,9 +34,9 @@ const ARM64_IMAGE_MAGIC: &[u8; 4] = b"ARM\x64";
 #[derive(clap::Args, Debug)]
 pub(crate) struct BootImgArgs {
     #[arg(value_name = "VENDOR/DEVICE")]
-    device: KernelDevice,
+    pub(super) device: KernelDevice,
     #[arg(short, long, value_name = "PATH")]
-    output: Option<PathBuf>,
+    pub(super) output: Option<PathBuf>,
 }
 
 pub(crate) fn run(args: BootImgArgs) -> Result<()> {

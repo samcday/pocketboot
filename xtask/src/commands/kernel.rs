@@ -21,11 +21,11 @@ use super::{
 #[derive(clap::Args, Debug)]
 pub(crate) struct KernelArgs {
     #[arg(value_name = "VENDOR/DEVICE")]
-    device: KernelDevice,
+    pub(super) device: KernelDevice,
     #[arg(value_name = "KERNEL_TREE")]
-    kernel_tree: Option<PathBuf>,
+    pub(super) kernel_tree: Option<PathBuf>,
     #[arg(long, value_name = "PATH")]
-    initrd: Option<PathBuf>,
+    pub(super) initrd: Option<PathBuf>,
 }
 
 #[derive(Debug)]

@@ -27,6 +27,8 @@ struct Cli {
 
 #[derive(Debug, Subcommand)]
 enum XtaskCommand {
+    #[command(about = "build a pocketboot kernel and boot.img for one device")]
+    Build(commands::build::BuildArgs),
     #[command(about = "build BusyBox for initrd use")]
     Busybox(commands::busybox::BusyBoxArgs),
     #[command(about = "build pocketboot and create an initrd cpio")]
@@ -50,6 +52,7 @@ enum XtaskCommand {
 
 fn run() -> Result<()> {
     match Cli::parse().command {
+        XtaskCommand::Build(args) => commands::build::run(args),
         XtaskCommand::Busybox(args) => commands::busybox::run(args),
         XtaskCommand::Cpio(args) => commands::cpio::run(args),
         XtaskCommand::CiMatrix(args) => commands::ci_matrix::run(args),

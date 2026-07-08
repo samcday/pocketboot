@@ -1,4 +1,5 @@
 pub(crate) mod bootimg;
+pub(crate) mod build;
 pub(crate) mod busybox;
 pub(crate) mod ci_matrix;
 mod config;
