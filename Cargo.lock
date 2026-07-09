@@ -3486,6 +3486,7 @@ dependencies = [
  "mbrman",
  "rustix 1.1.4",
  "ruzstd",
+ "sha2",
  "slint",
  "slint-build",
  "tracing",

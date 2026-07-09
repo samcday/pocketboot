@@ -79,6 +79,8 @@ pub(crate) enum Mode {
     Fastboot {
         commands: fastboot::CommandMap,
         acm: bool,
+        #[cfg(feature = "mesh-usb-net")]
+        usb_net: Option<crate::mesh::usb::UsbNetConfig>,
     },
 }
 
@@ -191,6 +193,13 @@ impl Gadget {
 
         match mode {
             Mode::Console => self.setup_console_gadget(),
+            #[cfg(feature = "mesh-usb-net")]
+            Mode::Fastboot {
+                commands,
+                acm,
+                usb_net,
+            } => self.setup_fastboot_gadget(commands, acm, usb_net),
+            #[cfg(not(feature = "mesh-usb-net"))]
             Mode::Fastboot { commands, acm } => self.setup_fastboot_gadget(commands, acm),
         }
     }
@@ -198,11 +207,17 @@ impl Gadget {
     fn setup_console_gadget(&self) -> ThreadResult {
         let serial = AcmFunction::new();
         let config = config_with_functions(&[&serial]);
-        self.register_and_bind(config, false)?;
+        self.register_and_bind(config, false, None)?;
         Ok(None)
     }
 
-    fn setup_fastboot_gadget(&self, commands: fastboot::CommandMap, acm: bool) -> ThreadResult {
+    #[cfg(feature = "mesh-usb-net")]
+    fn setup_fastboot_gadget(
+        &self,
+        commands: fastboot::CommandMap,
+        acm: bool,
+        usb_net: Option<crate::mesh::usb::UsbNetConfig>,
+    ) -> ThreadResult {
         let fastboot_function = fastboot::UsbFunction::new(commands);
         let adb_function = adb::UsbFunction::new();
         let config = if acm {
@@ -211,7 +226,7 @@ impl Gadget {
         } else {
             config_with_functions(&[&fastboot_function, &adb_function])
         };
-        self.register_and_bind(config, true)?;
+        self.register_and_bind(config, true, usb_net)?;
 
         let (server, event_loop) = fastboot_function.start()?;
         let (adb_server, adb_event_loop) = adb_function.start()?;
@@ -245,7 +260,77 @@ impl Gadget {
         Ok(action)
     }
 
-    fn register_and_bind(&self, config: Config, include_mass_storage: bool) -> io::Result<()> {
+    #[cfg(not(feature = "mesh-usb-net"))]
+    fn setup_fastboot_gadget(&self, commands: fastboot::CommandMap, acm: bool) -> ThreadResult {
+        let fastboot_function = fastboot::UsbFunction::new(commands);
+        let adb_function = adb::UsbFunction::new();
+        let config = if acm {
+            let serial = AcmFunction::new();
+            config_with_functions(&[&serial, &fastboot_function, &adb_function])
+        } else {
+            config_with_functions(&[&fastboot_function, &adb_function])
+        };
+        self.register_and_bind(config, true, None)?;
+
+        let (server, event_loop) = fastboot_function.start()?;
+        let (adb_server, adb_event_loop) = adb_function.start()?;
+        let adb_handle = adb_server.spawn()?;
+        let server_result = server.run();
+        match &server_result {
+            Ok(action) => tracing::info!(
+                has_action = action.is_some(),
+                "fastboot server exited normally"
+            ),
+            Err(err) => tracing::warn!(error = ?err, "fastboot server exited with error"),
+        }
+
+        adb_handle.stop();
+        event_loop.stop();
+        adb_event_loop.stop();
+        let unbind_result = self.unbind_and_remove();
+        match &unbind_result {
+            Ok(()) => tracing::info!("USB gadget unbound"),
+            Err(err) => tracing::warn!(error = ?err, "USB gadget unbind failed"),
+        }
+
+        if let Err(err) = adb_handle.join() {
+            tracing::warn!(error = ?err, "adb server exited with error");
+        }
+        event_loop.join();
+        adb_event_loop.join();
+
+        let action = server_result?;
+        unbind_result?;
+        Ok(action)
+    }
+
+    #[cfg(feature = "mesh-usb-net")]
+    fn register_and_bind(
+        &self,
+        config: Config,
+        include_mass_storage: bool,
+        usb_net: Option<crate::mesh::usb::UsbNetConfig>,
+    ) -> io::Result<()> {
+        self.register_and_bind_inner(config, include_mass_storage, usb_net)
+    }
+
+    #[cfg(not(feature = "mesh-usb-net"))]
+    fn register_and_bind(
+        &self,
+        config: Config,
+        include_mass_storage: bool,
+        _usb_net: Option<()>,
+    ) -> io::Result<()> {
+        self.register_and_bind_inner(config, include_mass_storage, None)
+    }
+
+    fn register_and_bind_inner(
+        &self,
+        config: Config,
+        include_mass_storage: bool,
+        #[cfg(feature = "mesh-usb-net")] usb_net: Option<crate::mesh::usb::UsbNetConfig>,
+        #[cfg(not(feature = "mesh-usb-net"))] usb_net: Option<()>,
+    ) -> io::Result<()> {
         let gadget = RawGadget::new(
             Class::INTERFACE_SPECIFIC,
             Id::new(VENDOR_ID, PRODUCT_ID),
@@ -263,6 +348,25 @@ impl Gadget {
         } else {
             None
         };
+
+        #[cfg(feature = "mesh-usb-net")]
+        if let Some(net_config) = &usb_net {
+            match crate::mesh::usb::create_function(reg.path(), net_config) {
+                Ok(crate::mesh::usb::UsbNetStart::Started { ifname }) => {
+                    tracing::info!(ifname, "mesh usb net function composed");
+                }
+                Ok(crate::mesh::usb::UsbNetStart::AlreadyPresent { ifname }) => {
+                    tracing::info!(ifname, "mesh usb net function already present");
+                }
+                Ok(crate::mesh::usb::UsbNetStart::Unsupported) => {
+                    tracing::warn!("mesh usb net function unsupported; continuing without it");
+                }
+                Err(err) => {
+                    tracing::warn!(error = ?err, "mesh usb net function creation failed; continuing without it");
+                }
+            }
+        }
+        let _ = &usb_net;
 
         let udc = wait_for_udc(Duration::from_secs(10))?;
         let udc_name = udc.name().to_string_lossy().into_owned();

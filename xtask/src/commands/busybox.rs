@@ -562,6 +562,20 @@ fn configure_busybox(config: &Path, features: &FeatureSet) -> Result<()> {
             set_kconfig_bool(&mut contents, name, true);
         }
     }
+    if features.contains("mesh") {
+        // Mesh runtime uses `busybox ip` for address/link configuration.
+        for name in [
+            "IP",
+            "FEATURE_IP_ADDRESS",
+            "FEATURE_IP_LINK",
+            "FEATURE_IP_ROUTE",
+            "FEATURE_IP_RULE",
+            "FEATURE_IP_NEIGH",
+            "ROUTE",
+        ] {
+            set_kconfig_bool(&mut contents, name, true);
+        }
+    }
     for name in DISABLED {
         set_kconfig_bool(&mut contents, name, false);
     }

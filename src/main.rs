@@ -19,6 +19,8 @@ mod kexec;
 mod kmsg;
 #[path = "kmsg-forwarder.rs"]
 mod kmsg_forwarder;
+#[cfg(feature = "mesh")]
+mod mesh;
 mod pe;
 mod power;
 #[cfg(feature = "qemu")]
@@ -100,12 +102,60 @@ async fn run() -> Result<()> {
     };
     let gadget = gadget::Gadget::new(serialno.clone());
     let acm = cmdline.is_set(ACM_CMDLINE_PARAM);
+
+    #[cfg(feature = "mesh")]
+    let mesh_config = if cmdline.value("pocketboot.mesh") == Some("0") {
+        tracing::info!("mesh disabled by kernel command line");
+        None
+    } else {
+        let config = mesh::Config::from_boot(&serialno, &cmdline);
+        tracing::info!(
+            node_id = %config.identity.node_id_hex,
+            ula = %config.identity.ula_addr,
+            "mesh config derived"
+        );
+        Some(config)
+    };
+
     let fastboot_thread = gadget
-        .spawn(gadget::Mode::Fastboot {
-            commands: fastboot_commands(gadget.clone(), serialno, cmdline.clone()),
-            acm,
+        .spawn({
+            #[cfg(feature = "mesh-usb-net")]
+            {
+                let usb_net = mesh_config.as_ref().filter(|c| c.usb_net_enabled).map(|c| {
+                    mesh::usb::UsbNetConfig::from_identity(
+                        c.identity.usb_dev_mac,
+                        c.identity.usb_host_mac,
+                    )
+                });
+                gadget::Mode::Fastboot {
+                    commands: fastboot_commands(gadget.clone(), serialno, cmdline.clone()),
+                    acm,
+                    usb_net,
+                }
+            }
+            #[cfg(not(feature = "mesh-usb-net"))]
+            {
+                gadget::Mode::Fastboot {
+                    commands: fastboot_commands(gadget.clone(), serialno, cmdline.clone()),
+                    acm,
+                }
+            }
         })
         .map_err(|err| format!("spawn fastboot gadget thread: {err}"))?;
+
+    #[cfg(feature = "mesh")]
+    let _mesh_handle = if let Some(config) = mesh_config {
+        match mesh::spawn(config) {
+            Ok(handle) => Some(handle),
+            Err(err) => {
+                tracing::warn!(error = %err, "failed to start mesh subsystem");
+                None
+            }
+        }
+    } else {
+        None
+    };
+
     #[cfg(feature = "qemu")]
     if let Err(err) = qemu::spawn() {
         tracing::warn!(error = ?err, "failed to spawn QEMU USB/IP service");

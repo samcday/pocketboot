@@ -22,6 +22,7 @@ libc = "0.2.177"
 mbrman = "0.6.1"
 ruzstd = "0.8.3"
 rustix = { version = "1", features = ["termios"] }
+sha2 = { version = "0.10", default-features = false, optional = true }
 slint = { version = "1.16.1", default-features = false, features = ["compat-1-2", "libm", "renderer-software", "unsafe-single-threaded"] }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", default-features = false, features = ["fmt", "registry", "std"] }
@@ -30,6 +31,13 @@ tracing-subscriber = { version = "0.3", default-features = false, features = ["f
 default = []
 busybox = []
 qemu = []
+# Optional PocketMesh substrate: deterministic node identity, ULA, link
+# management, and (when a backend is present) routed forwarding.
+mesh = ["dep:sha2"]
+# USB gadget Ethernet (NCM/ECM) link backend. Implies `mesh`.
+mesh-usb-net = ["mesh"]
+# Wi-Fi P2P link backend. Stubs only for now; not advertised as working.
+mesh-wifi-p2p = ["mesh"]
 
 [build-dependencies]
 slint-build = "1.16.1"

@@ -82,8 +82,43 @@ pub(super) fn build_initrd(
     let busybox = include_busybox
         .then(|| build_busybox(&target_dir, target, features))
         .transpose()?;
-    write_initrd(&init, busybox.as_ref(), &output)?;
+    let babeld = resolve_babeld(features)?;
+    write_initrd(&init, busybox.as_ref(), babeld.as_deref(), &output)?;
     Ok(output)
+}
+
+/// Resolve the `babeld` binary to include in the initrd when the `mesh`
+/// feature is enabled.
+///
+/// Honors the `BABELD=/path/to/babeld` environment variable. If `mesh` is
+/// enabled and `BABELD` is not set, emit a clear build error explaining
+/// that it is required for now.
+fn resolve_babeld(features: &FeatureSet) -> Result<Option<PathBuf>> {
+    if !features.contains("mesh") {
+        return Ok(None);
+    }
+    let Some(path) = env::var_os("BABELD") else {
+        return Err(
+            "mesh feature is enabled but BABELD is not set; \
+             provide a path to a babeld binary, e.g. BABELD=/usr/sbin/babeld cargo xtask cpio --features mesh"
+                .to_string(),
+        );
+    };
+    let path = PathBuf::from(path);
+    if !path.is_file() {
+        return Err(format!(
+            "BABELD does not point to a file: {}",
+            path.display()
+        ));
+    }
+    println!(
+        "babeld {} ({} bytes)",
+        path.display(),
+        fs::metadata(&path)
+            .map_err(|err| format!("stat {}: {err}", path.display()))?
+            .len()
+    );
+    Ok(Some(path))
 }
 
 fn build_release(workspace_root: &Path, target: &str, features: &FeatureSet) -> Result<()> {
@@ -110,7 +145,12 @@ fn build_release(workspace_root: &Path, target: &str, features: &FeatureSet) -> 
     Ok(())
 }
 
-fn write_initrd(init: &Path, busybox: Option<&BusyBoxInstall>, output: &Path) -> Result<()> {
+fn write_initrd(
+    init: &Path,
+    busybox: Option<&BusyBoxInstall>,
+    babeld: Option<&Path>,
+    output: &Path,
+) -> Result<()> {
     let tmp = output.with_extension("cpio.tmp");
     let mut writer = NewcWriter::create(&tmp)?;
     writer.dir("dev", 0o755)?;
@@ -120,6 +160,7 @@ fn write_initrd(init: &Path, busybox: Option<&BusyBoxInstall>, output: &Path) ->
     writer.dir("etc", 0o755)?;
     writer.dir("proc", 0o755)?;
     writer.dir("run", 0o755)?;
+    writer.dir("sbin", 0o755)?;
     writer.dir("sys", 0o755)?;
     writer.dir("tmp", 0o1777)?;
     if let Some(busybox) = busybox {
@@ -131,6 +172,9 @@ fn write_initrd(init: &Path, busybox: Option<&BusyBoxInstall>, output: &Path) ->
                 .map_err(|err| format!("stat {}: {err}", busybox.binary.display()))?
                 .len()
         );
+    }
+    if let Some(babeld) = babeld {
+        writer.file("sbin/babeld", babeld, 0o755)?;
     }
     writer.file("init", init, 0o755)?;
     writer.finish()?;
@@ -328,5 +372,75 @@ fn cpio_name(path: &Path) -> Result<String> {
         Err(format!("invalid cpio path: {name}"))
     } else {
         Ok(name.to_string())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::path::Path;
+
+    #[test]
+    fn cpio_name_rejects_absolute_paths() {
+        let path = Path::new("/sbin/babeld");
+        assert!(cpio_name(path).is_err());
+    }
+
+    #[test]
+    fn cpio_name_rejects_dot_segments() {
+        assert!(cpio_name(Path::new("sbin/../etc/babeld")).is_err());
+        assert!(cpio_name(Path::new("sbin/./babeld")).is_err());
+    }
+
+    #[test]
+    fn cpio_name_accepts_relative_nested_paths() {
+        assert_eq!(cpio_name(Path::new("sbin/babeld")).unwrap(), "sbin/babeld");
+    }
+
+    #[test]
+    fn resolve_babeld_is_none_without_mesh() {
+        let features = FeatureSet::default();
+        assert!(resolve_babeld(&features).unwrap().is_none());
+    }
+
+    #[test]
+    fn resolve_babeld_errors_when_mesh_without_env() {
+        // Ensure BABELD is not set for this test.
+        let prev = env::var_os("BABELD");
+        unsafe {
+            env::remove_var("BABELD");
+        }
+        let mut features = FeatureSet::default();
+        features.add("mesh").unwrap();
+        let result = resolve_babeld(&features);
+        if let Some(prev) = prev {
+            unsafe {
+                env::set_var("BABELD", prev);
+            }
+        }
+        assert!(result.is_err());
+        let err = result.unwrap_err().to_string();
+        assert!(err.contains("BABELD"), "error should mention BABELD: {err}");
+    }
+
+    #[test]
+    fn resolve_babeld_errors_when_path_missing() {
+        let prev = env::var_os("BABELD");
+        unsafe {
+            env::set_var("BABELD", "/nonexistent/babeld/path/that/does/not/exist");
+        }
+        let mut features = FeatureSet::default();
+        features.add("mesh").unwrap();
+        let result = resolve_babeld(&features);
+        if let Some(prev) = prev {
+            unsafe {
+                env::set_var("BABELD", prev);
+            }
+        } else {
+            unsafe {
+                env::remove_var("BABELD");
+            }
+        }
+        assert!(result.is_err());
     }
 }

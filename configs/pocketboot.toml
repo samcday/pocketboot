@@ -2,6 +2,9 @@ name = "pocketboot baseline"
 
 [features]
 busybox = true
+# Mesh substrate is opt-in for now. Enable per-device (e.g. QEMU) once a
+# smoke test topology exists.
+mesh = false
 
 [kconfig]
 # Minimal kernel baseline
@@ -120,3 +123,19 @@ INPUT_KEYBOARD = true
 INPUT_MISC = true
 INPUT_TOUCHSCREEN = true
 KEYBOARD_GPIO = true
+
+# Mesh substrate (opt-in via the `mesh` feature). Provides IPv6, netdevs,
+# USB Ethernet gadget functions, and debug virtual interfaces. Adjust
+# symbols if the target kernel merge complains about indirect selects.
+[kconfig.mesh]
+INET = true
+IPV6 = true
+NETDEVICES = true
+PACKET = true
+UNIX = true
+# USB Ethernet gadget support.
+USB_CONFIGFS_NCM = true
+USB_CONFIGFS_ECM = true
+# Useful for tests/debug.
+TUN = true
+DUMMY = true
