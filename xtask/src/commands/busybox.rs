@@ -20,7 +20,7 @@ use super::{
 };
 
 pub(super) const BUSYBOX_VERSION: &str = "1.38.0";
-const BUSYBOX_RECIPE_VERSION: u32 = 2;
+const BUSYBOX_RECIPE_VERSION: u32 = 3;
 const BUSYBOX_ARCHIVE_SHA256: &str =
     "34f9ea6ff8636f2c9241153b9114eefa9e65674a45318ae1ef95bb5f31c53bb2";
 const BUSYBOX_SOURCE_URL: &str = "https://busybox.net/downloads/busybox-1.38.0.tar.bz2";
@@ -478,6 +478,7 @@ fn configure_busybox(config: &Path, features: &FeatureSet) -> Result<()> {
         "GREP",
         "EGREP",
         "FGREP",
+        "GETTY",
         "HEAD",
         "HEXDUMP",
         "ID",

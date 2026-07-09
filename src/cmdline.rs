@@ -17,8 +17,13 @@ impl KernelCommandLine {
     }
 
     pub(crate) fn value(&self, key: &str) -> Option<&str> {
-        self.args.iter().find_map(|arg| {
-            let value = arg.strip_prefix(key)?.strip_prefix('=')?;
+        self.values(key).next()
+    }
+
+    pub(crate) fn values<'a>(&'a self, key: &str) -> impl Iterator<Item = &'a str> + 'a {
+        let key = key.to_string();
+        self.args.iter().filter_map(move |arg| {
+            let value = arg.strip_prefix(key.as_str())?.strip_prefix('=')?;
             (!value.is_empty()).then_some(value)
         })
     }
@@ -48,5 +53,19 @@ mod tests {
         assert!(cmdline.is_set("pocketboot.acm"));
         assert!(!cmdline.is_set("pocketboot.acm.extra"));
         assert!(!cmdline.is_set("missing"));
+    }
+
+    #[test]
+    fn returns_repeated_key_values() {
+        let cmdline = KernelCommandLine::parse("console=tty0 console=ttyS0,115200 empty=");
+
+        assert_eq!(
+            cmdline.values("console").collect::<Vec<_>>(),
+            vec!["tty0", "ttyS0,115200"]
+        );
+        assert_eq!(
+            cmdline.values("empty").collect::<Vec<_>>(),
+            Vec::<&str>::new()
+        );
     }
 }

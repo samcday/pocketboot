@@ -14,6 +14,7 @@ mod bootflow;
 mod cmdline;
 mod fastboot;
 mod gadget;
+mod getty;
 mod kexec;
 mod kmsg;
 #[path = "kmsg-forwarder.rs"]
@@ -64,6 +65,8 @@ async fn run() -> Result<()> {
 
     kmsg::init_tracing(&cmdline);
     tracing::info!("starting up");
+    reaper::spawn();
+    getty::spawn(&cmdline);
 
     let boot_state = boot_state::detect();
     let boot_state_source = boot_state.source.as_ref();
@@ -81,7 +84,6 @@ async fn run() -> Result<()> {
     let serialno = detect_serial(&cmdline);
     tracing::info!(serialno = %serialno, "selected device serialno");
     let system_info = detect_system_info(&serialno);
-    reaper::spawn();
     let battery = match battery::spawn() {
         Ok(updates) => Some(updates),
         Err(err) => {
