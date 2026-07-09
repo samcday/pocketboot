@@ -1,5 +1,10 @@
 name = "Qualcomm SDM670"
 
+[kernel-source]
+remote = "https://github.com/samcday/linux.git"
+# https://github.com/samcday/linux/tree/pocketboot/sdm670
+sha = "75d5a9875202673b11a8eac05e6f489ba0c87a05"
+
 [kconfig]
 # Platform sizing
 ARCH_QCOM = true
@@ -74,6 +79,13 @@ USB_DWC3_GADGET = false
 USB_DWC3_DUAL_ROLE = true
 USB_DWC3_QCOM = true
 USB_XHCI_HCD = true
+HID_SUPPORT = true
+USB_HID = true
+HID = true
+HID_GENERIC = true
+HIDRAW = true
+INPUT_MOUSEDEV = true
+USB_ANNOUNCE_NEW_DEVICES = true
 USB_ROLE_SWITCH = true
 TYPEC = true
 TYPEC_TCPM = true
