@@ -54,7 +54,14 @@ fn bootimg(args: BootImgArgs) -> Result<()> {
         .join("kernel")
         .join(&args.device.vendor)
         .join(&args.device.stem);
-    let dtb = kernel_dtb_path(&workspace_root, &out_dir, &arch, &args.device, &dtb_stem);
+    let dtb = kernel_dtb_path(
+        &workspace_root,
+        &out_dir,
+        &arch,
+        &args.device,
+        &device_config.kernel,
+        &dtb_stem,
+    );
     let output = args.output.unwrap_or_else(|| out_dir.join("boot.img"));
     let config = device_config.bootimg.as_ref().ok_or_else(|| {
         format!(

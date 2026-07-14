@@ -20,6 +20,8 @@ const DEV: &str = "/dev";
 const DEV_LOOP_CONTROL: &str = "/dev/loop-control";
 const BOOT_MOUNT_ROOT: &str = "/run/pocketboot/boot";
 const FDT_COMPATIBLE_PATH: &str = "/sys/firmware/devicetree/base/compatible";
+const FDT_MAINLINE_COMPATIBLE_PATH: &str =
+    "/sys/firmware/devicetree/base/chosen/pocketboot,mainline-compatible";
 const EXTLINUX_CONFIG_PATHS: [&str; 2] = ["extlinux/extlinux.conf", "boot/extlinux/extlinux.conf"];
 const GPT_SIGNATURE: &[u8; 8] = b"EFI PART";
 const GPT_MIN_HEADER_SIZE: usize = 92;
@@ -1450,7 +1452,7 @@ fn bls_dtb_path(
     let compatibles = match read_fdt_compatibles() {
         Ok(compatibles) => compatibles,
         Err(err) => {
-            tracing::warn!(source = %source.display(), path = FDT_COMPATIBLE_PATH, error = ?err, "cannot resolve BLS fdtdir without live FDT compatibles");
+            tracing::warn!(source = %source.display(), identity_path = FDT_MAINLINE_COMPATIBLE_PATH, fallback_path = FDT_COMPATIBLE_PATH, error = ?err, "cannot resolve BLS fdtdir without packaged or live FDT compatibles");
             return Ok(None);
         }
     };
@@ -1479,9 +1481,70 @@ fn bls_dtb_path(
 }
 
 fn read_fdt_compatibles() -> io::Result<Vec<String>> {
-    let values = fs::read(FDT_COMPATIBLE_PATH).map(|bytes| parse_fdt_strings(&bytes))?;
+    read_fdt_compatibles_from(
+        Path::new(FDT_MAINLINE_COMPATIBLE_PATH),
+        Path::new(FDT_COMPATIBLE_PATH),
+    )
+}
+
+fn read_fdt_compatibles_from(identity_path: &Path, live_path: &Path) -> io::Result<Vec<String>> {
+    match fs::read(identity_path) {
+        Ok(bytes) => parse_mainline_compatible(&bytes, identity_path),
+        Err(err) if err.kind() == io::ErrorKind::NotFound => {
+            let bytes = fs::read(live_path)?;
+            read_compatible_property(&bytes, live_path, "live FDT")
+        }
+        Err(err) => Err(io::Error::new(
+            err.kind(),
+            format!("read mainline identity {}: {err}", identity_path.display()),
+        )),
+    }
+}
+
+fn parse_mainline_compatible(bytes: &[u8], path: &Path) -> io::Result<Vec<String>> {
+    if bytes.is_empty() || bytes.last() != Some(&0) {
+        return Err(invalid_data(format!(
+            "packaged mainline compatible list at {} is not NUL-terminated",
+            path.display()
+        )));
+    }
+    let mut values = Vec::new();
+    for value in bytes[..bytes.len() - 1].split(|byte| *byte == 0) {
+        let value = std::str::from_utf8(value).map_err(|err| {
+            invalid_data(format!(
+                "packaged mainline compatible list at {} contains invalid UTF-8: {err}",
+                path.display()
+            ))
+        })?;
+        let value = value.trim();
+        if value.is_empty() {
+            return Err(invalid_data(format!(
+                "packaged mainline compatible list at {} contains an empty string",
+                path.display()
+            )));
+        }
+        values.push(value.to_string());
+    }
     if values.is_empty() {
-        Err(invalid_data("live FDT compatible list is empty"))
+        return Err(invalid_data(format!(
+            "packaged mainline compatible list at {} is empty",
+            path.display()
+        )));
+    }
+    Ok(values)
+}
+
+fn read_compatible_property(
+    bytes: &[u8],
+    path: &Path,
+    description: &str,
+) -> io::Result<Vec<String>> {
+    let values = parse_fdt_strings(bytes);
+    if values.is_empty() {
+        Err(invalid_data(format!(
+            "{description} compatible list at {} is empty or invalid",
+            path.display()
+        )))
     } else {
         Ok(values)
     }
@@ -2198,6 +2261,69 @@ mod tests {
             ),
             Some(dtb)
         );
+
+        fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[test]
+    fn packaged_mainline_identity_selects_crosshatch_dtb_despite_abl_root_identity() {
+        let root = std::env::temp_dir().join(format!(
+            "pocketboot-mainline-identity-test-{}",
+            std::process::id()
+        ));
+        let identity = root.join("pocketboot,mainline-compatible");
+        let live = root.join("compatible");
+        let fdtdir = root.join("dtbs");
+        let dtb = fdtdir.join("qcom/sdm845-google-crosshatch.dtb");
+        let _ = fs::remove_dir_all(&root);
+        fs::create_dir_all(dtb.parent().unwrap()).unwrap();
+        fs::write(&identity, b"google,crosshatch\0qcom,sdm845\0").unwrap();
+        fs::write(&live, b"google,b1c1-sdm845\0qcom,sdm845\0").unwrap();
+        File::create(&dtb).unwrap();
+
+        let compatibles = read_fdt_compatibles_from(&identity, &live).unwrap();
+        assert_eq!(compatibles, ["google,crosshatch", "qcom,sdm845"]);
+        assert_eq!(select_fdtdir_dtb(&fdtdir, &compatibles), Some(dtb));
+
+        fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[test]
+    fn live_compatible_remains_the_fallback_when_identity_is_absent() {
+        let root = std::env::temp_dir().join(format!(
+            "pocketboot-mainline-fallback-test-{}",
+            std::process::id()
+        ));
+        let identity = root.join("missing-mainline-compatible");
+        let live = root.join("compatible");
+        let _ = fs::remove_dir_all(&root);
+        fs::create_dir_all(&root).unwrap();
+        fs::write(&live, b"oneplus,fajita\0qcom,sdm845\0").unwrap();
+
+        assert_eq!(
+            read_fdt_compatibles_from(&identity, &live).unwrap(),
+            ["oneplus,fajita", "qcom,sdm845"]
+        );
+
+        fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[test]
+    fn malformed_present_mainline_identity_fails_closed() {
+        let root = std::env::temp_dir().join(format!(
+            "pocketboot-mainline-malformed-test-{}",
+            std::process::id()
+        ));
+        let identity = root.join("pocketboot,mainline-compatible");
+        let live = root.join("compatible");
+        let _ = fs::remove_dir_all(&root);
+        fs::create_dir_all(&root).unwrap();
+        fs::write(&identity, b"google,crosshatch").unwrap();
+        fs::write(&live, b"google,b1c1-sdm845\0qcom,sdm845\0").unwrap();
+
+        let error = read_fdt_compatibles_from(&identity, &live).unwrap_err();
+        assert_eq!(error.kind(), io::ErrorKind::InvalidData);
+        assert!(error.to_string().contains("not NUL-terminated"));
 
         fs::remove_dir_all(&root).unwrap();
     }

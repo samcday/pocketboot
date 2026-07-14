@@ -1,5 +1,8 @@
 name = "Google Pixel 3 XL (crosshatch)"
 
+[kernel]
+dtbo_mask_manifest = "configs/dtbo-masks/qcom/sdm845-google-crosshatch.toml"
+
 [kconfig]
 # The reference sdm845-next tree does not have the pocketboot EUD serial driver.
 SERIAL_QCOM_EUD = "omit"

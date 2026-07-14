@@ -73,6 +73,7 @@ pub(super) struct KernelConfig {
     pub(super) image_path: Option<PathBuf>,
     pub(super) dtb_stem: Option<String>,
     pub(super) dtb: Option<bool>,
+    pub(super) dtbo_mask_manifest: Option<PathBuf>,
 }
 
 #[derive(Clone, Debug, Default, Deserialize)]
@@ -442,6 +443,9 @@ fn merge_kernel(merged: &mut KernelConfig, layer: &KernelConfig) {
     }
     if layer.dtb.is_some() {
         merged.dtb = layer.dtb;
+    }
+    if layer.dtbo_mask_manifest.is_some() {
+        merged.dtbo_mask_manifest = layer.dtbo_mask_manifest.clone();
     }
 }
 
