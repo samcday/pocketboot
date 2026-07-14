@@ -217,11 +217,68 @@ fn prepend_ccache_wrappers(command: &mut Command, out_dir: &Path) -> Result<()> 
         "clang",
         "clang++",
     ] {
-        if let Some(real_compiler) = path_command(compiler) {
+        if let Some(real_compiler) = compiler_path_command(compiler, &tool_dir) {
             write_ccache_wrapper(&tool_dir.join(compiler), &real_compiler)?;
         }
     }
     prepend_command_path(command, &tool_dir)
+}
+
+/// Resolve a compiler without selecting a distro ccache shim which would make
+/// our own `ccache <compiler>` wrapper recurse back into ccache forever.
+///
+/// An explicit path remains exactly as supplied. Bare command names are
+/// searched in PATH order, skipping the wrapper output directory, conventional
+/// ccache shim directories, and candidates which resolve to the ccache binary.
+fn compiler_path_command(command: &str, wrapper_dir: &Path) -> Option<PathBuf> {
+    let paths = env::var_os("PATH")?;
+    let search_paths = env::split_paths(&paths).collect::<Vec<_>>();
+    let ccache = path_command("ccache");
+    resolve_compiler_command(
+        OsStr::new(command),
+        &search_paths,
+        ccache.as_deref(),
+        wrapper_dir,
+    )
+}
+
+fn resolve_compiler_command(
+    command: &OsStr,
+    search_paths: &[PathBuf],
+    ccache: Option<&Path>,
+    wrapper_dir: &Path,
+) -> Option<PathBuf> {
+    let requested = Path::new(command);
+    if requested.is_absolute() || requested.components().count() > 1 {
+        return requested.is_file().then(|| requested.to_path_buf());
+    }
+
+    search_paths
+        .iter()
+        .map(|dir| dir.join(command))
+        .find(|candidate| {
+            candidate.is_file()
+                && !candidate.starts_with(wrapper_dir)
+                && !is_ccache_shim(candidate, ccache)
+        })
+}
+
+fn is_ccache_shim(candidate: &Path, ccache: Option<&Path>) -> bool {
+    if candidate
+        .parent()
+        .and_then(Path::file_name)
+        .is_some_and(|name| name == OsStr::new("ccache"))
+    {
+        return true;
+    }
+
+    let Some(ccache) = ccache else {
+        return false;
+    };
+    match (fs::canonicalize(candidate), fs::canonicalize(ccache)) {
+        (Ok(candidate), Ok(ccache)) => candidate == ccache,
+        _ => false,
+    }
 }
 
 fn kernel_tool_dir(out_dir: &Path) -> Result<PathBuf> {
@@ -355,5 +412,123 @@ fn target_dir(workspace_root: &Path) -> PathBuf {
             }
         }
         None => workspace_root.join("target"),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn compiler_resolution_skips_fedora_ccache_shim_directory() {
+        let root = test_dir("ccache-fedora");
+        let shim_dir = root.join("usr/lib64/ccache");
+        let real_dir = root.join("usr/bin");
+        let wrapper_dir = root.join("out/pocketboot-toolchain");
+        fs::create_dir_all(&shim_dir).unwrap();
+        fs::create_dir_all(&real_dir).unwrap();
+        fs::create_dir_all(&wrapper_dir).unwrap();
+        fs::write(shim_dir.join("aarch64-linux-gnu-gcc"), b"ccache shim").unwrap();
+        fs::write(real_dir.join("aarch64-linux-gnu-gcc"), b"real compiler").unwrap();
+
+        let selected = resolve_compiler_command(
+            OsStr::new("aarch64-linux-gnu-gcc"),
+            &[shim_dir, real_dir.clone()],
+            None,
+            &wrapper_dir,
+        )
+        .unwrap();
+
+        assert_eq!(selected, real_dir.join("aarch64-linux-gnu-gcc"));
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn compiler_resolution_skips_symlink_to_ccache_outside_named_shim_directory() {
+        use std::os::unix::fs::symlink;
+
+        let root = test_dir("ccache-symlink");
+        let shim_dir = root.join("wrappers");
+        let real_dir = root.join("bin");
+        let wrapper_dir = root.join("out/pocketboot-toolchain");
+        fs::create_dir_all(&shim_dir).unwrap();
+        fs::create_dir_all(&real_dir).unwrap();
+        fs::create_dir_all(&wrapper_dir).unwrap();
+        let ccache = real_dir.join("ccache");
+        fs::write(&ccache, b"ccache").unwrap();
+        symlink(&ccache, shim_dir.join("gcc")).unwrap();
+        fs::write(real_dir.join("gcc"), b"real compiler").unwrap();
+
+        let selected = resolve_compiler_command(
+            OsStr::new("gcc"),
+            &[shim_dir, real_dir.clone()],
+            Some(&ccache),
+            &wrapper_dir,
+        )
+        .unwrap();
+
+        assert_eq!(selected, real_dir.join("gcc"));
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn explicit_compiler_path_and_shell_quoting_are_preserved() {
+        let root = test_dir("ccache-explicit");
+        let wrapper_dir = root.join("wrapper output");
+        let compiler = root.join("toolchain with spaces/compiler's gcc");
+        fs::create_dir_all(compiler.parent().unwrap()).unwrap();
+        fs::create_dir_all(&wrapper_dir).unwrap();
+        fs::write(&compiler, b"real compiler").unwrap();
+
+        let selected =
+            resolve_compiler_command(compiler.as_os_str(), &[], None, &wrapper_dir).unwrap();
+        assert_eq!(selected, compiler);
+
+        let wrapper = wrapper_dir.join("gcc");
+        write_ccache_wrapper(&wrapper, &selected).unwrap();
+        let contents = fs::read_to_string(&wrapper).unwrap();
+        let compiler = selected.to_str().unwrap();
+        assert_eq!(
+            contents,
+            format!("#!/bin/sh\nexec ccache '{}' \"$@\"\n", sh_quote(compiler))
+        );
+
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn compiler_resolution_does_not_reuse_generated_wrapper() {
+        let root = test_dir("ccache-wrapper-loop");
+        let wrapper_dir = root.join("pocketboot-toolchain");
+        let real_dir = root.join("bin");
+        fs::create_dir_all(&wrapper_dir).unwrap();
+        fs::create_dir_all(&real_dir).unwrap();
+        fs::write(wrapper_dir.join("clang"), b"old generated wrapper").unwrap();
+        fs::write(real_dir.join("clang"), b"real compiler").unwrap();
+
+        let selected = resolve_compiler_command(
+            OsStr::new("clang"),
+            &[wrapper_dir.clone(), real_dir.clone()],
+            None,
+            &wrapper_dir,
+        )
+        .unwrap();
+
+        assert_eq!(selected, real_dir.join("clang"));
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    fn test_dir(label: &str) -> PathBuf {
+        let nonce = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let path = env::temp_dir().join(format!(
+            "pocketboot-xtask-{label}-{}-{nonce}",
+            std::process::id()
+        ));
+        fs::create_dir(&path).unwrap();
+        path
     }
 }
