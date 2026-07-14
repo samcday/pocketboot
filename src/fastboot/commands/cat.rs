@@ -14,6 +14,7 @@ const MAX_STAGED_SIZE: u64 = u32::MAX as u64;
 const COPY_CHUNK: usize = 1024 * 1024;
 
 pub(super) fn handle(context: &mut CommandContext<'_>, command: &str) -> io::Result<CommandResult> {
+    context.clear_staged();
     let path = parse_path(command)?;
     let staged = stage_file(path)?;
     let bytes = staged.size;

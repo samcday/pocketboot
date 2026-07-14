@@ -20,6 +20,7 @@ const SHELL_TIMEOUT: Duration = Duration::from_secs(30);
 const SHELL: &str = "/bin/sh";
 
 pub(super) fn handle(context: &mut CommandContext<'_>, command: &str) -> io::Result<CommandResult> {
+    context.clear_staged();
     let command = parse_command(command)?;
     run_and_stage(context, command)
 }
@@ -28,7 +29,9 @@ pub(super) fn handle_staged(
     context: &mut CommandContext<'_>,
     _command: &str,
 ) -> io::Result<CommandResult> {
-    let command = read_staged_command(context)?;
+    let command = read_staged_command(context);
+    context.clear_staged();
+    let command = command?;
     run_and_stage(context, &command)
 }
 

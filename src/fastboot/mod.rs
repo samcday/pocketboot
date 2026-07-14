@@ -283,6 +283,7 @@ impl FastbootServer {
         }
 
         if command.starts_with(DOWNLOAD_PREFIX) {
+            clear_staged_for_download(&mut self.staged);
             match parse_download_command(command) {
                 Ok(Some(size)) => {
                     tracing::info!(command, bytes = size, "fastboot download requested");
@@ -331,6 +332,9 @@ impl FastbootServer {
     }
 
     fn download(&mut self, size: u32) -> io::Result<()> {
+        // Keep this defensive clear in addition to the command-dispatch clear:
+        // any future direct caller must also fail closed before fallible work.
+        clear_staged_for_download(&mut self.staged);
         if size > MAX_DOWNLOAD_SIZE {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidInput,
@@ -489,6 +493,16 @@ impl<'a> CommandContext<'a> {
 
     pub(crate) fn stage_file(&mut self, name: impl Into<String>, file: File, size: u64) {
         *self.staged = Some(StagedData::file(name, file, size));
+    }
+
+    /// Discard an earlier command's payload before starting fallible work for
+    /// a command which will produce a new payload.
+    ///
+    /// Fastboot's staging area normally persists until it is replaced. A
+    /// diagnostic producer must clear it first so a failed capture cannot be
+    /// followed by `get_staged` accidentally returning unrelated stale data.
+    pub(crate) fn clear_staged(&mut self) {
+        *self.staged = None;
     }
 
     pub(crate) fn staged_file(&self) -> io::Result<File> {
@@ -695,6 +709,10 @@ fn is_usb_disconnect(err: &io::Error) -> bool {
     )
 }
 
+fn clear_staged_for_download(staged: &mut Option<StagedData>) {
+    *staged = None;
+}
+
 fn parse_download_command(command: &str) -> io::Result<Option<u32>> {
     let Some(size) = command.strip_prefix(DOWNLOAD_PREFIX) else {
         return Ok(None);
@@ -819,6 +837,16 @@ mod tests {
             finish_command_result("oem test", result).unwrap(),
             ServerStep::Continue
         ));
+    }
+
+    #[test]
+    fn fallible_download_start_discards_previous_staged_payload() {
+        let mut staged = Some(StagedData::memory("old-diagnostic", b"stale".to_vec()));
+
+        clear_staged_for_download(&mut staged);
+        assert!(parse_download_command("download:not-hex").is_err());
+
+        assert!(staged.is_none());
     }
 
     #[test]
