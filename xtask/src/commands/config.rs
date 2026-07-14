@@ -683,6 +683,15 @@ mod tests {
                 assert!(config.features.contains("qemu"));
                 assert!(kconfig.contains("CONFIG_USBIP_VUDC=y"));
             }
+            if device_id == "qcom/sdm670-google-sargo" {
+                assert!(config.features.contains("blob-wrangler"));
+                for symbol in ["FW_LOADER", "MD", "BLK_DEV_DM", "DM_ZERO"] {
+                    assert!(
+                        kconfig.contains(&format!("CONFIG_{symbol}=y")),
+                        "missing firmware Kconfig symbol {symbol}"
+                    );
+                }
+            }
         }
     }
 }
