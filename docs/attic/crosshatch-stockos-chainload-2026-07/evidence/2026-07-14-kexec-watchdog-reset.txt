@@ -1,0 +1,37 @@
+Crosshatch stockOS chainload — curated final UART excerpt
+Date: 2026-07-14
+Raw source SHA-256: 73243c4c0558c0cf4a50adfdb7f9071e857b9ccb245c9ccde2f1d79bd628ad9d
+Redaction: device serial, addresses, PARTUUIDs, unrelated logs, and register values omitted.
+
+[    6.561574] WARN pocketboot: stock AVB signatures and payload hashes match ABL's receipt, but pocketboot did not independently trust the OEM root key or enforce hardware rollback floors
+...
+[   58.699214] WARNING: kernel/workqueue.c:4335 at __flush_work+0x378/0x394, CPU#3: pocketboot-fast/140
+...
+[   58.829057] ffs_fs_kill_sb+0x70/0x84
+...
+[   58.872546] ffs_data_put(): freeing
+[   58.876776] unloading
+[   61.470077] arm-smmu 15000000.iommu: disabling translation
+[   61.476412] kexec_core: Starting new kernel
+[   61.500245] psci: CPU1 killed (polled 0 ms)
+[   61.520442] psci: CPU2 killed (polled 0 ms)
+[   61.536027] psci: CPU3 killed (polled 0 ms)
+[   61.557028] psci: CPU4 killed (polled 0 ms)
+[   61.589126] psci: CPU5 killed (polled 0 ms)
+[   61.612380] psci: CPU6 killed (polled 0 ms)
+[   61.626800] psci: CPU7 killed (polled 0 ms)
+[   61.632295] Bye!
+
+UEFI Start
+...
+ABL version: b1c1-0.4-7617406
+Reset REASON 8
+Booting from slot (a)
+...
+Linux version 4.9.270-g862f51bac900-ab7613625
+Kernel command line: rcupdate.rcu_expedited=1 ... androidboot.serialno=<redacted> ... androidboot.bootreason=watchdog ...
+
+Interpretation: Pocketboot reached the generic ARM64 kexec shutdown boundary
+and no target-kernel instruction was observed on UART. Firmware classified the
+subsequent reset as reason 8; recovered Android described the new boot as a
+watchdog boot. This does not establish what initiated the reset.

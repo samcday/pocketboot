@@ -1,0 +1,12 @@
+Crosshatch stockOS chainload — curated first-attempt UART excerpt
+Date: 2026-07-13
+Raw source SHA-256: e26dfd5b1fbb677bd31884558a4777f66e390d0cf1387771ce82f7cb0ac74529
+Redaction: non-decisive binary UART noise and device-identifying data omitted.
+
+[    6.523114] WARN pocketboot: stock AVB signatures and payload hashes match ABL's receipt, but pocketboot did not independently trust the OEM root key or enforce hardware rollback floors
+...
+[   97.320433] ERROR pocketboot: fastboot-triggered boot failed; restoring recovery surface error=load stock Android slot a: kernel is not a raw arm64 Image
+
+Interpretation: verification and reconstruction completed, but the handoff
+rejected Google's modern-LZ4-compressed kernel before loading kexec segments.
+Pocketboot returned to its recovery surface.
