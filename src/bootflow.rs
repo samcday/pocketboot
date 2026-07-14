@@ -1056,6 +1056,8 @@ fn mount_partition(candidate: &BootPartitionCandidate) -> io::Result<MountedPart
 fn mount_fs(source: &Path, target: &Path, fstype: &'static str) -> io::Result<()> {
     let source = cstring_path(source)?;
     let target = cstring_path(target)?;
+    let mount_data = mount_data_for_fstype(fstype)
+        .map(|data| CString::new(data).expect("static mount data has no NUL"));
     let fstype = CString::new(fstype).expect("static fstype has no NUL");
     let flags = libc::MS_RDONLY | libc::MS_NOSUID | libc::MS_NODEV | libc::MS_NOEXEC;
     let rc = unsafe {
@@ -1064,7 +1066,9 @@ fn mount_fs(source: &Path, target: &Path, fstype: &'static str) -> io::Result<()
             target.as_ptr(),
             fstype.as_ptr(),
             flags,
-            std::ptr::null::<libc::c_void>(),
+            mount_data
+                .as_ref()
+                .map_or(std::ptr::null(), |data| data.as_ptr().cast()),
         )
     };
     if rc == 0 {
@@ -1072,6 +1076,16 @@ fn mount_fs(source: &Path, target: &Path, fstype: &'static str) -> io::Result<()
     }
 
     Err(io::Error::last_os_error())
+}
+
+/// A read-only VFS mount is not sufficient for a dirty ext filesystem: ext4
+/// may replay its journal while mounting read-only. `noload` (also known as
+/// `norecovery`) keeps boot-media discovery observational and fail-closed.
+fn mount_data_for_fstype(fstype: &str) -> Option<&'static str> {
+    match fstype {
+        "ext4" | "ext2" => Some("noload"),
+        _ => None,
+    }
 }
 
 fn scan_bls_entries(
@@ -1987,6 +2001,13 @@ fn invalid_data(message: impl Into<String>) -> io::Error {
 mod tests {
     use super::*;
     use std::io::Cursor;
+
+    #[test]
+    fn ext_mounts_disable_journal_recovery() {
+        assert_eq!(mount_data_for_fstype("ext4"), Some("noload"));
+        assert_eq!(mount_data_for_fstype("ext2"), Some("noload"));
+        assert_eq!(mount_data_for_fstype("vfat"), None);
+    }
 
     #[test]
     fn parses_minimal_bls_entry() {
