@@ -240,9 +240,7 @@ impl Gadget {
         event_loop.join();
         adb_event_loop.join();
 
-        let action = server_result?;
-        unbind_result?;
-        Ok(action)
+        resolve_fastboot_result(server_result, unbind_result)
     }
 
     fn register_and_bind(&self, config: Config, include_mass_storage: bool) -> io::Result<()> {
@@ -301,6 +299,25 @@ impl Gadget {
         drop(reg);
         Ok(())
     }
+}
+
+fn resolve_fastboot_result(
+    server_result: ThreadResult,
+    unbind_result: io::Result<()>,
+) -> ThreadResult {
+    let action = server_result?;
+    if action.is_some() {
+        if let Err(err) = unbind_result {
+            tracing::warn!(
+                error = ?err,
+                "USB gadget cleanup failed after fastboot action was acknowledged; preserving action"
+            );
+        }
+        return Ok(action);
+    }
+
+    unbind_result?;
+    Ok(None)
 }
 
 fn config_with_functions(functions: &[&dyn GadgetFunction]) -> Config {
@@ -498,5 +515,42 @@ fn wait_for_udc(timeout: Duration) -> io::Result<Udc> {
             }
             Err(err) => return Err(err),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::{
+        Arc,
+        atomic::{AtomicBool, Ordering},
+    };
+
+    #[test]
+    fn acknowledged_action_takes_precedence_over_unbind_failure() {
+        let ran = Arc::new(AtomicBool::new(false));
+        let action_ran = ran.clone();
+        let action: PostResponseAction = Box::new(move || {
+            action_ran.store(true, Ordering::Relaxed);
+            Ok(())
+        });
+
+        let returned = resolve_fastboot_result(
+            Ok(Some(action)),
+            Err(io::Error::other("configfs cleanup failed")),
+        )
+        .expect("acknowledged action must survive cleanup failure")
+        .expect("action was dropped");
+        returned().unwrap();
+
+        assert!(ran.load(Ordering::Relaxed));
+    }
+
+    #[test]
+    fn unbind_failure_is_fatal_without_an_acknowledged_action() {
+        let result =
+            resolve_fastboot_result(Ok(None), Err(io::Error::other("configfs cleanup failed")));
+
+        assert!(result.is_err());
     }
 }
