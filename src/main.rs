@@ -34,6 +34,8 @@ type Result<T> = std::result::Result<T, String>;
 const SYS_BLOCK: &str = "/sys/block";
 const PROC_CMDLINE: &str = "/proc/cmdline";
 const ACM_CMDLINE_PARAM: &str = "pocketboot.acm";
+const DRM_PAGE_FLIPS_CMDLINE_PARAM: &str = "pocketboot.drm_page_flips";
+const MAX_DRM_PAGE_FLIPS: u32 = 64;
 const FDT_MODEL_PATH: &str = "/sys/firmware/devicetree/base/model";
 const FDT_COMPATIBLE_PATH: &str = "/sys/firmware/devicetree/base/compatible";
 const FDT_SERIALNO_PATHS: [&str; 1] = [
@@ -91,7 +93,8 @@ async fn run() -> Result<()> {
             None
         }
     };
-    let ui = match ui::spawn(battery, system_info) {
+    let drm_page_flips = drm_page_flips(&cmdline);
+    let ui = match ui::spawn(battery, system_info, drm_page_flips) {
         Ok(handle) => Some(handle),
         Err(err) => {
             tracing::warn!(error = %err, "failed to spawn UI thread");
@@ -465,7 +468,7 @@ fn fastboot_commands(
     commands.extend(fastboot::commands::slot_commands(slots));
     commands.extend(fastboot::commands::diagnostic_commands());
     commands.extend(fastboot::commands::ums_commands(gadget));
-    commands.push(fastboot::commands::reboot_command());
+    commands.extend(fastboot::commands::reboot_commands());
     commands
 }
 
@@ -505,6 +508,24 @@ fn detect_serial(cmdline: &cmdline::KernelCommandLine) -> String {
     fdt_serialno()
         .or_else(|| cmdline_serialno(cmdline))
         .unwrap_or_else(|| DEFAULT_SERIALNO.to_string())
+}
+
+fn drm_page_flips(cmdline: &cmdline::KernelCommandLine) -> u32 {
+    let Some(value) = cmdline.value(DRM_PAGE_FLIPS_CMDLINE_PARAM) else {
+        return 0;
+    };
+    match value.parse::<u32>() {
+        Ok(value) if value <= MAX_DRM_PAGE_FLIPS => value,
+        _ => {
+            tracing::warn!(
+                param = DRM_PAGE_FLIPS_CMDLINE_PARAM,
+                value,
+                maximum = MAX_DRM_PAGE_FLIPS,
+                "ignoring invalid bounded DRM page-flip request"
+            );
+            0
+        }
+    }
 }
 
 fn fdt_serialno() -> Option<String> {
@@ -762,5 +783,20 @@ mod tests {
     fn ignores_empty_fdt_serialno() {
         assert_eq!(parse_fdt_serialno(b"\0"), None);
         assert_eq!(parse_fdt_serialno(b" \n\0"), None);
+    }
+
+    #[test]
+    fn parses_bounded_drm_page_flip_lab_count() {
+        for (value, expected) in [
+            ("", 0),
+            ("pocketboot.drm_page_flips=0", 0),
+            ("pocketboot.drm_page_flips=16", 16),
+            ("pocketboot.drm_page_flips=64", 64),
+            ("pocketboot.drm_page_flips=65", 0),
+            ("pocketboot.drm_page_flips=invalid", 0),
+        ] {
+            let cmdline = cmdline::KernelCommandLine::parse(value);
+            assert_eq!(drm_page_flips(&cmdline), expected, "cmdline: {value}");
+        }
     }
 }

@@ -9,3 +9,11 @@ pub(super) fn handle(
 ) -> io::Result<CommandResult> {
     context.okay_then_exit(b"rebooting", power::reboot)
 }
+
+pub(super) fn handle_bootloader(
+    context: &mut CommandContext<'_>,
+    _command: &str,
+) -> io::Result<CommandResult> {
+    let action = power::bootloader_reboot_action()?;
+    context.okay_then_exit(b"rebooting to bootloader", action)
+}

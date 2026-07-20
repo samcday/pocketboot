@@ -97,13 +97,14 @@ enum Command {
 pub(crate) fn spawn(
     battery: Option<battery::Updates>,
     system_info: SystemInfo,
+    drm_page_flips: u32,
 ) -> io::Result<Handle> {
     let (command_tx, command_rx) = async_channel::unbounded();
     let (action_tx, action_rx) = async_channel::unbounded();
     let handle = thread::Builder::new()
         .name("pocketboot-ui".to_string())
         .spawn(move || {
-            if let Err(err) = run(battery, system_info, command_rx, action_tx) {
+            if let Err(err) = run(battery, system_info, drm_page_flips, command_rx, action_tx) {
                 tracing::warn!(error = %err, "UI thread exited");
             }
         })?;
@@ -118,10 +119,12 @@ pub(crate) fn spawn(
 fn run(
     battery: Option<battery::Updates>,
     system_info: SystemInfo,
+    drm_page_flips: u32,
     commands: async_channel::Receiver<Command>,
     actions: async_channel::Sender<Action>,
 ) -> Result<(), String> {
     let mut kms_display = KmsDisplay::wait_open(UI_START_TIMEOUT)?;
+    kms_display.lab_page_flip_markers_remaining = drm_page_flips;
     let window = MinimalSoftwareWindow::new(RepaintBufferType::NewBuffer);
 
     slint::platform::set_platform(Box::new(PocketPlatform::new(window.clone())))
@@ -159,6 +162,7 @@ fn run(
     let mut commands = UiCommands::new(commands);
     let mut pointer_down = false;
     let mut power_press_context = PowerPressContext::BootMenu;
+    let mut page_flip_lab = DrmPageFlipLab::new(drm_page_flips);
     let display_path = kms_display.path.display().to_string();
     let connector = kms_display.connector.to_string();
     tracing::info!(
@@ -172,6 +176,16 @@ fn run(
 
     loop {
         slint::platform::update_timers_and_animations();
+
+        if page_flip_lab.request_next(kms_display.posted, kms_display.completed_page_flips) {
+            if page_flip_lab.remaining + 1 == page_flip_lab.requested {
+                tracing::info!(
+                    requested = page_flip_lab.requested,
+                    "POCKETBOOT_DRM_PAGE_FLIP_TEST_START"
+                );
+            }
+            window.request_redraw();
+        }
 
         if let Some(battery) = &mut battery {
             battery.poll(&main_window);
@@ -232,7 +246,17 @@ fn run(
             }
         }
 
-        if !kms_display.draw_if_needed(&window)? {
+        let redrawn = kms_display.draw_if_needed(&window)?;
+        if page_flip_lab.should_drain(kms_display.page_flip_pending) {
+            kms_display.wait_for_page_flip()?;
+        }
+        if let Some((requested, completed)) = page_flip_lab.finish(
+            kms_display.page_flip_pending,
+            kms_display.completed_page_flips,
+        ) {
+            tracing::info!(requested, completed, "POCKETBOOT_DRM_PAGE_FLIP_TEST_RESULT");
+        }
+        if !redrawn {
             thread::sleep(IDLE_SLEEP);
         }
     }
@@ -386,6 +410,49 @@ struct KmsDisplay {
     in_flight_buffer: KmsBuffer,
     posted: bool,
     page_flip_pending: bool,
+    completed_page_flips: u64,
+    lab_page_flip_markers_remaining: u32,
+}
+
+#[derive(Debug)]
+struct DrmPageFlipLab {
+    requested: u32,
+    remaining: u32,
+    baseline: Option<u64>,
+    reported: bool,
+}
+
+impl DrmPageFlipLab {
+    fn new(requested: u32) -> Self {
+        Self {
+            requested,
+            remaining: requested,
+            baseline: None,
+            reported: false,
+        }
+    }
+
+    fn request_next(&mut self, display_posted: bool, completed: u64) -> bool {
+        if !display_posted || self.remaining == 0 {
+            return false;
+        }
+        self.baseline.get_or_insert(completed);
+        self.remaining -= 1;
+        true
+    }
+
+    fn should_drain(&self, page_flip_pending: bool) -> bool {
+        self.baseline.is_some() && self.remaining == 0 && page_flip_pending
+    }
+
+    fn finish(&mut self, page_flip_pending: bool, completed: u64) -> Option<(u32, u64)> {
+        if self.reported || self.remaining != 0 || page_flip_pending {
+            return None;
+        }
+        let baseline = self.baseline?;
+        self.reported = true;
+        Some((self.requested, completed.saturating_sub(baseline)))
+    }
 }
 
 impl KmsDisplay {
@@ -472,6 +539,8 @@ impl KmsDisplay {
             in_flight_buffer,
             posted: false,
             page_flip_pending: false,
+            completed_page_flips: 0,
+            lab_page_flip_markers_remaining: 0,
         })
     }
 
@@ -554,6 +623,13 @@ impl KmsDisplay {
                 )
                 .map_err(|err| format!("set DRM CRTC: {err}"))?;
             self.posted = true;
+            tracing::info!(
+                path = %self.path.display(),
+                connector = %self.connector,
+                width = self.width,
+                height = self.height,
+                "POCKETBOOT_DRM_READY"
+            );
         }
 
         Ok(())
@@ -573,9 +649,47 @@ impl KmsDisplay {
                 |event| matches!(event, Event::PageFlip(page_flip) if page_flip.crtc == self.crtc),
             ) {
                 self.page_flip_pending = false;
+                self.completed_page_flips = self.completed_page_flips.saturating_add(1);
+                if self.lab_page_flip_markers_remaining > 0 {
+                    self.lab_page_flip_markers_remaining -= 1;
+                    tracing::info!(
+                        sequence = self.completed_page_flips,
+                        remaining = self.lab_page_flip_markers_remaining,
+                        "POCKETBOOT_DRM_PAGE_FLIP"
+                    );
+                }
                 return Ok(());
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod drm_lab_tests {
+    use super::*;
+
+    #[test]
+    fn bounded_page_flip_lab_requests_exact_count_and_reports_once() {
+        let mut lab = DrmPageFlipLab::new(3);
+
+        assert!(!lab.request_next(false, 10));
+        assert!(lab.request_next(true, 10));
+        assert!(lab.request_next(true, 11));
+        assert!(lab.request_next(true, 12));
+        assert!(!lab.request_next(true, 13));
+        assert!(lab.should_drain(true));
+        assert_eq!(lab.finish(true, 13), None);
+        assert_eq!(lab.finish(false, 13), Some((3, 3)));
+        assert_eq!(lab.finish(false, 13), None);
+    }
+
+    #[test]
+    fn disabled_page_flip_lab_never_forces_a_redraw() {
+        let mut lab = DrmPageFlipLab::new(0);
+
+        assert!(!lab.request_next(true, 0));
+        assert!(!lab.should_drain(true));
+        assert_eq!(lab.finish(false, 0), None);
     }
 }
 

@@ -43,10 +43,28 @@ pub(crate) fn slot_commands(slots: crate::ab_slots::Slots) -> CommandMap {
     slots::FastbootSlots::new(slots).commands()
 }
 
-pub(crate) fn reboot_command() -> Command {
-    Command::exact("reboot", reboot::handle)
+pub(crate) fn reboot_commands() -> CommandMap {
+    vec![
+        Command::exact("reboot", reboot::handle),
+        Command::exact("reboot-bootloader", reboot::handle_bootloader),
+    ]
 }
 
 pub(crate) fn ums_commands(gadget: crate::gadget::Gadget) -> CommandMap {
     ums::FastbootUms::new(gadget).commands()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn registers_standard_reboot_commands() {
+        let names = reboot_commands()
+            .iter()
+            .map(|command| command.name)
+            .collect::<Vec<_>>();
+
+        assert_eq!(names, ["reboot", "reboot-bootloader"]);
+    }
 }
