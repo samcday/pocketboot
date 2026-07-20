@@ -20,7 +20,8 @@ use super::{
 };
 
 pub(super) const BUSYBOX_VERSION: &str = "1.38.0";
-const BUSYBOX_RECIPE_VERSION: u32 = 4;
+const BUSYBOX_RECIPE_VERSION: u32 = 5;
+const BUSYBOX_EDITING_MAX_LEN: u32 = 4096;
 const BUSYBOX_ARCHIVE_SHA256: &str =
     "34f9ea6ff8636f2c9241153b9114eefa9e65674a45318ae1ef95bb5f31c53bb2";
 const BUSYBOX_SOURCE_URL: &str = "https://busybox.net/downloads/busybox-1.38.0.tar.bz2";
@@ -573,7 +574,11 @@ fn configure_busybox(config: &Path, features: &FeatureSet) -> Result<()> {
     set_kconfig_string(&mut contents, "BUSYBOX_EXEC_PATH", "/bin/busybox");
     set_kconfig_string(&mut contents, "PREFIX", "./_install");
     set_kconfig_string(&mut contents, "CROSS_COMPILER_PREFIX", "");
-    set_kconfig_int(&mut contents, "FEATURE_EDITING_MAX_LEN", 1024);
+    set_kconfig_int(
+        &mut contents,
+        "FEATURE_EDITING_MAX_LEN",
+        BUSYBOX_EDITING_MAX_LEN,
+    );
     set_kconfig_int(&mut contents, "FEATURE_EDITING_HISTORY", 64);
     fs::write(config, contents)
         .map_err(|err| format!("write busybox config {}: {err}", config.display()))
@@ -852,4 +857,37 @@ fn strip_busybox(binary: &Path, target: &str) -> Result<()> {
     let mut command = Command::new(strip);
     command.arg("--strip-all").arg(binary);
     run_command(command, "strip busybox")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn recipe_configures_a_4096_byte_interactive_editing_buffer() {
+        let nonce = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let config = std::env::temp_dir().join(format!(
+            "pocketboot-busybox-config-{}-{nonce}",
+            std::process::id()
+        ));
+        fs::write(&config, "CONFIG_FEATURE_EDITING_MAX_LEN=1024\n").unwrap();
+
+        configure_busybox(&config, &FeatureSet::default()).unwrap();
+        let contents = fs::read_to_string(&config).unwrap();
+        fs::remove_file(&config).unwrap();
+
+        let matching: Vec<_> = contents
+            .lines()
+            .filter(|line| line.starts_with("CONFIG_FEATURE_EDITING_MAX_LEN="))
+            .collect();
+        assert_eq!(
+            matching,
+            [format!(
+                "CONFIG_FEATURE_EDITING_MAX_LEN={BUSYBOX_EDITING_MAX_LEN}"
+            )]
+        );
+    }
 }
