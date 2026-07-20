@@ -4,10 +4,35 @@ name = "Google Pixel 3 XL (crosshatch)"
 dtbo_mask_manifest = "configs/dtbo-masks/qcom/sdm845-google-crosshatch.toml"
 
 [kconfig]
-# The reference sdm845-next tree does not have the pocketboot EUD serial driver.
+# Crosshatch has no EUD hardware; override the SDM845-wide debug defaults.
+USB_QCOM_EUD = false
 SERIAL_QCOM_EUD = "omit"
 SERIAL_QCOM_EUD_CONSOLE = "omit"
 SERIAL_QCOM_EUD_EARLYCON = "omit"
+
+# Firmware-independent display bring-up. Keep the DPU/DSI path built in so it
+# is available before the initramfs starts; the Adreno GPU remains isolated by
+# its disabled DT nodes and the skip_gpu/separate_gpu_kms command line below.
+DRM_SIMPLEDRM = false
+DRM_MSM = true
+DRM_MSM_DPU = true
+DRM_MSM_DSI = true
+DRM_MSM_DSI_10NM_PHY = true
+DRM_MIPI_DSI = true
+DRM_DISPLAY_DSC_HELPER = true
+SDM_DISPCC_845 = true
+REGULATOR_QCOM_REFGEN = true
+# Downstream owns the LAB rail through SWIRE/AOD; do not let mainline bind it.
+REGULATOR_QCOM_LABIBB = false
+BACKLIGHT_CLASS_DEVICE = true
+DRM_PANEL_SAMSUNG_S6E3HA8 = true
+
+# Do not probe the A630 clock/GPU side until its firmware path is ready.
+SDM_GPUCC_845 = false
+
+# Serial SysRq debug dumps (0x08) plus emergency reboot (0x80) for the
+# USB-Cereal lab harness. Other SysRq action classes remain disabled.
+MAGIC_SYSRQ_DEFAULT_ENABLE = { hex = 0x88 }
 
 # Crosshatch enables the USB3/DP QMP PHY for USB peripheral mode.
 PHY_QCOM_QMP_COMBO = true
@@ -34,4 +59,4 @@ ramdisk_offset = 0x01000000
 second_offset = 0x00f00000
 tags_offset = 0x00000100
 dtb_offset = 0x01f00000
-cmdline = ""
+cmdline = "earlycon console=ttyMSM0,115200n8 msm.skip_gpu=1 msm.separate_gpu_kms=1 pocketboot.log=info pocketboot.drm_page_flips=16 loglevel=8 ignore_loglevel drm.debug=0x6"

@@ -45,10 +45,6 @@
 	status = "disabled";
 };
 
-&{/soc@0/display-subsystem@ae00000} {
-	status = "disabled";
-};
-
 &{/soc@0/gpu@5000000} {
 	status = "disabled";
 };
@@ -58,10 +54,6 @@
 };
 
 &{/soc@0/gmu@506a000} {
-	status = "disabled";
-};
-
-&{/soc@0/clock-controller@af00000} {
 	status = "disabled";
 };
 

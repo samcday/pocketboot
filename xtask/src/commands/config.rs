@@ -689,4 +689,105 @@ mod tests {
             }
         }
     }
+
+    #[test]
+    fn crosshatch_enables_firmware_independent_msm_kms() {
+        let workspace_root = super::super::workspace_root().unwrap();
+        let device = KernelDevice::parse("qcom/sdm845-google-crosshatch").unwrap();
+        let config = load_device_config(&workspace_root, &device).unwrap();
+        let kconfig = config.kconfig_contents().unwrap();
+
+        for symbol in [
+            "DRM_MSM",
+            "DRM_MSM_DPU",
+            "DRM_MSM_DSI",
+            "DRM_MSM_DSI_10NM_PHY",
+            "DRM_MIPI_DSI",
+            "DRM_DISPLAY_DSC_HELPER",
+            "SDM_DISPCC_845",
+            "REGULATOR_QCOM_REFGEN",
+            "BACKLIGHT_CLASS_DEVICE",
+            "DRM_PANEL_SAMSUNG_S6E3HA8",
+            // Existing boot/storage paths must survive the display override.
+            "USB_DWC3",
+            "USB_DWC3_GADGET",
+            "USB_DWC3_QCOM",
+            "PHY_QCOM_QUSB2",
+            "PHY_QCOM_QMP_COMBO",
+            "SCSI_UFSHCD",
+            "SCSI_UFSHCD_PLATFORM",
+            "SCSI_UFS_QCOM",
+        ] {
+            assert!(
+                kconfig.contains(&format!("CONFIG_{symbol}=y\n")),
+                "missing built-in CONFIG_{symbol}:\n{kconfig}"
+            );
+        }
+        for symbol in [
+            "DRM_SIMPLEDRM",
+            "SDM_GPUCC_845",
+            "USB_QCOM_EUD",
+            "REGULATOR_QCOM_LABIBB",
+        ] {
+            assert!(
+                kconfig.contains(&format!("# CONFIG_{symbol} is not set\n")),
+                "CONFIG_{symbol} must be disabled:\n{kconfig}"
+            );
+        }
+        assert!(kconfig.contains("CONFIG_MAGIC_SYSRQ_DEFAULT_ENABLE=0x88\n"));
+
+        let cmdline = &config.bootimg.as_ref().unwrap().cmdline;
+        assert!(
+            cmdline
+                .split_ascii_whitespace()
+                .any(|arg| arg == "msm.skip_gpu=1")
+        );
+        assert!(
+            cmdline
+                .split_ascii_whitespace()
+                .any(|arg| arg == "msm.separate_gpu_kms=1")
+        );
+        for expected in [
+            "earlycon",
+            "console=ttyMSM0,115200n8",
+            "pocketboot.log=info",
+            "pocketboot.drm_page_flips=16",
+            "loglevel=8",
+            "ignore_loglevel",
+            "drm.debug=0x6",
+        ] {
+            assert!(cmdline.split_ascii_whitespace().any(|arg| arg == expected));
+        }
+    }
+
+    #[test]
+    fn crosshatch_overlay_keeps_display_and_gpu_isolation_boundaries() {
+        let workspace_root = super::super::workspace_root().unwrap();
+        let overlay = fs::read_to_string(
+            workspace_root.join("configs/dt-overlays/qcom/sdm845-google-crosshatch.dtso"),
+        )
+        .unwrap();
+
+        for enabled_path in [
+            "/soc@0/display-subsystem@ae00000",
+            "/soc@0/clock-controller@af00000",
+        ] {
+            assert!(
+                !overlay.contains(enabled_path),
+                "display path must no longer be disabled: {enabled_path}"
+            );
+        }
+        for disabled_path in [
+            "/soc@0/clock-controller@5090000",
+            "/soc@0/gpu@5000000",
+            "/soc@0/iommu@5040000",
+            "/soc@0/gmu@506a000",
+        ] {
+            let fragment = format!("&{{{disabled_path}}} {{\n\tstatus = \"disabled\";\n}};");
+            assert!(
+                overlay.contains(&fragment),
+                "GPU isolation path must remain disabled: {disabled_path}"
+            );
+        }
+    }
 }
