@@ -1,3 +1,5 @@
 /linux
 /kernel
 /target
+__pycache__/
+*.py[cod]
