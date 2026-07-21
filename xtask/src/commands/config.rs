@@ -691,7 +691,7 @@ mod tests {
     }
 
     #[test]
-    fn crosshatch_enables_firmware_independent_msm_kms() {
+    fn crosshatch_enables_firmware_independent_msm_kms_and_touch() {
         let workspace_root = super::super::workspace_root().unwrap();
         let device = KernelDevice::parse("qcom/sdm845-google-crosshatch").unwrap();
         let config = load_device_config(&workspace_root, &device).unwrap();
@@ -708,6 +708,7 @@ mod tests {
             "REGULATOR_QCOM_REFGEN",
             "BACKLIGHT_CLASS_DEVICE",
             "DRM_PANEL_SAMSUNG_S6E3HA8",
+            "TOUCHSCREEN_S6SY761",
             // Existing boot/storage paths must survive the display override.
             "USB_DWC3",
             "USB_DWC3_GADGET",

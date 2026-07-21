@@ -43,6 +43,10 @@ PHY_QCOM_QMP_COMBO = true
 # Buttons and PMIC input
 INPUT_PM8941_PWRKEY = true
 
+# Samsung S6SY761 touch controller on I2C2. Keep it built in: Pocketboot does
+# not package kernel modules in its initramfs.
+TOUCHSCREEN_S6SY761 = true
+
 # Board GPIO-controlled rails
 REGULATOR_FIXED_VOLTAGE = true
 
