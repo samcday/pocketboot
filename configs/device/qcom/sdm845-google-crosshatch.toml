@@ -10,6 +10,9 @@ SERIAL_QCOM_EUD = "omit"
 SERIAL_QCOM_EUD_CONSOLE = "omit"
 SERIAL_QCOM_EUD_EARLYCON = "omit"
 
+# Query-only transport for inspecting Citadel's AP-UART SBU routing state.
+CITADEL = true
+
 # Firmware-independent display bring-up. Keep the DPU/DSI path built in so it
 # is available before the initramfs starts; the Adreno GPU remains isolated by
 # its disabled DT nodes and the skip_gpu/separate_gpu_kms command line below.
@@ -31,7 +34,7 @@ DRM_PANEL_SAMSUNG_S6E3HA8 = true
 SDM_GPUCC_845 = false
 
 # Serial SysRq debug dumps (0x08) plus emergency reboot (0x80) for the
-# USB-Cereal lab harness. Other SysRq action classes remain disabled.
+# SBU UART lab harness. Other SysRq action classes remain disabled.
 MAGIC_SYSRQ_DEFAULT_ENABLE = { hex = 0x88 }
 
 # Crosshatch enables the USB3/DP QMP PHY for USB peripheral mode.
