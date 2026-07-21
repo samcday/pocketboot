@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Ephemeral Crosshatch MSM DRM bring-up runner over USB-Cereal.
+"""Ephemeral Crosshatch MSM DRM bring-up runner over the SBU debug UART.
 
 This program intentionally has no fastboot flash/erase support.  It opens an
 explicitly named UART, verifies an explicitly named fastboot device, and uses
@@ -326,11 +326,11 @@ def validate_serial_path(path: Path) -> Path:
         resolved = path.resolve(strict=True)
         mode = resolved.stat().st_mode
     except OSError as error:
-        raise SafetyError(f"cannot resolve USB-Cereal serial port {path}: {error}") from error
+        raise SafetyError(f"cannot resolve SBU UART serial port {path}: {error}") from error
     if str(resolved) in FORBIDDEN_TTYS or str(path) in FORBIDDEN_TTYS:
         raise SafetyError(f"refusing unsafe general-purpose tty: {path}")
     if not stat.S_ISCHR(mode):
-        raise SafetyError(f"USB-Cereal serial port is not a character device: {path}")
+        raise SafetyError(f"SBU UART serial port is not a character device: {path}")
 
     target_rdev = resolved.stat().st_rdev
     for fd, description in ((0, "stdin"), (1, "stdout"), (2, "stderr")):
@@ -339,7 +339,7 @@ def validate_serial_path(path: Path) -> Path:
         except OSError:
             same_terminal = False
         if same_terminal:
-            raise SafetyError(f"refusing to use the process {description} terminal as USB-Cereal")
+            raise SafetyError(f"refusing to use the process {description} terminal as SBU UART")
     return resolved
 
 
@@ -391,7 +391,7 @@ class SerialPort:
         except BlockingIOError:
             return b""
         except OSError as error:
-            raise LabError(f"read USB-Cereal serial port: {error}") from error
+            raise LabError(f"read SBU UART serial port: {error}") from error
 
     def write(self, data: bytes) -> None:
         offset = 0
@@ -402,9 +402,9 @@ class SerialPort:
                 select.select([], [self.fileno()], [], 1.0)
                 continue
             except OSError as error:
-                raise LabError(f"write USB-Cereal serial port: {error}") from error
+                raise LabError(f"write SBU UART serial port: {error}") from error
             if written <= 0:
-                raise LabError("write USB-Cereal serial port returned no progress")
+                raise LabError("write SBU UART serial port returned no progress")
             offset += written
 
     def send_command(self, command: str) -> None:
@@ -1042,7 +1042,7 @@ def validate_args(args: argparse.Namespace, parser: argparse.ArgumentParser) -> 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description=(
-            "Run ephemeral Crosshatch MSM DRM attempts while recording USB-Cereal. "
+            "Run ephemeral Crosshatch MSM DRM attempts while recording the SBU UART. "
             "The fastboot surface cannot write partitions."
         )
     )
@@ -1056,7 +1056,7 @@ def build_parser() -> argparse.ArgumentParser:
         "--serial-port",
         required=True,
         type=Path,
-        help="explicit USB-Cereal tty, preferably /dev/serial/by-id/...",
+        help="explicit SBU UART tty, preferably /dev/serial/by-id/...",
     )
     parser.add_argument("--expected-product", default="crosshatch")
     parser.add_argument("--fastboot", default="fastboot", help="fastboot executable")
@@ -1210,7 +1210,7 @@ def run(args: argparse.Namespace) -> int:
         log.line("HOST", f"image={image.name} size={image.stat().st_size} sha256={image_sha256}")
         fastboot = FastbootClient(executable, args.fastboot_serial)
         with SerialPort(serial_path, args.baud) as serial:
-            log.line("HOST", f"USB-Cereal opened at {args.baud} baud")
+            log.line("HOST", f"SBU UART opened at {args.baud} baud")
             for attempt in range(1, args.attempts + 1):
                 fastboot.wait_and_verify(
                     args.expected_product,

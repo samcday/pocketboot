@@ -1,15 +1,22 @@
 # Crosshatch MSM DRM lab runner
 
 `tools/crosshatch_drm_lab.py` boots a Pocketboot image ephemerally while
-capturing the Pixel 3 XL's UART through USB-Cereal. It is deliberately narrow:
+capturing the Pixel 3 XL's SBU debug UART. It is deliberately narrow:
 the fastboot surface contains read-only `getvar` checks, `fastboot boot`, and
 an optional identity-gated `fastboot reboot bootloader`. There is no flash,
 erase, format, slot-selection, or continue operation.
 
-Crosshatch has no EUD. On the tested setup USB-Cereal is a receive-only evidence
-channel; fastboot and ADB are the normal control and recovery paths. Serial
-BREAK/Magic SysRq support remains optional for adapters and wiring where input
-has been independently proven.
+Crosshatch has no EUD. The tested SBU UART setup is a passive USB-C breakout
+with an FT232RL adapter rather than Google's USB-Cereal board. Crosshatch uses
+3.3 V-class signalling: with the FT232 disconnected, its idle TX measured
+2.936 V. An FT232 set to 1.8 V still captured readable target output, but its
+TX was not recognized by Crosshatch; selecting 3.3 V restored a bidirectional
+Pocketboot shell. Leave the adapter's VCC pin disconnected and never select
+5 V. Correct connector orientation is also required.
+
+Fastboot and ADB remain the normal control and recovery paths. Serial
+BREAK/Magic SysRq support is available after bidirectional UART has been proven
+with the actual adapter, level setting, and connector orientation in use.
 
 ## Downstream provenance
 
@@ -49,7 +56,7 @@ The runner requires all three target inputs explicitly:
 - `--image` names the boot image.
 - `--fastboot-serial` names the Android fastboot device. The runner never
   enumerates or auto-selects a device.
-- `--serial-port` names the USB-Cereal tty. Prefer its stable
+- `--serial-port` names the SBU UART adapter's tty. Prefer its stable
   `/dev/serial/by-id/...` path; no tty path is built in or discovered by a
   shell glob.
 
@@ -82,7 +89,7 @@ python3 tools/crosshatch_drm_lab.py \
 ## One panel attempt
 
 The Crosshatch config adds `earlycon console=ttyMSM0,115200n8` for the
-USB-Cereal SBU debug UART plus `pocketboot.log=info loglevel=8 ignore_loglevel
+SBU debug UART plus `pocketboot.log=info loglevel=8 ignore_loglevel
 drm.debug=0x6`. This records early boot, DRM driver, and KMS setup without
 enabling the atomic/vblank debug classes, which are too noisy for repeated
 flips.
@@ -229,10 +236,11 @@ next attempt always waits for and re-verifies product and unlocked state.
 The host configures 115200 8-N-1 with no flow control by default. A SysRq
 request asserts BREAK with `TIOCSBRK` for 250 ms (falling back to
 `tcsendbreak`), waits 100 ms, then writes one key. These timings are adjustable.
-This assumes the USB-Cereal adapter and its host driver propagate BREAK and the
-kernel UART is the active serial console. That assumption did not hold for the
-receive-only Crosshatch setup used for the validated run, so SysRq was not part
-of its control or recovery contract.
+This assumes the SBU UART adapter and its host driver propagate BREAK and the
+kernel UART is the active serial console. The original validated five-boot run
+used the FT232 at 1.8 V, so it captured output but could not deliver input and
+SysRq was not part of that run's control or recovery contract. Follow-up testing
+at the measured-correct 3.3 V setting proved interactive UART input.
 
 The Crosshatch lab config sets `MAGIC_SYSRQ_DEFAULT_ENABLE=0x88`: `0x08`
 permits debug dumps and `0x80` permits emergency reboot/poweroff. Other SysRq

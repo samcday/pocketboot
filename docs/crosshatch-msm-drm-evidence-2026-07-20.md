@@ -1,8 +1,20 @@
 # Crosshatch MSM DRM evidence, 2026-07-20
 
-This checkpoint used only identity-gated `fastboot boot` and ADB against
-Crosshatch serial `8CCY15V1T`. No partition was flashed or erased. USB-Cereal
-was receive-only.
+This checkpoint used only identity-gated `fastboot boot` and ADB on the tested
+Crosshatch. It was booted ephemerally; no partition was flashed or erased. The
+SBU UART capture was receive-only.
+
+## UART follow-up, 2026-07-21
+
+The checkpoint's receive-only behavior was an adapter-level mismatch, not a
+Crosshatch or Pocketboot RX failure. The actual setup was a passive USB-C
+breakout and an FT232RL configured for 1.8 V. Its TX measured 1.818 V idle and
+delivered a low-heavy UART pattern at the breakout, but controlled writes left
+the QUP9 RX counter unchanged. With the FT232 disconnected, Crosshatch's native
+idle TX measured 2.936 V. Selecting 3.3 V on the FT232 immediately restored an
+interactive Pocketboot UART shell. The original output-only evidence remains
+valid; future bidirectional and Magic SysRq runs must use the verified 3.3 V
+setting, leave VCC disconnected, and preserve the working connector orientation.
 
 ## Five-boot run
 
@@ -39,7 +51,7 @@ therefore removed the two teardown workqueue warnings seen before it.
 ## Build-#5 live blanking check
 
 ADB still identified only the intended target as
-`8CCY15V1T recovery usb:1-1.3.4.3.1 product:pocketboot`. Its kernel was:
+`<redacted> recovery usb:<redacted> product:pocketboot`. Its kernel was:
 
 ```text
 Linux (none) 7.2.0-rc1+ #5 SMP PREEMPT Mon Jul 20 18:05:20 AEST 2026 aarch64
