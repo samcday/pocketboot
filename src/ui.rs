@@ -123,8 +123,15 @@ fn run(
     commands: async_channel::Receiver<Command>,
     actions: async_channel::Sender<Action>,
 ) -> Result<(), String> {
+    let ui_start = Instant::now();
+    let drm_open_start = Instant::now();
     let mut kms_display = KmsDisplay::wait_open(UI_START_TIMEOUT)?;
+    tracing::debug!(
+        duration_us = duration_us(drm_open_start.elapsed()),
+        "POCKETBOOT_UI_DRM_OPEN_TIMING"
+    );
     kms_display.lab_page_flip_markers_remaining = drm_page_flips;
+    let setup_start = Instant::now();
     let window = MinimalSoftwareWindow::new(RepaintBufferType::NewBuffer);
 
     slint::platform::set_platform(Box::new(PocketPlatform::new(window.clone())))
@@ -155,6 +162,11 @@ fn run(
     main_window
         .show()
         .map_err(|err| format!("show Slint window: {err}"))?;
+    tracing::debug!(
+        duration_us = duration_us(setup_start.elapsed()),
+        since_ui_start_us = duration_us(ui_start.elapsed()),
+        "POCKETBOOT_UI_SETUP_TIMING"
+    );
 
     let mut touch = TouchInput::new();
     let mut buttons = ButtonInput::new();
@@ -163,6 +175,7 @@ fn run(
     let mut pointer_down = false;
     let mut power_press_context = PowerPressContext::BootMenu;
     let mut page_flip_lab = DrmPageFlipLab::new(drm_page_flips);
+    let mut first_frame_logged = false;
     let display_path = kms_display.path.display().to_string();
     let connector = kms_display.connector.to_string();
     tracing::info!(
@@ -247,6 +260,14 @@ fn run(
         }
 
         let redrawn = kms_display.draw_if_needed(&window)?;
+        if redrawn && !first_frame_logged {
+            first_frame_logged = true;
+            tracing::debug!(
+                frame = kms_display.submitted_frames,
+                since_ui_start_us = duration_us(ui_start.elapsed()),
+                "POCKETBOOT_UI_FIRST_FRAME_SUBMITTED"
+            );
+        }
         if page_flip_lab.should_drain(kms_display.page_flip_pending) {
             kms_display.wait_for_page_flip()?;
         }
@@ -410,6 +431,8 @@ struct KmsDisplay {
     in_flight_buffer: KmsBuffer,
     posted: bool,
     page_flip_pending: bool,
+    page_flip_submitted_at: Option<Instant>,
+    submitted_frames: u64,
     completed_page_flips: u64,
     lab_page_flip_markers_remaining: u32,
 }
@@ -539,58 +562,90 @@ impl KmsDisplay {
             in_flight_buffer,
             posted: false,
             page_flip_pending: false,
+            page_flip_submitted_at: None,
+            submitted_frames: 0,
             completed_page_flips: 0,
             lab_page_flip_markers_remaining: 0,
         })
     }
 
     fn draw_if_needed(&mut self, window: &MinimalSoftwareWindow) -> Result<bool, String> {
+        let frame = self.submitted_frames.saturating_add(1);
+        let draw_start = Instant::now();
         let mut render_result = Ok(());
         let redraw = window.draw_if_needed(|renderer| {
-            render_result = self.render(renderer);
+            render_result = self.render(renderer, frame);
         });
 
         render_result?;
 
         if redraw {
-            self.present()?;
+            self.present(frame)?;
+            tracing::debug!(
+                frame,
+                duration_us = duration_us(draw_start.elapsed()),
+                "POCKETBOOT_UI_FRAME_TIMING"
+            );
         }
 
         Ok(redraw)
     }
 
-    fn render(&mut self, renderer: &SoftwareRenderer) -> Result<(), String> {
+    fn render(&mut self, renderer: &SoftwareRenderer, frame: u64) -> Result<(), String> {
+        let render_total_start = Instant::now();
         let format = self.format;
         let stride = self.back_buffer.buffer.pitch() as usize / bytes_per_pixel(format);
-        let repaint_buffer_type = repaint_buffer_type_for_age(self.back_buffer.age);
-        let mut mapping = self
-            .card
-            .map_dumb_buffer(&mut self.back_buffer.buffer)
-            .map_err(|err| format!("map DRM dumb buffer: {err}"))?;
-        let buffer = mapping.as_mut();
+        let buffer_age = self.back_buffer.age;
+        let repaint_buffer_type = repaint_buffer_type_for_age(buffer_age);
+        let (map_duration, renderer_duration) = {
+            let map_start = Instant::now();
+            let mut mapping = self
+                .card
+                .map_dumb_buffer(&mut self.back_buffer.buffer)
+                .map_err(|err| format!("map DRM dumb buffer: {err}"))?;
+            let map_duration = map_start.elapsed();
+            let buffer = mapping.as_mut();
 
-        renderer.set_repaint_buffer_type(repaint_buffer_type);
-        match format {
-            DrmFourcc::Xrgb8888 | DrmFourcc::Argb8888 => {
-                let pixels = cast_buffer_mut::<Xrgb8888Pixel>(buffer, format)?;
-                renderer.render(pixels, stride);
+            renderer.set_repaint_buffer_type(repaint_buffer_type);
+            let renderer_start = Instant::now();
+            match format {
+                DrmFourcc::Xrgb8888 | DrmFourcc::Argb8888 => {
+                    let pixels = cast_buffer_mut::<Xrgb8888Pixel>(buffer, format)?;
+                    renderer.render(pixels, stride);
+                }
+                DrmFourcc::Bgra8888 => {
+                    let pixels = cast_buffer_mut::<Bgra8888Pixel>(buffer, format)?;
+                    renderer.render(pixels, stride);
+                }
+                DrmFourcc::Rgb565 => {
+                    let pixels = cast_buffer_mut::<Rgb565Pixel>(buffer, format)?;
+                    renderer.render(pixels, stride);
+                }
+                _ => unreachable!("unsupported DRM format was selected"),
             }
-            DrmFourcc::Bgra8888 => {
-                let pixels = cast_buffer_mut::<Bgra8888Pixel>(buffer, format)?;
-                renderer.render(pixels, stride);
-            }
-            DrmFourcc::Rgb565 => {
-                let pixels = cast_buffer_mut::<Rgb565Pixel>(buffer, format)?;
-                renderer.render(pixels, stride);
-            }
-            _ => unreachable!("unsupported DRM format was selected"),
-        }
+
+            (map_duration, renderer_start.elapsed())
+        };
+
+        tracing::trace!(
+            frame,
+            format = ?format,
+            stride,
+            buffer_age,
+            map_us = duration_us(map_duration),
+            renderer_us = duration_us(renderer_duration),
+            total_us = duration_us(render_total_start.elapsed()),
+            "POCKETBOOT_UI_RENDER_TIMING"
+        );
 
         Ok(())
     }
 
-    fn present(&mut self) -> Result<(), String> {
+    fn present(&mut self, frame: u64) -> Result<(), String> {
+        let present_start = Instant::now();
+        let wait_start = Instant::now();
         self.wait_for_page_flip()?;
+        let previous_flip_wait = wait_start.elapsed();
 
         mem::swap(&mut self.back_buffer, &mut self.front_buffer);
         mem::swap(&mut self.front_buffer, &mut self.in_flight_buffer);
@@ -602,7 +657,8 @@ impl KmsDisplay {
             }
         }
 
-        if self.posted {
+        let (operation, submit_duration) = if self.posted {
+            let submit_start = Instant::now();
             self.card
                 .page_flip(
                     self.crtc,
@@ -611,8 +667,12 @@ impl KmsDisplay {
                     None,
                 )
                 .map_err(|err| format!("page flip DRM buffer: {err}"))?;
+            let submit_duration = submit_start.elapsed();
             self.page_flip_pending = true;
+            self.page_flip_submitted_at = Some(submit_start);
+            ("page_flip", submit_duration)
         } else {
+            let submit_start = Instant::now();
             self.card
                 .set_crtc(
                     self.crtc,
@@ -622,6 +682,7 @@ impl KmsDisplay {
                     Some(self.mode),
                 )
                 .map_err(|err| format!("set DRM CRTC: {err}"))?;
+            let submit_duration = submit_start.elapsed();
             self.posted = true;
             tracing::info!(
                 path = %self.path.display(),
@@ -629,6 +690,25 @@ impl KmsDisplay {
                 width = self.width,
                 height = self.height,
                 "POCKETBOOT_DRM_READY"
+            );
+            ("set_crtc", submit_duration)
+        };
+        self.submitted_frames = frame;
+        tracing::trace!(
+            frame,
+            operation,
+            previous_flip_wait_us = duration_us(previous_flip_wait),
+            submit_us = duration_us(submit_duration),
+            total_us = duration_us(present_start.elapsed()),
+            "POCKETBOOT_UI_PRESENT_TIMING"
+        );
+        if frame == 1 {
+            tracing::debug!(
+                frame,
+                operation,
+                submit_us = duration_us(submit_duration),
+                total_us = duration_us(present_start.elapsed()),
+                "POCKETBOOT_UI_FIRST_MODESET_TIMING"
             );
         }
 
@@ -640,16 +720,61 @@ impl KmsDisplay {
             return Ok(());
         }
 
+        let frame = self.submitted_frames;
+        let wait_start = Instant::now();
+        let submitted_at = self
+            .page_flip_submitted_at
+            .ok_or_else(|| "page flip pending without a submission timestamp".to_string())?;
+        let mut batches = 0u32;
         loop {
+            let receive_start = Instant::now();
             let events = self
                 .card
                 .receive_events()
                 .map_err(|err| format!("receive DRM events: {err}"))?;
-            if events.into_iter().any(
-                |event| matches!(event, Event::PageFlip(page_flip) if page_flip.crtc == self.crtc),
-            ) {
+            let receive_duration = receive_start.elapsed();
+            batches = batches.saturating_add(1);
+            let mut event_count = 0u32;
+            let mut matched = false;
+            for event in events {
+                event_count = event_count.saturating_add(1);
+                if matches!(event, Event::PageFlip(page_flip) if page_flip.crtc == self.crtc) {
+                    matched = true;
+                }
+            }
+            let receive_wait_duration = wait_start.elapsed();
+            tracing::trace!(
+                frame,
+                batch = batches,
+                event_count,
+                matched,
+                receive_us = duration_us(receive_duration),
+                receive_wait_us = duration_us(receive_wait_duration),
+                "POCKETBOOT_UI_DRM_EVENT_TIMING"
+            );
+            if matched {
+                let submit_to_observe_duration = submitted_at.elapsed();
                 self.page_flip_pending = false;
+                self.page_flip_submitted_at = None;
                 self.completed_page_flips = self.completed_page_flips.saturating_add(1);
+                tracing::trace!(
+                    frame,
+                    sequence = self.completed_page_flips,
+                    batches,
+                    submit_to_observe_us = duration_us(submit_to_observe_duration),
+                    receive_wait_us = duration_us(receive_wait_duration),
+                    "POCKETBOOT_UI_PAGE_FLIP_COMPLETE_TIMING"
+                );
+                if self.completed_page_flips == 1 {
+                    tracing::debug!(
+                        frame,
+                        sequence = self.completed_page_flips,
+                        batches,
+                        submit_to_observe_us = duration_us(submit_to_observe_duration),
+                        receive_wait_us = duration_us(receive_wait_duration),
+                        "POCKETBOOT_UI_FIRST_PAGE_FLIP_TIMING"
+                    );
+                }
                 if self.lab_page_flip_markers_remaining > 0 {
                     self.lab_page_flip_markers_remaining -= 1;
                     tracing::info!(
@@ -662,6 +787,10 @@ impl KmsDisplay {
             }
         }
     }
+}
+
+fn duration_us(duration: Duration) -> u64 {
+    duration.as_micros().try_into().unwrap_or(u64::MAX)
 }
 
 #[cfg(test)]
