@@ -1,6 +1,17 @@
 name = "Samsung Galaxy A5U (EUR)"
 
 [kconfig]
+# Firmware-independent MDP5/DSI display bring-up. Keep the GPU isolated while
+# exercising the KMS path; the panel driver is generated in the MSM8916 tree.
+DRM_SIMPLEDRM = false
+IOMMU_SUPPORT = true
+QCOM_IOMMU = true
+DRM_MSM = true
+DRM_MSM_MDP5 = true
+DRM_MSM_DSI = true
+DRM_MSM_DSI_28NM_PHY = true
+DRM_PANEL_SAMSUNG_EA8061V_AMS497EE01 = true
+
 # Buttons, touchscreen and touchkeys
 INPUT_PM8941_PWRKEY = true
 TOUCHSCREEN_MMS114 = true
@@ -39,7 +50,7 @@ tags_offset = 0x00000100
 dtb_offset = 0x0
 ramdisk_size = 1
 append_seandroid_enforce = true
-cmdline = ""
+cmdline = "msm.skip_gpu=1 msm.separate_gpu_kms=1"
 
 [bootimg.qcdt]
 entries = [

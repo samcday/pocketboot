@@ -25,10 +25,6 @@
 	status = "disabled";
 };
 
-&{/soc@0/iommu@1ef0000} {
-	status = "disabled";
-};
-
 &{/soc@0/iommu@1f08000} {
 	status = "disabled";
 };
@@ -42,10 +38,6 @@
 };
 
 &{/soc@0/remoteproc@4080000/smd-edge/apr} {
-	status = "disabled";
-};
-
-&{/soc@0/display-subsystem@1a00000} {
 	status = "disabled";
 };
 
