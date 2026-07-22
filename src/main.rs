@@ -35,6 +35,7 @@ const SYS_BLOCK: &str = "/sys/block";
 const PROC_CMDLINE: &str = "/proc/cmdline";
 const ACM_CMDLINE_PARAM: &str = "pocketboot.acm";
 const DRM_PAGE_FLIPS_CMDLINE_PARAM: &str = "pocketboot.drm_page_flips";
+const UI_ANIMATION_LAB_CMDLINE_PARAM: &str = "pocketboot.ui_animation_lab";
 const MAX_DRM_PAGE_FLIPS: u32 = 64;
 const FDT_MODEL_PATH: &str = "/sys/firmware/devicetree/base/model";
 const FDT_COMPATIBLE_PATH: &str = "/sys/firmware/devicetree/base/compatible";
@@ -94,7 +95,8 @@ async fn run() -> Result<()> {
         }
     };
     let drm_page_flips = drm_page_flips(&cmdline);
-    let ui = match ui::spawn(battery, system_info, drm_page_flips) {
+    let ui_animation_lab = cmdline.is_set(UI_ANIMATION_LAB_CMDLINE_PARAM);
+    let ui = match ui::spawn(battery, system_info, drm_page_flips, ui_animation_lab) {
         Ok(handle) => Some(handle),
         Err(err) => {
             tracing::warn!(error = %err, "failed to spawn UI thread");

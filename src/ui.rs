@@ -41,6 +41,11 @@ const INPUT: &str = "/dev/input";
 const UI_START_TIMEOUT: Duration = Duration::from_secs(2);
 const IDLE_SLEEP: Duration = Duration::from_millis(16);
 const POWER_KEY_HOLD: Duration = Duration::from_millis(2500);
+const FRAME_RATE_WINDOW: Duration = Duration::from_secs(1);
+const FRAME_RATE_GAP_RESET: Duration = Duration::from_millis(250);
+const ANIMATION_LAB_SETTLE: Duration = Duration::from_millis(600);
+const ANIMATION_LAB_BETWEEN_BUTTONS: Duration = Duration::from_millis(800);
+const ANIMATION_LAB_HOLD: Duration = Duration::from_millis(1500);
 
 #[derive(Clone, Debug)]
 pub(crate) struct SystemInfo {
@@ -98,13 +103,21 @@ pub(crate) fn spawn(
     battery: Option<battery::Updates>,
     system_info: SystemInfo,
     drm_page_flips: u32,
+    ui_animation_lab: bool,
 ) -> io::Result<Handle> {
     let (command_tx, command_rx) = async_channel::unbounded();
     let (action_tx, action_rx) = async_channel::unbounded();
     let handle = thread::Builder::new()
         .name("pocketboot-ui".to_string())
         .spawn(move || {
-            if let Err(err) = run(battery, system_info, drm_page_flips, command_rx, action_tx) {
+            if let Err(err) = run(
+                battery,
+                system_info,
+                drm_page_flips,
+                ui_animation_lab,
+                command_rx,
+                action_tx,
+            ) {
                 tracing::warn!(error = %err, "UI thread exited");
             }
         })?;
@@ -120,6 +133,7 @@ fn run(
     battery: Option<battery::Updates>,
     system_info: SystemInfo,
     drm_page_flips: u32,
+    ui_animation_lab: bool,
     commands: async_channel::Receiver<Command>,
     actions: async_channel::Sender<Action>,
 ) -> Result<(), String> {
@@ -142,7 +156,14 @@ fn run(
     main_window.set_device_name(system_info.device_name.into());
     main_window.set_device_detail(system_info.device_detail.into());
     main_window.set_serialno(system_info.serialno.into());
-    main_window.on_power_action(|action| {
+    main_window.on_power_action(move |action| {
+        if ui_animation_lab {
+            tracing::error!(
+                action = ?action,
+                "POCKETBOOT_UI_ANIMATION_LAB_UNEXPECTED_POWER_ACTION"
+            );
+            return;
+        }
         let result = match action {
             PowerAction::Shutdown => power::power_off(),
             PowerAction::Reboot => power::reboot(),
@@ -175,6 +196,7 @@ fn run(
     let mut pointer_down = false;
     let mut power_press_context = PowerPressContext::BootMenu;
     let mut page_flip_lab = DrmPageFlipLab::new(drm_page_flips);
+    let mut animation_lab = UiAnimationLab::new(ui_animation_lab);
     let mut first_frame_logged = false;
     let display_path = kms_display.path.display().to_string();
     let connector = kms_display.connector.to_string();
@@ -259,7 +281,12 @@ fn run(
             }
         }
 
+        animation_lab.poll(&main_window, &mut kms_display)?;
+
         let redrawn = kms_display.draw_if_needed(&window)?;
+        if redrawn && window.has_active_animations() {
+            window.request_redraw();
+        }
         if redrawn && !first_frame_logged {
             first_frame_logged = true;
             tracing::debug!(
@@ -277,10 +304,193 @@ fn run(
         ) {
             tracing::info!(requested, completed, "POCKETBOOT_DRM_PAGE_FLIP_TEST_RESULT");
         }
-        if !redrawn {
-            thread::sleep(IDLE_SLEEP);
+        if !redrawn && !window.has_active_animations() {
+            let sleep = slint::platform::duration_until_next_timer_update()
+                .map(|duration| duration.min(IDLE_SLEEP))
+                .unwrap_or(IDLE_SLEEP);
+            if !sleep.is_zero() {
+                thread::sleep(sleep);
+            }
         }
     }
+}
+
+struct UiAnimationLab {
+    phase: UiAnimationLabPhase,
+    shutdown: Option<UiAnimationLabMeasurement>,
+    reboot: Option<UiAnimationLabMeasurement>,
+}
+
+#[derive(Clone, Copy)]
+struct UiAnimationLabMeasurement {
+    report: FrameRateReport,
+    progress_milli: u64,
+}
+
+impl UiAnimationLabMeasurement {
+    fn passes(self) -> bool {
+        (30_000..=60_000).contains(&self.report.fps_milli)
+            && (30_000..=60_000).contains(&self.report.vblank_fps_milli)
+            && self.report.interval_p95_us <= 33_500
+            && self.report.interval_max_us <= 50_000
+            && (650..=900).contains(&self.progress_milli)
+    }
+}
+
+#[derive(Clone, Copy)]
+enum UiAnimationLabPhase {
+    Disabled,
+    WaitForDisplay,
+    OpenMenuAt(Instant),
+    SelectShutdownAt(Instant),
+    StartShutdownAt(Instant),
+    StopShutdownAt(Instant),
+    SelectRebootAt(Instant),
+    StartRebootAt(Instant),
+    StopRebootAt(Instant),
+    FinishAt(Instant),
+    Done,
+}
+
+impl UiAnimationLab {
+    fn new(enabled: bool) -> Self {
+        let phase = if enabled {
+            tracing::info!("POCKETBOOT_UI_ANIMATION_LAB_ENABLED");
+            UiAnimationLabPhase::WaitForDisplay
+        } else {
+            UiAnimationLabPhase::Disabled
+        };
+        Self {
+            phase,
+            shutdown: None,
+            reboot: None,
+        }
+    }
+
+    fn poll(&mut self, window: &MainWindow, display: &mut KmsDisplay) -> Result<(), String> {
+        let now = Instant::now();
+        match self.phase {
+            UiAnimationLabPhase::Disabled | UiAnimationLabPhase::Done => {}
+            UiAnimationLabPhase::WaitForDisplay if display.posted => {
+                self.phase = UiAnimationLabPhase::OpenMenuAt(now + ANIMATION_LAB_SETTLE);
+            }
+            UiAnimationLabPhase::WaitForDisplay => {}
+            UiAnimationLabPhase::OpenMenuAt(deadline) if now >= deadline => {
+                display.wait_for_page_flip()?;
+                window.invoke_show_power_menu();
+                tracing::info!(phase = "open_menu", "POCKETBOOT_UI_ANIMATION_LAB_PHASE");
+                self.phase =
+                    UiAnimationLabPhase::SelectShutdownAt(Instant::now() + ANIMATION_LAB_SETTLE);
+            }
+            UiAnimationLabPhase::OpenMenuAt(_) => {}
+            UiAnimationLabPhase::SelectShutdownAt(deadline) if now >= deadline => {
+                display.wait_for_page_flip()?;
+                window.invoke_hardware_nav_next();
+                self.phase =
+                    UiAnimationLabPhase::StartShutdownAt(Instant::now() + ANIMATION_LAB_SETTLE);
+            }
+            UiAnimationLabPhase::SelectShutdownAt(_) => {}
+            UiAnimationLabPhase::StartShutdownAt(deadline) if now >= deadline => {
+                display.wait_for_page_flip()?;
+                display.start_frame_rate_measurement("shutdown");
+                window.invoke_hardware_power_pressed();
+                tracing::info!(
+                    action = "shutdown",
+                    "POCKETBOOT_UI_ANIMATION_LAB_HOLD_START"
+                );
+                self.phase =
+                    UiAnimationLabPhase::StopShutdownAt(Instant::now() + ANIMATION_LAB_HOLD);
+            }
+            UiAnimationLabPhase::StartShutdownAt(_) => {}
+            UiAnimationLabPhase::StopShutdownAt(deadline) if now >= deadline => {
+                display.wait_for_page_flip()?;
+                let progress_milli = progress_milli(window.get_hold_progress());
+                self.shutdown = display.finish_frame_rate_measurement().map(|report| {
+                    UiAnimationLabMeasurement {
+                        report,
+                        progress_milli,
+                    }
+                });
+                window.invoke_hardware_power_released();
+                tracing::info!(
+                    action = "shutdown",
+                    measured = self.shutdown.is_some(),
+                    progress_milli,
+                    "POCKETBOOT_UI_ANIMATION_LAB_HOLD_STOP"
+                );
+                self.phase = UiAnimationLabPhase::SelectRebootAt(
+                    Instant::now() + ANIMATION_LAB_BETWEEN_BUTTONS,
+                );
+            }
+            UiAnimationLabPhase::StopShutdownAt(_) => {}
+            UiAnimationLabPhase::SelectRebootAt(deadline) if now >= deadline => {
+                display.wait_for_page_flip()?;
+                window.invoke_hardware_nav_next();
+                self.phase =
+                    UiAnimationLabPhase::StartRebootAt(Instant::now() + ANIMATION_LAB_SETTLE);
+            }
+            UiAnimationLabPhase::SelectRebootAt(_) => {}
+            UiAnimationLabPhase::StartRebootAt(deadline) if now >= deadline => {
+                display.wait_for_page_flip()?;
+                display.start_frame_rate_measurement("reboot");
+                window.invoke_hardware_power_pressed();
+                tracing::info!(action = "reboot", "POCKETBOOT_UI_ANIMATION_LAB_HOLD_START");
+                self.phase = UiAnimationLabPhase::StopRebootAt(Instant::now() + ANIMATION_LAB_HOLD);
+            }
+            UiAnimationLabPhase::StartRebootAt(_) => {}
+            UiAnimationLabPhase::StopRebootAt(deadline) if now >= deadline => {
+                display.wait_for_page_flip()?;
+                let progress_milli = progress_milli(window.get_hold_progress());
+                self.reboot = display.finish_frame_rate_measurement().map(|report| {
+                    UiAnimationLabMeasurement {
+                        report,
+                        progress_milli,
+                    }
+                });
+                window.invoke_hardware_power_released();
+                tracing::info!(
+                    action = "reboot",
+                    measured = self.reboot.is_some(),
+                    progress_milli,
+                    "POCKETBOOT_UI_ANIMATION_LAB_HOLD_STOP"
+                );
+                self.phase = UiAnimationLabPhase::FinishAt(Instant::now() + ANIMATION_LAB_SETTLE);
+            }
+            UiAnimationLabPhase::StopRebootAt(_) => {}
+            UiAnimationLabPhase::FinishAt(deadline) if now >= deadline => {
+                display.wait_for_page_flip()?;
+                let shutdown = self.shutdown;
+                let reboot = self.reboot;
+                let passed = shutdown.is_some_and(UiAnimationLabMeasurement::passes)
+                    && reboot.is_some_and(UiAnimationLabMeasurement::passes);
+                tracing::info!(
+                    passed,
+                    shutdown_measured = shutdown.is_some(),
+                    shutdown_fps_milli = shutdown.map_or(0, |m| m.report.fps_milli),
+                    shutdown_vblank_fps_milli = shutdown.map_or(0, |m| m.report.vblank_fps_milli),
+                    shutdown_flips = shutdown.map_or(0, |m| m.report.completed_flips),
+                    shutdown_p95_us = shutdown.map_or(0, |m| m.report.interval_p95_us),
+                    shutdown_max_us = shutdown.map_or(0, |m| m.report.interval_max_us),
+                    shutdown_progress_milli = shutdown.map_or(0, |m| m.progress_milli),
+                    reboot_measured = reboot.is_some(),
+                    reboot_fps_milli = reboot.map_or(0, |m| m.report.fps_milli),
+                    reboot_vblank_fps_milli = reboot.map_or(0, |m| m.report.vblank_fps_milli),
+                    reboot_flips = reboot.map_or(0, |m| m.report.completed_flips),
+                    reboot_p95_us = reboot.map_or(0, |m| m.report.interval_p95_us),
+                    reboot_max_us = reboot.map_or(0, |m| m.report.interval_max_us),
+                    reboot_progress_milli = reboot.map_or(0, |m| m.progress_milli),
+                    "POCKETBOOT_UI_ANIMATION_LAB_RESULT"
+                );
+                self.phase = UiAnimationLabPhase::Done;
+            }
+            UiAnimationLabPhase::FinishAt(_) => {}
+        }
+        Ok(())
+    }
+}
+
+fn progress_milli(progress: f32) -> u64 {
+    u64::try_from((progress.clamp(0.0, 1.0) * 1000.0).round() as i64).unwrap_or(0)
 }
 
 struct UiCommands {
@@ -429,12 +639,132 @@ struct KmsDisplay {
     front_buffer: KmsBuffer,
     back_buffer: KmsBuffer,
     in_flight_buffer: KmsBuffer,
+    heap_buffer: CachedRenderBuffer,
     posted: bool,
     page_flip_pending: bool,
     page_flip_submitted_at: Option<Instant>,
     submitted_frames: u64,
     completed_page_flips: u64,
+    frame_rate_stats: FrameRateStats,
+    frame_rate_measurement_action: Option<&'static str>,
+    frame_rate_measurement_report: Option<FrameRateReport>,
     lab_page_flip_markers_remaining: u32,
+}
+
+#[derive(Debug)]
+struct FrameRateStats {
+    mode_vrefresh: u32,
+    start_time: Option<Duration>,
+    start_vblank: u32,
+    last_time: Option<Duration>,
+    intervals_us: Vec<u64>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct FrameRateReport {
+    completed_flips: u32,
+    elapsed_us: u64,
+    vblank_delta: u32,
+    fps_milli: u64,
+    vblank_fps_milli: u64,
+    interval_p50_us: u64,
+    interval_p95_us: u64,
+    interval_max_us: u64,
+}
+
+impl FrameRateStats {
+    fn new(mode_vrefresh: u32) -> Self {
+        Self {
+            mode_vrefresh,
+            start_time: None,
+            start_vblank: 0,
+            last_time: None,
+            intervals_us: Vec::with_capacity(mode_vrefresh as usize),
+        }
+    }
+
+    fn record(&mut self, vblank: u32, event_time: Duration) -> Option<FrameRateReport> {
+        let Some(last_time) = self.last_time else {
+            self.reset(vblank, event_time);
+            return None;
+        };
+        let interval = event_time.saturating_sub(last_time);
+        if interval > FRAME_RATE_GAP_RESET {
+            self.reset(vblank, event_time);
+            return None;
+        }
+
+        self.last_time = Some(event_time);
+        self.intervals_us.push(duration_us(interval));
+
+        let start_time = self.start_time.unwrap_or(event_time);
+        let elapsed = event_time.saturating_sub(start_time);
+        if elapsed < FRAME_RATE_WINDOW {
+            return None;
+        }
+
+        self.intervals_us.sort_unstable();
+        let completed_flips = self.intervals_us.len() as u32;
+        let elapsed_us = duration_us(elapsed);
+        let vblank_delta = vblank.wrapping_sub(self.start_vblank);
+        let report = FrameRateReport {
+            completed_flips,
+            elapsed_us,
+            vblank_delta,
+            fps_milli: rate_milli(completed_flips, elapsed),
+            vblank_fps_milli: if vblank_delta == 0 {
+                0
+            } else {
+                u64::from(completed_flips)
+                    .saturating_mul(u64::from(self.mode_vrefresh))
+                    .saturating_mul(1000)
+                    / u64::from(vblank_delta)
+            },
+            interval_p50_us: percentile(&self.intervals_us, 50),
+            interval_p95_us: percentile(&self.intervals_us, 95),
+            interval_max_us: self.intervals_us.last().copied().unwrap_or(0),
+        };
+        self.reset(vblank, event_time);
+        Some(report)
+    }
+
+    fn clear(&mut self) {
+        self.start_time = None;
+        self.start_vblank = 0;
+        self.last_time = None;
+        self.intervals_us.clear();
+    }
+
+    fn reset(&mut self, vblank: u32, event_time: Duration) {
+        self.start_time = Some(event_time);
+        self.start_vblank = vblank;
+        self.last_time = Some(event_time);
+        self.intervals_us.clear();
+    }
+}
+
+fn rate_milli(completed_flips: u32, elapsed: Duration) -> u64 {
+    let elapsed_ns = elapsed.as_nanos();
+    if elapsed_ns == 0 {
+        return 0;
+    }
+    let rate = u128::from(completed_flips)
+        .saturating_mul(1_000_000_000)
+        .saturating_mul(1000)
+        / elapsed_ns;
+    rate.try_into().unwrap_or(u64::MAX)
+}
+
+fn percentile(sorted_values: &[u64], percentile: usize) -> u64 {
+    if sorted_values.is_empty() {
+        return 0;
+    }
+    let rank = sorted_values
+        .len()
+        .saturating_mul(percentile)
+        .div_ceil(100)
+        .saturating_sub(1);
+    sorted_values[rank.min(sorted_values.len() - 1)]
 }
 
 #[derive(Debug)]
@@ -543,10 +873,23 @@ impl KmsDisplay {
         let format = choose_format(&card, &resources, crtc)?;
         let (width, height) = mode.size();
         let size = (width as u32, height as u32);
+        let frame_rate_stats = FrameRateStats::new(mode.vrefresh());
 
         let front_buffer = KmsBuffer::allocate(&card, size, format)?;
         let back_buffer = KmsBuffer::allocate(&card, size, format)?;
         let in_flight_buffer = KmsBuffer::allocate(&card, size, format)?;
+        let render_pitch = back_buffer.buffer.pitch();
+        for (name, pitch) in [
+            ("front", front_buffer.buffer.pitch()),
+            ("in-flight", in_flight_buffer.buffer.pitch()),
+        ] {
+            if pitch != render_pitch {
+                return Err(format!(
+                    "DRM {name} buffer pitch differs from back buffer: {pitch} != {render_pitch}"
+                ));
+            }
+        }
+        let heap_buffer = CachedRenderBuffer::new(format, render_pitch, size.1)?;
 
         Ok(Self {
             card,
@@ -560,13 +903,28 @@ impl KmsDisplay {
             front_buffer,
             back_buffer,
             in_flight_buffer,
+            heap_buffer,
             posted: false,
             page_flip_pending: false,
             page_flip_submitted_at: None,
             submitted_frames: 0,
             completed_page_flips: 0,
+            frame_rate_stats,
+            frame_rate_measurement_action: None,
+            frame_rate_measurement_report: None,
             lab_page_flip_markers_remaining: 0,
         })
+    }
+
+    fn start_frame_rate_measurement(&mut self, action: &'static str) {
+        self.frame_rate_stats.clear();
+        self.frame_rate_measurement_action = Some(action);
+        self.frame_rate_measurement_report = None;
+    }
+
+    fn finish_frame_rate_measurement(&mut self) -> Option<FrameRateReport> {
+        self.frame_rate_measurement_action = None;
+        self.frame_rate_measurement_report.take()
     }
 
     fn draw_if_needed(&mut self, window: &MinimalSoftwareWindow) -> Result<bool, String> {
@@ -581,7 +939,7 @@ impl KmsDisplay {
 
         if redraw {
             self.present(frame)?;
-            tracing::debug!(
+            tracing::trace!(
                 frame,
                 duration_us = duration_us(draw_start.elapsed()),
                 "POCKETBOOT_UI_FRAME_TIMING"
@@ -595,45 +953,28 @@ impl KmsDisplay {
         let render_total_start = Instant::now();
         let format = self.format;
         let stride = self.back_buffer.buffer.pitch() as usize / bytes_per_pixel(format);
-        let buffer_age = self.back_buffer.age;
-        let repaint_buffer_type = repaint_buffer_type_for_age(buffer_age);
-        let (map_duration, renderer_duration) = {
-            let map_start = Instant::now();
-            let mut mapping = self
-                .card
-                .map_dumb_buffer(&mut self.back_buffer.buffer)
-                .map_err(|err| format!("map DRM dumb buffer: {err}"))?;
-            let map_duration = map_start.elapsed();
-            let buffer = mapping.as_mut();
+        let buffer_age = self.heap_buffer.age;
+        renderer.set_repaint_buffer_type(self.heap_buffer.repaint_buffer_type());
 
-            renderer.set_repaint_buffer_type(repaint_buffer_type);
-            let renderer_start = Instant::now();
-            match format {
-                DrmFourcc::Xrgb8888 | DrmFourcc::Argb8888 => {
-                    let pixels = cast_buffer_mut::<Xrgb8888Pixel>(buffer, format)?;
-                    renderer.render(pixels, stride);
-                }
-                DrmFourcc::Bgra8888 => {
-                    let pixels = cast_buffer_mut::<Bgra8888Pixel>(buffer, format)?;
-                    renderer.render(pixels, stride);
-                }
-                DrmFourcc::Rgb565 => {
-                    let pixels = cast_buffer_mut::<Rgb565Pixel>(buffer, format)?;
-                    renderer.render(pixels, stride);
-                }
-                _ => unreachable!("unsupported DRM format was selected"),
-            }
+        let renderer_duration = self.heap_buffer.render(renderer, format, stride)?;
 
-            (map_duration, renderer_start.elapsed())
-        };
+        let map_start = Instant::now();
+        let mut mapping = self
+            .card
+            .map_dumb_buffer(&mut self.back_buffer.buffer)
+            .map_err(|err| format!("map DRM dumb buffer: {err}"))?;
+        let map_duration = map_start.elapsed();
+        let copy_duration = self.heap_buffer.copy_to_drm(mapping.as_mut(), format)?;
 
         tracing::trace!(
             frame,
+            path = "cached_heap",
             format = ?format,
             stride,
             buffer_age,
             map_us = duration_us(map_duration),
             renderer_us = duration_us(renderer_duration),
+            copy_us = duration_us(copy_duration),
             total_us = duration_us(render_total_start.elapsed()),
             "POCKETBOOT_UI_RENDER_TIMING"
         );
@@ -649,13 +990,6 @@ impl KmsDisplay {
 
         mem::swap(&mut self.back_buffer, &mut self.front_buffer);
         mem::swap(&mut self.front_buffer, &mut self.in_flight_buffer);
-
-        self.in_flight_buffer.age = 1;
-        for buffer in [&mut self.back_buffer, &mut self.front_buffer] {
-            if buffer.age != 0 {
-                buffer.age = buffer.age.saturating_add(1);
-            }
-        }
 
         let (operation, submit_duration) = if self.posted {
             let submit_start = Instant::now();
@@ -735,13 +1069,16 @@ impl KmsDisplay {
             let receive_duration = receive_start.elapsed();
             batches = batches.saturating_add(1);
             let mut event_count = 0u32;
-            let mut matched = false;
+            let mut matched_page_flip = None;
             for event in events {
                 event_count = event_count.saturating_add(1);
-                if matches!(event, Event::PageFlip(page_flip) if page_flip.crtc == self.crtc) {
-                    matched = true;
+                if let Event::PageFlip(page_flip) = event
+                    && page_flip.crtc == self.crtc
+                {
+                    matched_page_flip = Some(page_flip);
                 }
             }
+            let matched = matched_page_flip.is_some();
             let receive_wait_duration = wait_start.elapsed();
             tracing::trace!(
                 frame,
@@ -752,11 +1089,31 @@ impl KmsDisplay {
                 receive_wait_us = duration_us(receive_wait_duration),
                 "POCKETBOOT_UI_DRM_EVENT_TIMING"
             );
-            if matched {
+            if let Some(page_flip) = matched_page_flip {
                 let submit_to_observe_duration = submitted_at.elapsed();
                 self.page_flip_pending = false;
                 self.page_flip_submitted_at = None;
                 self.completed_page_flips = self.completed_page_flips.saturating_add(1);
+                if let Some(report) = self
+                    .frame_rate_stats
+                    .record(page_flip.frame, page_flip.duration)
+                {
+                    if self.frame_rate_measurement_action.is_some() {
+                        self.frame_rate_measurement_report = Some(report);
+                    }
+                    tracing::debug!(
+                        action = self.frame_rate_measurement_action.unwrap_or("unscoped"),
+                        completed_flips = report.completed_flips,
+                        elapsed_us = report.elapsed_us,
+                        vblank_delta = report.vblank_delta,
+                        fps_milli = report.fps_milli,
+                        vblank_fps_milli = report.vblank_fps_milli,
+                        interval_p50_us = report.interval_p50_us,
+                        interval_p95_us = report.interval_p95_us,
+                        interval_max_us = report.interval_max_us,
+                        "POCKETBOOT_UI_FRAME_RATE"
+                    );
+                }
                 tracing::trace!(
                     frame,
                     sequence = self.completed_page_flips,
@@ -820,6 +1177,76 @@ mod drm_lab_tests {
         assert!(!lab.should_drain(true));
         assert_eq!(lab.finish(false, 0), None);
     }
+
+    #[test]
+    fn cached_render_buffer_uses_the_drm_pitch() {
+        let mut buffer = CachedRenderBuffer::new(DrmFourcc::Xrgb8888, 64, 3).unwrap();
+
+        assert_eq!(buffer.byte_len(), 192);
+        assert_eq!(buffer.repaint_buffer_type(), RepaintBufferType::NewBuffer);
+        buffer.age = 1;
+        assert_eq!(
+            buffer.repaint_buffer_type(),
+            RepaintBufferType::ReusedBuffer
+        );
+    }
+
+    #[test]
+    fn cached_render_buffer_rejects_a_pitch_between_pixels() {
+        assert!(CachedRenderBuffer::new(DrmFourcc::Rgb565, 3, 1).is_err());
+    }
+
+    #[test]
+    fn cached_render_buffer_rejects_an_undersized_drm_mapping() {
+        let buffer = CachedRenderBuffer::new(DrmFourcc::Xrgb8888, 64, 3).unwrap();
+        let mut mapping = vec![0; buffer.byte_len() - 4];
+
+        assert!(
+            buffer
+                .copy_to_drm(&mut mapping, DrmFourcc::Xrgb8888)
+                .is_err()
+        );
+    }
+
+    #[test]
+    fn frame_rate_stats_reports_sixty_fps_from_completed_vblanks() {
+        let mut stats = FrameRateStats::new(60);
+        let mut report = None;
+        for frame in 0..=60u32 {
+            report = stats.record(
+                100 + frame,
+                Duration::from_nanos(16_666_667 * u64::from(frame)),
+            );
+        }
+
+        let report = report.unwrap();
+        assert_eq!(report.completed_flips, 60);
+        assert_eq!(report.vblank_delta, 60);
+        assert!((59_990..=60_000).contains(&report.fps_milli));
+        assert_eq!(report.vblank_fps_milli, 60_000);
+        assert_eq!(report.interval_p95_us, 16_666);
+        assert_eq!(report.interval_max_us, 16_666);
+    }
+
+    #[test]
+    fn frame_rate_stats_reports_thirty_fps_from_every_other_vblank() {
+        let mut stats = FrameRateStats::new(60);
+        let mut report = None;
+        for frame in 0..=30u32 {
+            report = stats.record(
+                100 + frame * 2,
+                Duration::from_nanos(33_333_334 * u64::from(frame)),
+            );
+        }
+
+        let report = report.unwrap();
+        assert_eq!(report.completed_flips, 30);
+        assert_eq!(report.vblank_delta, 60);
+        assert!((29_990..=30_000).contains(&report.fps_milli));
+        assert_eq!(report.vblank_fps_milli, 30_000);
+        assert_eq!(report.interval_p95_us, 33_333);
+        assert_eq!(report.interval_max_us, 33_333);
+    }
 }
 
 struct DrmCard(File);
@@ -836,7 +1263,6 @@ impl ControlDevice for DrmCard {}
 struct KmsBuffer {
     framebuffer: framebuffer::Handle,
     buffer: control::dumbbuffer::DumbBuffer,
-    age: u8,
 }
 
 impl KmsBuffer {
@@ -852,9 +1278,116 @@ impl KmsBuffer {
         Ok(Self {
             framebuffer,
             buffer,
-            age: 0,
         })
     }
+}
+
+struct CachedRenderBuffer {
+    pixels: CachedRenderPixels,
+    age: u8,
+}
+
+impl CachedRenderBuffer {
+    fn new(format: DrmFourcc, pitch: u32, height: u32) -> Result<Self, String> {
+        let bytes_per_pixel = bytes_per_pixel(format);
+        let pitch = pitch as usize;
+        if pitch % bytes_per_pixel != 0 {
+            return Err(format!(
+                "DRM pitch is not aligned for {format:?}: {pitch} bytes"
+            ));
+        }
+
+        let pixel_count = (pitch / bytes_per_pixel)
+            .checked_mul(height as usize)
+            .ok_or_else(|| format!("cached render buffer is too large for {format:?}"))?;
+        let pixels = match format {
+            DrmFourcc::Xrgb8888 | DrmFourcc::Argb8888 => {
+                CachedRenderPixels::Xrgb8888(vec![Xrgb8888Pixel::default(); pixel_count])
+            }
+            DrmFourcc::Bgra8888 => {
+                CachedRenderPixels::Bgra8888(vec![Bgra8888Pixel::default(); pixel_count])
+            }
+            DrmFourcc::Rgb565 => {
+                CachedRenderPixels::Rgb565(vec![Rgb565Pixel::default(); pixel_count])
+            }
+            _ => return Err(format!("unsupported DRM format {format:?}")),
+        };
+
+        Ok(Self { pixels, age: 0 })
+    }
+
+    fn repaint_buffer_type(&self) -> RepaintBufferType {
+        if self.age == 0 {
+            RepaintBufferType::NewBuffer
+        } else {
+            RepaintBufferType::ReusedBuffer
+        }
+    }
+
+    fn render(
+        &mut self,
+        renderer: &SoftwareRenderer,
+        format: DrmFourcc,
+        stride: usize,
+    ) -> Result<Duration, String> {
+        self.age = 1;
+        let render_start = Instant::now();
+        match (format, &mut self.pixels) {
+            (DrmFourcc::Xrgb8888 | DrmFourcc::Argb8888, CachedRenderPixels::Xrgb8888(pixels)) => {
+                renderer.render(pixels, stride);
+            }
+            (DrmFourcc::Bgra8888, CachedRenderPixels::Bgra8888(pixels)) => {
+                renderer.render(pixels, stride);
+            }
+            (DrmFourcc::Rgb565, CachedRenderPixels::Rgb565(pixels)) => {
+                renderer.render(pixels, stride);
+            }
+            _ => {
+                return Err(format!(
+                    "cached render buffer format does not match DRM format {format:?}"
+                ));
+            }
+        }
+
+        Ok(render_start.elapsed())
+    }
+
+    fn copy_to_drm(&self, drm_bytes: &mut [u8], format: DrmFourcc) -> Result<Duration, String> {
+        let copy_start = Instant::now();
+        match (format, &self.pixels) {
+            (DrmFourcc::Xrgb8888 | DrmFourcc::Argb8888, CachedRenderPixels::Xrgb8888(pixels)) => {
+                copy_pixels_to_drm(drm_bytes, pixels, format)?;
+            }
+            (DrmFourcc::Bgra8888, CachedRenderPixels::Bgra8888(pixels)) => {
+                copy_pixels_to_drm(drm_bytes, pixels, format)?;
+            }
+            (DrmFourcc::Rgb565, CachedRenderPixels::Rgb565(pixels)) => {
+                copy_pixels_to_drm(drm_bytes, pixels, format)?;
+            }
+            _ => {
+                return Err(format!(
+                    "cached render buffer format does not match DRM format {format:?}"
+                ));
+            }
+        }
+
+        Ok(copy_start.elapsed())
+    }
+
+    #[cfg(test)]
+    fn byte_len(&self) -> usize {
+        match &self.pixels {
+            CachedRenderPixels::Xrgb8888(pixels) => mem::size_of_val(pixels.as_slice()),
+            CachedRenderPixels::Bgra8888(pixels) => mem::size_of_val(pixels.as_slice()),
+            CachedRenderPixels::Rgb565(pixels) => mem::size_of_val(pixels.as_slice()),
+        }
+    }
+}
+
+enum CachedRenderPixels {
+    Xrgb8888(Vec<Xrgb8888Pixel>),
+    Bgra8888(Vec<Bgra8888Pixel>),
+    Rgb565(Vec<Rgb565Pixel>),
 }
 
 fn choose_connector(
@@ -976,14 +1509,6 @@ fn supported_formats(
     formats
 }
 
-fn repaint_buffer_type_for_age(age: u8) -> RepaintBufferType {
-    match age {
-        1 => RepaintBufferType::ReusedBuffer,
-        2 => RepaintBufferType::SwappedBuffers,
-        _ => RepaintBufferType::NewBuffer,
-    }
-}
-
 fn bytes_per_pixel(format: DrmFourcc) -> usize {
     match format {
         DrmFourcc::Xrgb8888 | DrmFourcc::Argb8888 | DrmFourcc::Bgra8888 => 4,
@@ -1001,7 +1526,29 @@ fn pixel_format_params(format: DrmFourcc) -> Result<(u32, u32), String> {
     }
 }
 
-fn cast_buffer_mut<T>(buffer: &mut [u8], format: DrmFourcc) -> Result<&mut [T], String> {
+/// A pixel whose in-memory representation can be copied directly to a DRM mapping.
+///
+/// Implementors must have no uninitialized padding and every bit pattern must be valid.
+unsafe trait DrmPixel: Copy {}
+
+fn copy_pixels_to_drm<T: DrmPixel>(
+    drm_bytes: &mut [u8],
+    pixels: &[T],
+    format: DrmFourcc,
+) -> Result<(), String> {
+    let drm_pixels = cast_buffer_mut::<T>(drm_bytes, format)?;
+    if drm_pixels.len() < pixels.len() {
+        return Err(format!(
+            "DRM buffer mapping is too small for cached render: {} < {} pixels",
+            drm_pixels.len(),
+            pixels.len()
+        ));
+    }
+    drm_pixels[..pixels.len()].copy_from_slice(pixels);
+    Ok(())
+}
+
+fn cast_buffer_mut<T: DrmPixel>(buffer: &mut [u8], format: DrmFourcc) -> Result<&mut [T], String> {
     let pixel_size = mem::size_of::<T>();
     if buffer.len() % pixel_size != 0 {
         return Err(format!(
@@ -1085,6 +1632,11 @@ impl TargetPixel for Bgra8888Pixel {
         Self(0)
     }
 }
+
+// SAFETY: These are transparent integer-backed pixel types without padding.
+unsafe impl DrmPixel for Xrgb8888Pixel {}
+unsafe impl DrmPixel for Bgra8888Pixel {}
+unsafe impl DrmPixel for Rgb565Pixel {}
 
 struct TouchInput {
     devices: Vec<TouchDevice>,

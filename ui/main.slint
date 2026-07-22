@@ -28,7 +28,10 @@ export component MainWindow inherits Window {
     in-out property <bool> power-menu-open: false;
     in-out property <int> power-menu-selection: 0;
     in-out property <int> hold-action: 0;
-    in-out property <float> hold-progress: 0;
+    property <duration> hold-start-tick: 0ms;
+    out property <float> hold-progress: root.hold-action == 0
+        ? 0
+        : Math.min(1, 1 * (animation-tick() - root.hold-start-tick) / 2s);
 
     callback power-action(PowerAction);
     callback boot-entry-selected(int);
@@ -37,26 +40,23 @@ export component MainWindow inherits Window {
         root.power-menu-open = true;
         root.power-menu-selection = 0;
         root.hold-action = 0;
-        root.hold-progress = 0;
     }
 
     function hide-power-menu() {
         if (root.hold-action == 0) {
             root.power-menu-open = false;
             root.power-menu-selection = 0;
-            root.hold-progress = 0;
         }
     }
 
     function begin-power-hold(action: int) {
+        root.hold-start-tick = animation-tick();
         root.hold-action = action;
-        root.hold-progress = 0;
     }
 
     function cancel-power-hold(action: int) {
         if (root.hold-action == action) {
             root.hold-action = 0;
-            root.hold-progress = 0;
         }
     }
 
@@ -69,7 +69,6 @@ export component MainWindow inherits Window {
         }
         root.power-menu-open = false;
         root.hold-action = 0;
-        root.hold-progress = 0;
     }
 
     function clamp-boot-selection() {
@@ -121,7 +120,6 @@ export component MainWindow inherits Window {
 
     function set-power-menu-selection(selection: int) {
         root.hold-action = 0;
-        root.hold-progress = 0;
         root.power-menu-selection = Math.max(0, Math.min(selection, 2));
     }
 
@@ -173,7 +171,6 @@ export component MainWindow inherits Window {
     public function hardware-power-released() {
         if (root.power-menu-open && root.hold-action != 0) {
             root.hold-action = 0;
-            root.hold-progress = 0;
         }
     }
 
@@ -192,13 +189,10 @@ export component MainWindow inherits Window {
     }
 
     Timer {
-        interval: 50ms;
+        interval: 2s;
         running: root.hold-action != 0;
         triggered => {
-            root.hold-progress += 0.025;
-            if (root.hold-progress >= 1) {
-                root.confirm-power-hold();
-            }
+            root.confirm-power-hold();
         }
     }
 
