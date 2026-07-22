@@ -28,6 +28,7 @@ export component MainWindow inherits Window {
     in-out property <bool> power-menu-open: false;
     in-out property <int> power-menu-selection: 0;
     in-out property <int> hold-action: 0;
+    in-out property <int> damage-test-pattern: 0;
     property <duration> hold-start-tick: 0ms;
     out property <float> hold-progress: root.hold-action == 0
         ? 0
@@ -711,5 +712,32 @@ export component MainWindow inherits Window {
     Text {
         visible: false;
         text: "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789%+-:/.()_ Welcome to serial Boot Menu Booting selected entry Loading kernel and preparing kexec Tap a bootable entry to start it use volume power Scanning local boot media No directly bootable entries found Power Cancel Shutdown Reboot Press and hold action seconds Keep holding navigate";
+    }
+
+    damage-test-overlay := Rectangle {
+        visible: root.damage-test-pattern > 0;
+        width: parent.width;
+        height: parent.height;
+        background: #000000;
+
+        damage-test-tile := Rectangle {
+            width: 160px;
+            height: 160px;
+            x: root.damage-test-pattern == 1 ? 40px
+                : root.damage-test-pattern == 2 ? parent.width - self.width - 40px
+                : root.damage-test-pattern == 3 ? (parent.width - self.width) / 2
+                : root.damage-test-pattern == 4 ? 80px
+                : parent.width - self.width - 80px;
+            y: root.damage-test-pattern == 1 ? 48px
+                : root.damage-test-pattern == 2 ? 48px
+                : root.damage-test-pattern == 3 ? (parent.height - self.height) / 2
+                : root.damage-test-pattern == 4 ? parent.height - self.height - 64px
+                : parent.height - self.height - 64px;
+            background: root.damage-test-pattern == 1 ? #ff1744
+                : root.damage-test-pattern == 2 ? #00e5ff
+                : root.damage-test-pattern == 3 ? #ffea00
+                : root.damage-test-pattern == 4 ? #76ff03
+                : #d500f9;
+        }
     }
 }

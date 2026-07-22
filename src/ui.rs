@@ -26,8 +26,8 @@ use drm::{
 use slint::platform::{
     Platform, PlatformError, PointerEventButton, WindowAdapter, WindowEvent,
     software_renderer::{
-        MinimalSoftwareWindow, PremultipliedRgbaColor, RepaintBufferType, Rgb565Pixel,
-        SoftwareRenderer, TargetPixel,
+        MinimalSoftwareWindow, PhysicalRegion, PremultipliedRgbaColor, RepaintBufferType,
+        Rgb565Pixel, SoftwareRenderer, TargetPixel,
     },
 };
 use slint::{ComponentHandle, LogicalPosition, ModelRc, PhysicalSize, SharedString, VecModel};
@@ -46,6 +46,15 @@ const FRAME_RATE_GAP_RESET: Duration = Duration::from_millis(250);
 const ANIMATION_LAB_SETTLE: Duration = Duration::from_millis(600);
 const ANIMATION_LAB_BETWEEN_BUTTONS: Duration = Duration::from_millis(800);
 const ANIMATION_LAB_HOLD: Duration = Duration::from_millis(1500);
+const ANIMATION_LAB_WARMUP_FRAMES: u8 = 3;
+const ANIMATION_LAB_DAMAGE_FRAME_DELAY: Duration = Duration::ZERO;
+const ANIMATION_LAB_DAMAGE_PATTERN_STATES: u8 = 5;
+const ANIMATION_LAB_DAMAGE_FRAMES_PER_STATE: u8 = 3;
+const ANIMATION_LAB_DAMAGE_PATTERN_FRAMES: u8 =
+    ANIMATION_LAB_DAMAGE_PATTERN_STATES * ANIMATION_LAB_DAMAGE_FRAMES_PER_STATE;
+const ANIMATION_LAB_DAMAGE_VALIDATION_FRAMES: u8 =
+    ANIMATION_LAB_DAMAGE_PATTERN_FRAMES + ANIMATION_LAB_DAMAGE_FRAMES_PER_STATE;
+const MAX_PENDING_DAMAGE_RECTS: usize = 64;
 
 #[derive(Clone, Debug)]
 pub(crate) struct SystemInfo {
@@ -144,15 +153,26 @@ fn run(
         duration_us = duration_us(drm_open_start.elapsed()),
         "POCKETBOOT_UI_DRM_OPEN_TIMING"
     );
-    kms_display.lab_page_flip_markers_remaining = drm_page_flips;
+    kms_display.lab_page_flip_markers_remaining = if ui_animation_lab { 0 } else { drm_page_flips };
     let setup_start = Instant::now();
     let window = MinimalSoftwareWindow::new(RepaintBufferType::NewBuffer);
 
     slint::platform::set_platform(Box::new(PocketPlatform::new(window.clone())))
         .map_err(|err| format!("install Slint platform: {err}"))?;
-    window.set_size(PhysicalSize::new(kms_display.width, kms_display.height));
 
     let main_window = MainWindow::new().map_err(|err| format!("create Slint window: {err}"))?;
+    window.set_size(PhysicalSize::new(kms_display.width, kms_display.height));
+    let scale_factor = window.scale_factor();
+    let logical_width = kms_display.width as f32 / scale_factor;
+    let logical_height = kms_display.height as f32 / scale_factor;
+    tracing::info!(
+        scale_factor_milli = scale_factor_milli(scale_factor),
+        physical_width = kms_display.width,
+        physical_height = kms_display.height,
+        logical_width = logical_width.round() as u32,
+        logical_height = logical_height.round() as u32,
+        "POCKETBOOT_UI_SCALE"
+    );
     main_window.set_device_name(system_info.device_name.into());
     main_window.set_device_detail(system_info.device_detail.into());
     main_window.set_serialno(system_info.serialno.into());
@@ -195,7 +215,7 @@ fn run(
     let mut commands = UiCommands::new(commands);
     let mut pointer_down = false;
     let mut power_press_context = PowerPressContext::BootMenu;
-    let mut page_flip_lab = DrmPageFlipLab::new(drm_page_flips);
+    let mut page_flip_lab = DrmPageFlipLab::new(if ui_animation_lab { 0 } else { drm_page_flips });
     let mut animation_lab = UiAnimationLab::new(ui_animation_lab);
     let mut first_frame_logged = false;
     let display_path = kms_display.path.display().to_string();
@@ -222,60 +242,62 @@ fn run(
             window.request_redraw();
         }
 
-        if let Some(battery) = &mut battery {
-            battery.poll(&main_window);
-        }
-        commands.poll(&main_window);
+        if !ui_animation_lab {
+            if let Some(battery) = &mut battery {
+                battery.poll(&main_window);
+            }
+            commands.poll(&main_window);
 
-        for report in touch.poll(kms_display.width, kms_display.height) {
-            let position = LogicalPosition::new(report.x, report.y);
-            match report.kind {
-                TouchKind::Down => {
-                    pointer_down = true;
-                    window.dispatch_event(WindowEvent::PointerPressed {
-                        position,
-                        button: PointerEventButton::Left,
-                    });
-                }
-                TouchKind::Move => {
-                    window.dispatch_event(WindowEvent::PointerMoved { position });
-                }
-                TouchKind::Up => {
-                    if pointer_down {
-                        pointer_down = false;
-                        window.dispatch_event(WindowEvent::PointerReleased {
+            for report in touch.poll(kms_display.width, kms_display.height) {
+                let position = logical_touch_position(report, window.scale_factor());
+                match report.kind {
+                    TouchKind::Down => {
+                        pointer_down = true;
+                        window.dispatch_event(WindowEvent::PointerPressed {
                             position,
                             button: PointerEventButton::Left,
                         });
-                        window.dispatch_event(WindowEvent::PointerExited);
+                    }
+                    TouchKind::Move => {
+                        window.dispatch_event(WindowEvent::PointerMoved { position });
+                    }
+                    TouchKind::Up => {
+                        if pointer_down {
+                            pointer_down = false;
+                            window.dispatch_event(WindowEvent::PointerReleased {
+                                position,
+                                button: PointerEventButton::Left,
+                            });
+                            window.dispatch_event(WindowEvent::PointerExited);
+                        }
                     }
                 }
             }
-        }
 
-        for event in buttons.poll() {
-            match event {
-                ButtonEvent::Previous => main_window.invoke_hardware_nav_previous(),
-                ButtonEvent::Next => main_window.invoke_hardware_nav_next(),
-                ButtonEvent::PowerPressed => {
-                    power_press_context = if main_window.get_power_menu_open() {
-                        PowerPressContext::PowerMenu
-                    } else {
-                        PowerPressContext::BootMenu
-                    };
-                    main_window.invoke_hardware_power_pressed();
-                }
-                ButtonEvent::PowerReleased => main_window.invoke_hardware_power_released(),
-                ButtonEvent::PowerShortPress => {
-                    if matches!(power_press_context, PowerPressContext::BootMenu) {
-                        main_window.invoke_hardware_power_short_press();
+            for event in buttons.poll() {
+                match event {
+                    ButtonEvent::Previous => main_window.invoke_hardware_nav_previous(),
+                    ButtonEvent::Next => main_window.invoke_hardware_nav_next(),
+                    ButtonEvent::PowerPressed => {
+                        power_press_context = if main_window.get_power_menu_open() {
+                            PowerPressContext::PowerMenu
+                        } else {
+                            PowerPressContext::BootMenu
+                        };
+                        main_window.invoke_hardware_power_pressed();
                     }
-                }
-                ButtonEvent::OpenMenu => {
-                    if matches!(power_press_context, PowerPressContext::BootMenu)
-                        && !main_window.get_power_menu_open()
-                    {
-                        main_window.invoke_show_power_menu();
+                    ButtonEvent::PowerReleased => main_window.invoke_hardware_power_released(),
+                    ButtonEvent::PowerShortPress => {
+                        if matches!(power_press_context, PowerPressContext::BootMenu) {
+                            main_window.invoke_hardware_power_short_press();
+                        }
+                    }
+                    ButtonEvent::OpenMenu => {
+                        if matches!(power_press_context, PowerPressContext::BootMenu)
+                            && !main_window.get_power_menu_open()
+                        {
+                            main_window.invoke_show_power_menu();
+                        }
                     }
                 }
             }
@@ -319,21 +341,51 @@ struct UiAnimationLab {
     phase: UiAnimationLabPhase,
     shutdown: Option<UiAnimationLabMeasurement>,
     reboot: Option<UiAnimationLabMeasurement>,
+    damage_validation: Option<UiDamageValidationMeasurement>,
+    damage_validation_baseline_flips: u64,
 }
 
 #[derive(Clone, Copy)]
 struct UiAnimationLabMeasurement {
     report: FrameRateReport,
     progress_milli: u64,
+    copy: CopyStats,
 }
 
 impl UiAnimationLabMeasurement {
-    fn passes(self) -> bool {
-        (30_000..=60_000).contains(&self.report.fps_milli)
-            && (30_000..=60_000).contains(&self.report.vblank_fps_milli)
+    fn passes(self, visible_frame_bytes: u64) -> bool {
+        (55_000..=61_000).contains(&self.report.fps_milli)
+            && (55_000..=60_000).contains(&self.report.vblank_fps_milli)
+            && self.report.completed_flips >= 55
+            && self.report.interval_p50_us <= 18_000
             && self.report.interval_p95_us <= 33_500
             && self.report.interval_max_us <= 50_000
             && (650..=900).contains(&self.progress_milli)
+            && self.copy.damage_frames >= 55
+            && self.copy.full_frames == 0
+            && self.copy.copied_bytes > 0
+            && self.copy.max_damage_bytes > 0
+            && self.copy.max_damage_bytes < visible_frame_bytes
+    }
+}
+
+#[derive(Clone, Copy)]
+struct UiDamageValidationMeasurement {
+    stats: CopyValidationStats,
+    completed_flips: u64,
+}
+
+impl UiDamageValidationMeasurement {
+    fn passes(self) -> bool {
+        self.stats.checks == u32::from(ANIMATION_LAB_DAMAGE_VALIDATION_FRAMES)
+            && self.stats.mismatches == 0
+            && self.stats.buffer_checks == [6, 6, 6]
+            && self.stats.damage_checks > 0
+            && self.stats.full_checks > 0
+            && self.stats.seed_checks == 2
+            && self.stats.fallback_checks == u32::from(ANIMATION_LAB_DAMAGE_PATTERN_STATES + 1)
+            && self.stats.fallback_verified
+            && self.completed_flips == u64::from(ANIMATION_LAB_DAMAGE_VALIDATION_FRAMES)
     }
 }
 
@@ -343,11 +395,16 @@ enum UiAnimationLabPhase {
     WaitForDisplay,
     OpenMenuAt(Instant),
     SelectShutdownAt(Instant),
+    WarmShutdownFrameAt(Instant, u8),
     StartShutdownAt(Instant),
     StopShutdownAt(Instant),
     SelectRebootAt(Instant),
+    WarmRebootFrameAt(Instant, u8),
     StartRebootAt(Instant),
     StopRebootAt(Instant),
+    BeginDamageValidationAt(Instant),
+    DamageValidationFrameAt(Instant, u8),
+    FinishDamageValidationAt(Instant),
     FinishAt(Instant),
     Done,
 }
@@ -364,6 +421,8 @@ impl UiAnimationLab {
             phase,
             shutdown: None,
             reboot: None,
+            damage_validation: None,
+            damage_validation_baseline_flips: 0,
         }
     }
 
@@ -386,10 +445,22 @@ impl UiAnimationLab {
             UiAnimationLabPhase::SelectShutdownAt(deadline) if now >= deadline => {
                 display.wait_for_page_flip()?;
                 window.invoke_hardware_nav_next();
-                self.phase =
-                    UiAnimationLabPhase::StartShutdownAt(Instant::now() + ANIMATION_LAB_SETTLE);
+                self.phase = UiAnimationLabPhase::WarmShutdownFrameAt(
+                    Instant::now() + ANIMATION_LAB_SETTLE,
+                    ANIMATION_LAB_WARMUP_FRAMES,
+                );
             }
             UiAnimationLabPhase::SelectShutdownAt(_) => {}
+            UiAnimationLabPhase::WarmShutdownFrameAt(deadline, remaining) if now >= deadline => {
+                display.wait_for_page_flip()?;
+                window.window().request_redraw();
+                self.phase = if remaining > 1 {
+                    UiAnimationLabPhase::WarmShutdownFrameAt(Instant::now(), remaining - 1)
+                } else {
+                    UiAnimationLabPhase::StartShutdownAt(Instant::now())
+                };
+            }
+            UiAnimationLabPhase::WarmShutdownFrameAt(_, _) => {}
             UiAnimationLabPhase::StartShutdownAt(deadline) if now >= deadline => {
                 display.wait_for_page_flip()?;
                 display.start_frame_rate_measurement("shutdown");
@@ -405,11 +476,11 @@ impl UiAnimationLab {
             UiAnimationLabPhase::StopShutdownAt(deadline) if now >= deadline => {
                 display.wait_for_page_flip()?;
                 let progress_milli = progress_milli(window.get_hold_progress());
-                self.shutdown = display.finish_frame_rate_measurement().map(|report| {
-                    UiAnimationLabMeasurement {
-                        report,
-                        progress_milli,
-                    }
+                let (report, copy) = display.finish_frame_rate_measurement();
+                self.shutdown = report.map(|report| UiAnimationLabMeasurement {
+                    report,
+                    progress_milli,
+                    copy,
                 });
                 window.invoke_hardware_power_released();
                 tracing::info!(
@@ -426,10 +497,22 @@ impl UiAnimationLab {
             UiAnimationLabPhase::SelectRebootAt(deadline) if now >= deadline => {
                 display.wait_for_page_flip()?;
                 window.invoke_hardware_nav_next();
-                self.phase =
-                    UiAnimationLabPhase::StartRebootAt(Instant::now() + ANIMATION_LAB_SETTLE);
+                self.phase = UiAnimationLabPhase::WarmRebootFrameAt(
+                    Instant::now() + ANIMATION_LAB_SETTLE,
+                    ANIMATION_LAB_WARMUP_FRAMES,
+                );
             }
             UiAnimationLabPhase::SelectRebootAt(_) => {}
+            UiAnimationLabPhase::WarmRebootFrameAt(deadline, remaining) if now >= deadline => {
+                display.wait_for_page_flip()?;
+                window.window().request_redraw();
+                self.phase = if remaining > 1 {
+                    UiAnimationLabPhase::WarmRebootFrameAt(Instant::now(), remaining - 1)
+                } else {
+                    UiAnimationLabPhase::StartRebootAt(Instant::now())
+                };
+            }
+            UiAnimationLabPhase::WarmRebootFrameAt(_, _) => {}
             UiAnimationLabPhase::StartRebootAt(deadline) if now >= deadline => {
                 display.wait_for_page_flip()?;
                 display.start_frame_rate_measurement("reboot");
@@ -441,11 +524,11 @@ impl UiAnimationLab {
             UiAnimationLabPhase::StopRebootAt(deadline) if now >= deadline => {
                 display.wait_for_page_flip()?;
                 let progress_milli = progress_milli(window.get_hold_progress());
-                self.reboot = display.finish_frame_rate_measurement().map(|report| {
-                    UiAnimationLabMeasurement {
-                        report,
-                        progress_milli,
-                    }
+                let (report, copy) = display.finish_frame_rate_measurement();
+                self.reboot = report.map(|report| UiAnimationLabMeasurement {
+                    report,
+                    progress_milli,
+                    copy,
                 });
                 window.invoke_hardware_power_released();
                 tracing::info!(
@@ -454,31 +537,142 @@ impl UiAnimationLab {
                     progress_milli,
                     "POCKETBOOT_UI_ANIMATION_LAB_HOLD_STOP"
                 );
-                self.phase = UiAnimationLabPhase::FinishAt(Instant::now() + ANIMATION_LAB_SETTLE);
+                self.phase = UiAnimationLabPhase::BeginDamageValidationAt(
+                    Instant::now() + ANIMATION_LAB_SETTLE,
+                );
             }
             UiAnimationLabPhase::StopRebootAt(_) => {}
+            UiAnimationLabPhase::BeginDamageValidationAt(deadline) if now >= deadline => {
+                display.wait_for_page_flip()?;
+                self.damage_validation_baseline_flips = display.completed_page_flips;
+                display.begin_copy_validation()?;
+                debug_assert!(damage_validation_is_reference(0));
+                display.force_back_buffer_full_copy();
+                window.set_damage_test_pattern(damage_validation_pattern(0));
+                tracing::info!(
+                    frames = ANIMATION_LAB_DAMAGE_VALIDATION_FRAMES,
+                    pattern_states = ANIMATION_LAB_DAMAGE_PATTERN_STATES,
+                    frames_per_state = ANIMATION_LAB_DAMAGE_FRAMES_PER_STATE,
+                    "POCKETBOOT_UI_DAMAGE_VALIDATION_START"
+                );
+                self.phase = UiAnimationLabPhase::DamageValidationFrameAt(
+                    Instant::now() + ANIMATION_LAB_DAMAGE_FRAME_DELAY,
+                    1,
+                );
+            }
+            UiAnimationLabPhase::BeginDamageValidationAt(_) => {}
+            UiAnimationLabPhase::DamageValidationFrameAt(deadline, frame) if now >= deadline => {
+                display.wait_for_page_flip()?;
+                display.log_copy_validation_flip(frame - 1)?;
+                let pattern = damage_validation_pattern(frame);
+                if damage_validation_is_reference(frame) {
+                    display.force_back_buffer_full_copy();
+                }
+                if window.get_damage_test_pattern() != pattern {
+                    window.set_damage_test_pattern(pattern);
+                } else {
+                    window.window().request_redraw();
+                }
+
+                if frame + 1 < ANIMATION_LAB_DAMAGE_VALIDATION_FRAMES {
+                    self.phase = UiAnimationLabPhase::DamageValidationFrameAt(
+                        Instant::now() + ANIMATION_LAB_DAMAGE_FRAME_DELAY,
+                        frame + 1,
+                    );
+                } else {
+                    self.phase = UiAnimationLabPhase::FinishDamageValidationAt(
+                        Instant::now() + ANIMATION_LAB_DAMAGE_FRAME_DELAY,
+                    );
+                }
+            }
+            UiAnimationLabPhase::DamageValidationFrameAt(_, _) => {}
+            UiAnimationLabPhase::FinishDamageValidationAt(deadline) if now >= deadline => {
+                display.wait_for_page_flip()?;
+                display.log_copy_validation_flip(ANIMATION_LAB_DAMAGE_VALIDATION_FRAMES - 1)?;
+                let stats = display.finish_copy_validation();
+                let completed_flips = display
+                    .completed_page_flips
+                    .saturating_sub(self.damage_validation_baseline_flips);
+                self.damage_validation = Some(UiDamageValidationMeasurement {
+                    stats,
+                    completed_flips,
+                });
+                tracing::info!(
+                    checks = stats.checks,
+                    mismatches = stats.mismatches,
+                    buffer_0_checks = stats.buffer_checks[0],
+                    buffer_1_checks = stats.buffer_checks[1],
+                    buffer_2_checks = stats.buffer_checks[2],
+                    damage_checks = stats.damage_checks,
+                    clean_checks = stats.clean_checks,
+                    full_checks = stats.full_checks,
+                    seed_checks = stats.seed_checks,
+                    fallback_checks = stats.fallback_checks,
+                    fallback_verified = stats.fallback_verified,
+                    completed_flips,
+                    "POCKETBOOT_UI_DAMAGE_VALIDATION_RESULT"
+                );
+                self.phase = UiAnimationLabPhase::FinishAt(
+                    Instant::now() + ANIMATION_LAB_DAMAGE_FRAME_DELAY,
+                );
+            }
+            UiAnimationLabPhase::FinishDamageValidationAt(_) => {}
             UiAnimationLabPhase::FinishAt(deadline) if now >= deadline => {
                 display.wait_for_page_flip()?;
                 let shutdown = self.shutdown;
                 let reboot = self.reboot;
-                let passed = shutdown.is_some_and(UiAnimationLabMeasurement::passes)
-                    && reboot.is_some_and(UiAnimationLabMeasurement::passes);
+                let damage_validation = self.damage_validation;
+                let scanout_frame_bytes = display.frame_byte_len();
+                let visible_frame_bytes = display.visible_frame_byte_len();
+                let scale_factor_milli = scale_factor_milli(window.window().scale_factor());
+                let passed = shutdown
+                    .is_some_and(|measurement| measurement.passes(visible_frame_bytes))
+                    && reboot.is_some_and(|measurement| measurement.passes(visible_frame_bytes))
+                    && damage_validation.is_some_and(UiDamageValidationMeasurement::passes)
+                    && scale_factor_milli == 2_000;
                 tracing::info!(
                     passed,
+                    scale_factor_milli,
+                    scanout_frame_bytes,
+                    visible_frame_bytes,
                     shutdown_measured = shutdown.is_some(),
                     shutdown_fps_milli = shutdown.map_or(0, |m| m.report.fps_milli),
                     shutdown_vblank_fps_milli = shutdown.map_or(0, |m| m.report.vblank_fps_milli),
                     shutdown_flips = shutdown.map_or(0, |m| m.report.completed_flips),
+                    shutdown_p50_us = shutdown.map_or(0, |m| m.report.interval_p50_us),
                     shutdown_p95_us = shutdown.map_or(0, |m| m.report.interval_p95_us),
                     shutdown_max_us = shutdown.map_or(0, |m| m.report.interval_max_us),
                     shutdown_progress_milli = shutdown.map_or(0, |m| m.progress_milli),
+                    shutdown_damage_frames = shutdown.map_or(0, |m| m.copy.damage_frames),
+                    shutdown_full_frames = shutdown.map_or(0, |m| m.copy.full_frames),
+                    shutdown_copied_bytes = shutdown.map_or(0, |m| m.copy.copied_bytes),
+                    shutdown_max_damage_bytes = shutdown.map_or(0, |m| m.copy.max_damage_bytes),
                     reboot_measured = reboot.is_some(),
                     reboot_fps_milli = reboot.map_or(0, |m| m.report.fps_milli),
                     reboot_vblank_fps_milli = reboot.map_or(0, |m| m.report.vblank_fps_milli),
                     reboot_flips = reboot.map_or(0, |m| m.report.completed_flips),
+                    reboot_p50_us = reboot.map_or(0, |m| m.report.interval_p50_us),
                     reboot_p95_us = reboot.map_or(0, |m| m.report.interval_p95_us),
                     reboot_max_us = reboot.map_or(0, |m| m.report.interval_max_us),
                     reboot_progress_milli = reboot.map_or(0, |m| m.progress_milli),
+                    reboot_damage_frames = reboot.map_or(0, |m| m.copy.damage_frames),
+                    reboot_full_frames = reboot.map_or(0, |m| m.copy.full_frames),
+                    reboot_copied_bytes = reboot.map_or(0, |m| m.copy.copied_bytes),
+                    reboot_max_damage_bytes = reboot.map_or(0, |m| m.copy.max_damage_bytes),
+                    damage_verified_frames = damage_validation.map_or(0, |m| m.stats.checks),
+                    damage_mismatch_frames = damage_validation.map_or(0, |m| m.stats.mismatches),
+                    damage_buffer_0_checks =
+                        damage_validation.map_or(0, |m| m.stats.buffer_checks[0]),
+                    damage_buffer_1_checks =
+                        damage_validation.map_or(0, |m| m.stats.buffer_checks[1]),
+                    damage_buffer_2_checks =
+                        damage_validation.map_or(0, |m| m.stats.buffer_checks[2]),
+                    damage_completed_flips = damage_validation.map_or(0, |m| m.completed_flips),
+                    damage_seed_checks = damage_validation.map_or(0, |m| m.stats.seed_checks),
+                    damage_fallback_checks =
+                        damage_validation.map_or(0, |m| m.stats.fallback_checks),
+                    fallback_full_copy_verified =
+                        damage_validation.is_some_and(|m| m.stats.fallback_verified),
                     "POCKETBOOT_UI_ANIMATION_LAB_RESULT"
                 );
                 self.phase = UiAnimationLabPhase::Done;
@@ -491,6 +685,32 @@ impl UiAnimationLab {
 
 fn progress_milli(progress: f32) -> u64 {
     u64::try_from((progress.clamp(0.0, 1.0) * 1000.0).round() as i64).unwrap_or(0)
+}
+
+fn damage_validation_pattern(frame: u8) -> i32 {
+    if frame < ANIMATION_LAB_DAMAGE_PATTERN_FRAMES {
+        i32::from(frame / ANIMATION_LAB_DAMAGE_FRAMES_PER_STATE + 1)
+    } else {
+        0
+    }
+}
+
+fn damage_validation_is_reference(frame: u8) -> bool {
+    let state = frame / ANIMATION_LAB_DAMAGE_FRAMES_PER_STATE;
+    frame % ANIMATION_LAB_DAMAGE_FRAMES_PER_STATE == state % ANIMATION_LAB_DAMAGE_FRAMES_PER_STATE
+}
+
+fn scale_factor_milli(scale_factor: f32) -> u64 {
+    u64::try_from((scale_factor.max(0.0) * 1000.0).round() as i64).unwrap_or(0)
+}
+
+fn logical_touch_position(report: TouchReport, scale_factor: f32) -> LogicalPosition {
+    let scale_factor = if scale_factor.is_finite() && scale_factor > 0.0 {
+        scale_factor
+    } else {
+        1.0
+    };
+    LogicalPosition::new(report.x / scale_factor, report.y / scale_factor)
 }
 
 struct UiCommands {
@@ -643,11 +863,17 @@ struct KmsDisplay {
     posted: bool,
     page_flip_pending: bool,
     page_flip_submitted_at: Option<Instant>,
+    last_page_flip_vblank: Option<u32>,
+    last_page_flip_buffer_id: Option<u8>,
     submitted_frames: u64,
     completed_page_flips: u64,
     frame_rate_stats: FrameRateStats,
     frame_rate_measurement_action: Option<&'static str>,
     frame_rate_measurement_report: Option<FrameRateReport>,
+    copy_measurement_active: bool,
+    copy_measurement_stats: CopyStats,
+    copy_validation_active: bool,
+    copy_validation_stats: CopyValidationStats,
     lab_page_flip_markers_remaining: u32,
 }
 
@@ -875,9 +1101,9 @@ impl KmsDisplay {
         let size = (width as u32, height as u32);
         let frame_rate_stats = FrameRateStats::new(mode.vrefresh());
 
-        let front_buffer = KmsBuffer::allocate(&card, size, format)?;
-        let back_buffer = KmsBuffer::allocate(&card, size, format)?;
-        let in_flight_buffer = KmsBuffer::allocate(&card, size, format)?;
+        let front_buffer = KmsBuffer::allocate(&card, size, format, 0)?;
+        let back_buffer = KmsBuffer::allocate(&card, size, format, 1)?;
+        let in_flight_buffer = KmsBuffer::allocate(&card, size, format, 2)?;
         let render_pitch = back_buffer.buffer.pitch();
         for (name, pitch) in [
             ("front", front_buffer.buffer.pitch()),
@@ -907,11 +1133,17 @@ impl KmsDisplay {
             posted: false,
             page_flip_pending: false,
             page_flip_submitted_at: None,
+            last_page_flip_vblank: None,
+            last_page_flip_buffer_id: None,
             submitted_frames: 0,
             completed_page_flips: 0,
             frame_rate_stats,
             frame_rate_measurement_action: None,
             frame_rate_measurement_report: None,
+            copy_measurement_active: false,
+            copy_measurement_stats: CopyStats::default(),
+            copy_validation_active: false,
+            copy_validation_stats: CopyValidationStats::default(),
             lab_page_flip_markers_remaining: 0,
         })
     }
@@ -920,11 +1152,83 @@ impl KmsDisplay {
         self.frame_rate_stats.clear();
         self.frame_rate_measurement_action = Some(action);
         self.frame_rate_measurement_report = None;
+        self.copy_measurement_active = true;
+        self.copy_measurement_stats = CopyStats::default();
     }
 
-    fn finish_frame_rate_measurement(&mut self) -> Option<FrameRateReport> {
+    fn finish_frame_rate_measurement(&mut self) -> (Option<FrameRateReport>, CopyStats) {
         self.frame_rate_measurement_action = None;
-        self.frame_rate_measurement_report.take()
+        self.copy_measurement_active = false;
+        (
+            self.frame_rate_measurement_report.take(),
+            self.copy_measurement_stats,
+        )
+    }
+
+    fn begin_copy_validation(&mut self) -> Result<(), String> {
+        let byte_len = self.heap_buffer.as_bytes(self.format)?.len();
+        let allocate_shadow = || {
+            let mut shadow = Vec::new();
+            shadow
+                .try_reserve_exact(byte_len)
+                .map_err(|err| format!("allocate {byte_len}-byte BO validation shadow: {err}"))?;
+            shadow.resize(byte_len, 0);
+            Ok::<_, String>(shadow)
+        };
+        let front_shadow = allocate_shadow()?;
+        let back_shadow = allocate_shadow()?;
+        let in_flight_shadow = allocate_shadow()?;
+
+        self.front_buffer.validation_shadow = Some(front_shadow);
+        self.back_buffer.validation_shadow = Some(back_shadow);
+        self.in_flight_buffer.validation_shadow = Some(in_flight_shadow);
+        self.front_buffer.pending_damage = PendingDamage::Full(FullCopyReason::ValidationSeed);
+        self.back_buffer.pending_damage = PendingDamage::Full(FullCopyReason::ValidationSeed);
+        self.in_flight_buffer.pending_damage = PendingDamage::Full(FullCopyReason::ValidationSeed);
+        self.copy_validation_stats = CopyValidationStats::default();
+        self.copy_validation_active = true;
+        Ok(())
+    }
+
+    fn force_back_buffer_full_copy(&mut self) {
+        self.back_buffer.pending_damage = PendingDamage::Full(FullCopyReason::ValidationFallback);
+    }
+
+    fn finish_copy_validation(&mut self) -> CopyValidationStats {
+        self.copy_validation_active = false;
+        self.front_buffer.validation_shadow = None;
+        self.back_buffer.validation_shadow = None;
+        self.in_flight_buffer.validation_shadow = None;
+        self.copy_validation_stats
+    }
+
+    fn log_copy_validation_flip(&self, validation_frame: u8) -> Result<(), String> {
+        let vblank_frame = self
+            .last_page_flip_vblank
+            .ok_or_else(|| "copy validation page flip has no vblank frame".to_string())?;
+        let buffer_id = self
+            .last_page_flip_buffer_id
+            .ok_or_else(|| "copy validation page flip has no buffer ID".to_string())?;
+        tracing::info!(
+            validation_frame,
+            pattern = damage_validation_pattern(validation_frame),
+            reference = damage_validation_is_reference(validation_frame),
+            buffer_id,
+            vblank_frame,
+            completed_flips = self.completed_page_flips,
+            "POCKETBOOT_UI_DAMAGE_VALIDATION_FLIP"
+        );
+        Ok(())
+    }
+
+    fn frame_byte_len(&self) -> u64 {
+        u64::try_from(self.heap_buffer.byte_len()).unwrap_or(u64::MAX)
+    }
+
+    fn visible_frame_byte_len(&self) -> u64 {
+        u64::from(self.width)
+            .saturating_mul(u64::from(self.height))
+            .saturating_mul(bytes_per_pixel(self.format) as u64)
     }
 
     fn draw_if_needed(&mut self, window: &MinimalSoftwareWindow) -> Result<bool, String> {
@@ -952,11 +1256,23 @@ impl KmsDisplay {
     fn render(&mut self, renderer: &SoftwareRenderer, frame: u64) -> Result<(), String> {
         let render_total_start = Instant::now();
         let format = self.format;
-        let stride = self.back_buffer.buffer.pitch() as usize / bytes_per_pixel(format);
+        let pitch = self.back_buffer.buffer.pitch();
+        let stride = pitch as usize / bytes_per_pixel(format);
         let buffer_age = self.heap_buffer.age;
         renderer.set_repaint_buffer_type(self.heap_buffer.repaint_buffer_type());
 
-        let renderer_duration = self.heap_buffer.render(renderer, format, stride)?;
+        let render = self.heap_buffer.render(renderer, format, stride)?;
+        let frame_damage = PendingDamage::from_physical_region(
+            &render.damage,
+            self.width,
+            self.height,
+            render.new_buffer,
+        );
+        self.front_buffer.pending_damage.accumulate(&frame_damage);
+        self.back_buffer.pending_damage.accumulate(&frame_damage);
+        self.in_flight_buffer
+            .pending_damage
+            .accumulate(&frame_damage);
 
         let map_start = Instant::now();
         let mut mapping = self
@@ -964,17 +1280,63 @@ impl KmsDisplay {
             .map_dumb_buffer(&mut self.back_buffer.buffer)
             .map_err(|err| format!("map DRM dumb buffer: {err}"))?;
         let map_duration = map_start.elapsed();
-        let copy_duration = self.heap_buffer.copy_to_drm(mapping.as_mut(), format)?;
+        let pending_damage = self.back_buffer.pending_damage.clone();
+        let copy = self.heap_buffer.copy_to_drm(
+            mapping.as_mut(),
+            format,
+            pitch,
+            self.width,
+            self.height,
+            &pending_damage,
+        )?;
+        drop(mapping);
+        if self.copy_measurement_active {
+            self.copy_measurement_stats.record(copy);
+        }
+        if self.copy_validation_active {
+            let shadow = self
+                .back_buffer
+                .validation_shadow
+                .as_mut()
+                .ok_or_else(|| "copy validation back buffer has no shadow".to_string())?;
+            let mismatch = self.heap_buffer.update_validation_shadow(
+                shadow,
+                format,
+                pitch,
+                self.width,
+                self.height,
+                &pending_damage,
+                copy.mode,
+            )?;
+            self.copy_validation_stats
+                .record(self.back_buffer.id, copy, mismatch.is_none());
+            if let Some(mismatch) = mismatch {
+                tracing::error!(
+                    buffer_id = self.back_buffer.id,
+                    byte_offset = mismatch.byte_offset,
+                    x = mismatch.x,
+                    y = mismatch.y,
+                    expected = mismatch.expected,
+                    actual = mismatch.actual,
+                    "POCKETBOOT_UI_DAMAGE_VALIDATION_MISMATCH"
+                );
+            }
+        }
+        self.back_buffer.pending_damage = PendingDamage::Clean;
 
         tracing::trace!(
             frame,
             path = "cached_heap",
+            buffer_id = self.back_buffer.id,
             format = ?format,
             stride,
             buffer_age,
             map_us = duration_us(map_duration),
-            renderer_us = duration_us(renderer_duration),
-            copy_us = duration_us(copy_duration),
+            renderer_us = duration_us(render.duration),
+            copy_mode = ?copy.mode,
+            copy_rects = copy.rect_count,
+            copied_bytes = copy.copied_bytes,
+            copy_us = duration_us(copy.duration),
             total_us = duration_us(render_total_start.elapsed()),
             "POCKETBOOT_UI_RENDER_TIMING"
         );
@@ -1094,6 +1456,8 @@ impl KmsDisplay {
                 self.page_flip_pending = false;
                 self.page_flip_submitted_at = None;
                 self.completed_page_flips = self.completed_page_flips.saturating_add(1);
+                self.last_page_flip_vblank = Some(page_flip.frame);
+                self.last_page_flip_buffer_id = Some(self.in_flight_buffer.id);
                 if let Some(report) = self
                     .frame_rate_stats
                     .record(page_flip.frame, page_flip.duration)
@@ -1154,6 +1518,13 @@ fn duration_us(duration: Duration) -> u64 {
 mod drm_lab_tests {
     use super::*;
 
+    fn pixel_bytes_mut<T: DrmPixel>(pixels: &mut [T]) -> &mut [u8] {
+        let byte_len = mem::size_of_val(pixels);
+        // SAFETY: This is the mutable counterpart of pixels_as_bytes; DrmPixel guarantees that
+        // every byte belongs to an initialized pixel representation.
+        unsafe { slice::from_raw_parts_mut(pixels.as_mut_ptr().cast(), byte_len) }
+    }
+
     #[test]
     fn bounded_page_flip_lab_requests_exact_count_and_reports_once() {
         let mut lab = DrmPageFlipLab::new(3);
@@ -1203,9 +1574,428 @@ mod drm_lab_tests {
 
         assert!(
             buffer
-                .copy_to_drm(&mut mapping, DrmFourcc::Xrgb8888)
+                .copy_to_drm(
+                    &mut mapping,
+                    DrmFourcc::Xrgb8888,
+                    64,
+                    16,
+                    3,
+                    &PendingDamage::Full(FullCopyReason::VirginBuffer),
+                )
                 .is_err()
         );
+    }
+
+    #[test]
+    fn damage_rectangles_are_clipped_to_the_physical_frame() {
+        assert_eq!(clipped_axis(-3, 8, 10), Some((0, 5)));
+        assert_eq!(clipped_axis(8, 8, 10), Some((8, 2)));
+        assert_eq!(clipped_axis(-8, 3, 10), None);
+        assert_eq!(clipped_axis(10, 3, 10), None);
+        assert_eq!(clipped_axis(4, 0, 10), None);
+    }
+
+    #[test]
+    fn pending_damage_accumulates_until_the_buffer_is_current() {
+        let first = PixelRect {
+            x: 1,
+            y: 2,
+            width: 3,
+            height: 4,
+        };
+        let second = PixelRect {
+            x: 5,
+            y: 6,
+            width: 7,
+            height: 8,
+        };
+        let mut pending = PendingDamage::Clean;
+
+        pending.accumulate(&PendingDamage::Rects(vec![first]));
+        pending.accumulate(&PendingDamage::Clean);
+        pending.accumulate(&PendingDamage::Rects(vec![second]));
+
+        assert_eq!(pending, PendingDamage::Rects(vec![first, second]));
+        pending.accumulate(&PendingDamage::Full(FullCopyReason::NewRenderBuffer));
+        assert_eq!(
+            pending,
+            PendingDamage::Full(FullCopyReason::NewRenderBuffer)
+        );
+        pending.accumulate(&PendingDamage::Rects(vec![first]));
+        assert_eq!(
+            pending,
+            PendingDamage::Full(FullCopyReason::NewRenderBuffer)
+        );
+    }
+
+    #[test]
+    fn too_many_accumulated_rectangles_fall_back_to_a_full_copy() {
+        let rects = (0..MAX_PENDING_DAMAGE_RECTS)
+            .map(|index| PixelRect {
+                x: (index * 2) as u32,
+                y: 0,
+                width: 1,
+                height: 1,
+            })
+            .collect();
+        let mut pending = PendingDamage::Rects(rects);
+
+        pending.accumulate(&PendingDamage::Rects(vec![PixelRect {
+            x: (MAX_PENDING_DAMAGE_RECTS * 2) as u32,
+            y: 0,
+            width: 1,
+            height: 1,
+        }]));
+
+        assert_eq!(pending, PendingDamage::Full(FullCopyReason::TooManyRects));
+    }
+
+    #[test]
+    fn accumulated_overlapping_damage_is_coalesced_without_extra_copy_area() {
+        let mut pending = PendingDamage::Rects(vec![PixelRect {
+            x: 10,
+            y: 20,
+            width: 30,
+            height: 10,
+        }]);
+
+        pending.accumulate(&PendingDamage::Rects(vec![PixelRect {
+            x: 10,
+            y: 20,
+            width: 50,
+            height: 10,
+        }]));
+        pending.accumulate(&PendingDamage::Rects(vec![PixelRect {
+            x: 60,
+            y: 20,
+            width: 5,
+            height: 10,
+        }]));
+
+        assert_eq!(
+            pending,
+            PendingDamage::Rects(vec![PixelRect {
+                x: 10,
+                y: 20,
+                width: 55,
+                height: 10,
+            }])
+        );
+    }
+
+    #[test]
+    fn partial_copy_updates_only_damage_and_preserves_pitch_padding() {
+        const WIDTH: u32 = 3;
+        const HEIGHT: u32 = 3;
+        const STRIDE: usize = 5;
+        let source = (1..=STRIDE * HEIGHT as usize)
+            .map(|value| Xrgb8888Pixel(value as u32))
+            .collect::<Vec<_>>();
+        let untouched = Xrgb8888Pixel(0xdead_beef);
+        let mut destination = vec![untouched; source.len()];
+        let damage = PendingDamage::Rects(vec![PixelRect {
+            x: 1,
+            y: 1,
+            width: 2,
+            height: 2,
+        }]);
+
+        let outcome = copy_pixels_to_drm(
+            pixel_bytes_mut(&mut destination),
+            &source,
+            DrmFourcc::Xrgb8888,
+            (STRIDE * mem::size_of::<Xrgb8888Pixel>()) as u32,
+            WIDTH,
+            HEIGHT,
+            &damage,
+        )
+        .unwrap();
+
+        assert_eq!(outcome.mode, CopyMode::Damage);
+        assert_eq!(outcome.rect_count, 1);
+        assert_eq!(outcome.copied_bytes, 16);
+        for index in 0..source.len() {
+            if [6, 7, 11, 12].contains(&index) {
+                assert_eq!(destination[index].0, source[index].0, "pixel {index}");
+            } else {
+                assert_eq!(destination[index].0, untouched.0, "pixel {index}");
+            }
+        }
+    }
+
+    #[test]
+    fn validation_shadow_full_seed_copies_visible_pixels_and_pitch_padding() {
+        const WIDTH: u32 = 3;
+        const HEIGHT: u32 = 2;
+        const STRIDE: usize = 5;
+        const PITCH: u32 = (STRIDE * mem::size_of::<Xrgb8888Pixel>()) as u32;
+        let mut buffer = CachedRenderBuffer::new(DrmFourcc::Xrgb8888, PITCH, HEIGHT).unwrap();
+        let CachedRenderPixels::Xrgb8888(pixels) = &mut buffer.pixels else {
+            panic!("XRGB8888 buffer used a different cached pixel representation");
+        };
+        for (index, pixel) in pixels.iter_mut().enumerate() {
+            *pixel = Xrgb8888Pixel(0x1000_0000 + index as u32);
+        }
+        let mut shadow = vec![0xa5; buffer.byte_len()];
+        let damage = PendingDamage::Full(FullCopyReason::ValidationSeed);
+
+        let mismatch = buffer
+            .update_validation_shadow(
+                &mut shadow,
+                DrmFourcc::Xrgb8888,
+                PITCH,
+                WIDTH,
+                HEIGHT,
+                &damage,
+                CopyMode::Full(FullCopyReason::ValidationSeed),
+            )
+            .unwrap();
+
+        assert_eq!(mismatch, None);
+        assert_eq!(shadow, buffer.as_bytes(DrmFourcc::Xrgb8888).unwrap());
+        for padding_pixel in [3usize, 4, 8, 9] {
+            let start = padding_pixel * mem::size_of::<Xrgb8888Pixel>();
+            assert_eq!(
+                &shadow[start..start + mem::size_of::<Xrgb8888Pixel>()],
+                &buffer.as_bytes(DrmFourcc::Xrgb8888).unwrap()
+                    [start..start + mem::size_of::<Xrgb8888Pixel>()],
+                "pitch-padding pixel {padding_pixel}"
+            );
+        }
+    }
+
+    #[test]
+    fn validation_shadow_damage_updates_only_rectangles_across_pitched_rows() {
+        const WIDTH: u32 = 3;
+        const HEIGHT: u32 = 3;
+        const STRIDE: usize = 5;
+        const PITCH: u32 = (STRIDE * mem::size_of::<Xrgb8888Pixel>()) as u32;
+        let mut buffer = CachedRenderBuffer::new(DrmFourcc::Xrgb8888, PITCH, HEIGHT).unwrap();
+        let mut shadow = vec![0; buffer.byte_len()];
+        let seed = PendingDamage::Full(FullCopyReason::ValidationSeed);
+        buffer
+            .update_validation_shadow(
+                &mut shadow,
+                DrmFourcc::Xrgb8888,
+                PITCH,
+                WIDTH,
+                HEIGHT,
+                &seed,
+                CopyMode::Full(FullCopyReason::ValidationSeed),
+            )
+            .unwrap();
+        let before = shadow.clone();
+
+        let CachedRenderPixels::Xrgb8888(pixels) = &mut buffer.pixels else {
+            panic!("XRGB8888 buffer used a different cached pixel representation");
+        };
+        for (index, value) in [(6usize, 1u32), (7, 2), (11, 3), (12, 4)] {
+            pixels[index] = Xrgb8888Pixel(0xff00_0000 | value);
+        }
+        let damage = PendingDamage::Rects(vec![PixelRect {
+            x: 1,
+            y: 1,
+            width: 2,
+            height: 2,
+        }]);
+
+        let mismatch = buffer
+            .update_validation_shadow(
+                &mut shadow,
+                DrmFourcc::Xrgb8888,
+                PITCH,
+                WIDTH,
+                HEIGHT,
+                &damage,
+                CopyMode::Damage,
+            )
+            .unwrap();
+
+        assert_eq!(mismatch, None);
+        assert_eq!(shadow, buffer.as_bytes(DrmFourcc::Xrgb8888).unwrap());
+        for padding_pixel in [3usize, 4, 8, 9, 13, 14] {
+            let start = padding_pixel * mem::size_of::<Xrgb8888Pixel>();
+            assert_eq!(
+                &shadow[start..start + mem::size_of::<Xrgb8888Pixel>()],
+                &before[start..start + mem::size_of::<Xrgb8888Pixel>()],
+                "pitch-padding pixel {padding_pixel}"
+            );
+        }
+    }
+
+    #[test]
+    fn validation_shadow_clean_frame_detects_a_stale_visible_pixel() {
+        const WIDTH: u32 = 3;
+        const HEIGHT: u32 = 2;
+        const STRIDE: usize = 5;
+        const PITCH: u32 = (STRIDE * mem::size_of::<Xrgb8888Pixel>()) as u32;
+        let mut buffer = CachedRenderBuffer::new(DrmFourcc::Xrgb8888, PITCH, HEIGHT).unwrap();
+        let mut shadow = vec![0; buffer.byte_len()];
+        let seed = PendingDamage::Full(FullCopyReason::ValidationSeed);
+        buffer
+            .update_validation_shadow(
+                &mut shadow,
+                DrmFourcc::Xrgb8888,
+                PITCH,
+                WIDTH,
+                HEIGHT,
+                &seed,
+                CopyMode::Full(FullCopyReason::ValidationSeed),
+            )
+            .unwrap();
+
+        let CachedRenderPixels::Xrgb8888(pixels) = &mut buffer.pixels else {
+            panic!("XRGB8888 buffer used a different cached pixel representation");
+        };
+        pixels[STRIDE + 2] = Xrgb8888Pixel(0xff12_3456);
+
+        let mismatch = buffer
+            .update_validation_shadow(
+                &mut shadow,
+                DrmFourcc::Xrgb8888,
+                PITCH,
+                WIDTH,
+                HEIGHT,
+                &PendingDamage::Clean,
+                CopyMode::Clean,
+            )
+            .unwrap()
+            .expect("clean validation must report the stale pixel");
+
+        assert_eq!((mismatch.x, mismatch.y), (2, 1));
+        assert_ne!(mismatch.expected, mismatch.actual);
+    }
+
+    #[test]
+    fn clean_frame_performs_no_copy_and_is_not_counted_as_damage() {
+        const WIDTH: u32 = 2;
+        const HEIGHT: u32 = 2;
+        let source = vec![Xrgb8888Pixel(1); WIDTH as usize * HEIGHT as usize];
+        let untouched = Xrgb8888Pixel(2);
+        let mut destination = vec![untouched; source.len()];
+
+        let outcome = copy_pixels_to_drm(
+            pixel_bytes_mut(&mut destination),
+            &source,
+            DrmFourcc::Xrgb8888,
+            WIDTH * mem::size_of::<Xrgb8888Pixel>() as u32,
+            WIDTH,
+            HEIGHT,
+            &PendingDamage::Clean,
+        )
+        .unwrap();
+        let mut stats = CopyStats::default();
+        stats.record(outcome);
+
+        assert_eq!(outcome.mode, CopyMode::Clean);
+        assert_eq!(outcome.copied_bytes, 0);
+        assert!(destination.iter().all(|pixel| pixel.0 == untouched.0));
+        assert_eq!(stats, CopyStats::default());
+    }
+
+    #[test]
+    fn expensive_damage_and_explicit_validation_use_full_copy_fallbacks() {
+        const WIDTH: u32 = 4;
+        const HEIGHT: u32 = 3;
+        let source = (1..=WIDTH as usize * HEIGHT as usize)
+            .map(|value| Xrgb8888Pixel(value as u32))
+            .collect::<Vec<_>>();
+        let full_rect = PixelRect {
+            x: 0,
+            y: 0,
+            width: WIDTH,
+            height: HEIGHT,
+        };
+
+        for (damage, expected_reason) in [
+            (
+                PendingDamage::Rects(vec![full_rect]),
+                FullCopyReason::DamageCost,
+            ),
+            (
+                PendingDamage::Full(FullCopyReason::ValidationFallback),
+                FullCopyReason::ValidationFallback,
+            ),
+        ] {
+            let mut destination = vec![Xrgb8888Pixel::default(); source.len()];
+            let outcome = copy_pixels_to_drm(
+                pixel_bytes_mut(&mut destination),
+                &source,
+                DrmFourcc::Xrgb8888,
+                WIDTH * mem::size_of::<Xrgb8888Pixel>() as u32,
+                WIDTH,
+                HEIGHT,
+                &damage,
+            )
+            .unwrap();
+
+            assert_eq!(outcome.mode, CopyMode::Full(expected_reason));
+            assert!(
+                destination
+                    .iter()
+                    .zip(&source)
+                    .all(|(actual, expected)| actual.0 == expected.0)
+            );
+        }
+    }
+
+    #[test]
+    fn triple_buffer_damage_history_produces_exact_frames_across_reuse() {
+        const WIDTH: u32 = 8;
+        const HEIGHT: u32 = 6;
+        const PIXELS: usize = WIDTH as usize * HEIGHT as usize;
+        let mut canonical = vec![Xrgb8888Pixel::default(); PIXELS];
+        let mut buffers = [
+            vec![Xrgb8888Pixel::default(); PIXELS],
+            vec![Xrgb8888Pixel::default(); PIXELS],
+            vec![Xrgb8888Pixel::default(); PIXELS],
+        ];
+        let mut pending = [
+            PendingDamage::Full(FullCopyReason::VirginBuffer),
+            PendingDamage::Full(FullCopyReason::VirginBuffer),
+            PendingDamage::Full(FullCopyReason::VirginBuffer),
+        ];
+
+        for frame in 0..9usize {
+            let rect = PixelRect {
+                x: (frame % WIDTH as usize) as u32,
+                y: (frame * 2 % HEIGHT as usize) as u32,
+                width: 1,
+                height: 1,
+            };
+            let index = rect.y as usize * WIDTH as usize + rect.x as usize;
+            canonical[index] = Xrgb8888Pixel((frame + 1) as u32);
+            let frame_damage = PendingDamage::Rects(vec![rect]);
+            for buffer_damage in &mut pending {
+                buffer_damage.accumulate(&frame_damage);
+            }
+
+            let current = frame % buffers.len();
+            let outcome = copy_pixels_to_drm(
+                pixel_bytes_mut(&mut buffers[current]),
+                &canonical,
+                DrmFourcc::Xrgb8888,
+                WIDTH * mem::size_of::<Xrgb8888Pixel>() as u32,
+                WIDTH,
+                HEIGHT,
+                &pending[current],
+            )
+            .unwrap();
+            pending[current] = PendingDamage::Clean;
+
+            if frame < 3 {
+                assert_eq!(outcome.mode, CopyMode::Full(FullCopyReason::VirginBuffer));
+            } else {
+                assert_eq!(outcome.mode, CopyMode::Damage);
+                assert_eq!(outcome.rect_count, 3);
+            }
+            assert!(
+                buffers[current]
+                    .iter()
+                    .zip(&canonical)
+                    .all(|(actual, expected)| actual.0 == expected.0)
+            );
+        }
     }
 
     #[test]
@@ -1247,6 +2037,92 @@ mod drm_lab_tests {
         assert_eq!(report.interval_p95_us, 33_333);
         assert_eq!(report.interval_max_us, 33_333);
     }
+
+    #[test]
+    fn animation_lab_requires_fifty_five_delivered_partial_frames() {
+        let passing = UiAnimationLabMeasurement {
+            report: FrameRateReport {
+                completed_flips: 55,
+                elapsed_us: 1_000_000,
+                vblank_delta: 60,
+                fps_milli: 55_000,
+                vblank_fps_milli: 55_000,
+                interval_p50_us: 18_000,
+                interval_p95_us: 33_500,
+                interval_max_us: 50_000,
+            },
+            progress_milli: 750,
+            copy: CopyStats {
+                damage_frames: 55,
+                full_frames: 0,
+                copied_bytes: 55_000,
+                max_damage_bytes: 999,
+            },
+        };
+
+        assert!(passing.passes(1_000));
+        let mut too_slow = passing;
+        too_slow.report.fps_milli = 54_999;
+        assert!(!too_slow.passes(1_000));
+        let mut used_full_copy = passing;
+        used_full_copy.copy.full_frames = 1;
+        assert!(!used_full_copy.passes(1_000));
+        let mut copied_full_frame = passing;
+        copied_full_frame.copy.max_damage_bytes = 1_000;
+        assert!(!copied_full_frame.passes(1_000));
+    }
+
+    #[test]
+    fn damage_validation_requires_all_three_buffers_and_explicit_fallback() {
+        let passing = UiDamageValidationMeasurement {
+            stats: CopyValidationStats {
+                checks: 18,
+                mismatches: 0,
+                buffer_checks: [6, 6, 6],
+                damage_checks: 8,
+                clean_checks: 0,
+                full_checks: 10,
+                seed_checks: 2,
+                fallback_checks: 6,
+                fallback_verified: true,
+            },
+            completed_flips: 18,
+        };
+
+        assert!(passing.passes());
+        let mut stale = passing;
+        stale.stats.mismatches = 1;
+        assert!(!stale.passes());
+        let mut missed_buffer = passing;
+        missed_buffer.stats.buffer_checks = [9, 9, 0];
+        assert!(!missed_buffer.passes());
+        let mut no_fallback = passing;
+        no_fallback.stats.fallback_verified = false;
+        assert!(!no_fallback.passes());
+    }
+
+    #[test]
+    fn damage_validation_holds_each_pattern_for_three_buffers_and_rotates_reference() {
+        let patterns = (0..ANIMATION_LAB_DAMAGE_VALIDATION_FRAMES)
+            .map(damage_validation_pattern)
+            .collect::<Vec<_>>();
+        assert_eq!(
+            patterns,
+            vec![1, 1, 1, 2, 2, 2, 3, 3, 3, 4, 4, 4, 5, 5, 5, 0, 0, 0]
+        );
+
+        let reference_frames = (0..ANIMATION_LAB_DAMAGE_VALIDATION_FRAMES)
+            .filter(|frame| damage_validation_is_reference(*frame))
+            .collect::<Vec<_>>();
+        assert_eq!(reference_frames, vec![0, 4, 8, 9, 13, 17]);
+        assert_eq!(
+            reference_frames
+                .iter()
+                .map(|frame| frame % ANIMATION_LAB_DAMAGE_FRAMES_PER_STATE)
+                .collect::<Vec<_>>(),
+            vec![0, 1, 2, 0, 1, 2]
+        );
+    }
 }
 
 struct DrmCard(File);
@@ -1261,12 +2137,20 @@ impl DrmDevice for DrmCard {}
 impl ControlDevice for DrmCard {}
 
 struct KmsBuffer {
+    id: u8,
     framebuffer: framebuffer::Handle,
     buffer: control::dumbbuffer::DumbBuffer,
+    pending_damage: PendingDamage,
+    validation_shadow: Option<Vec<u8>>,
 }
 
 impl KmsBuffer {
-    fn allocate(card: &DrmCard, size: (u32, u32), format: DrmFourcc) -> Result<Self, String> {
+    fn allocate(
+        card: &DrmCard,
+        size: (u32, u32),
+        format: DrmFourcc,
+        id: u8,
+    ) -> Result<Self, String> {
         let (depth, bpp) = pixel_format_params(format)?;
         let buffer = card
             .create_dumb_buffer(size, format, bpp)
@@ -1276,10 +2160,252 @@ impl KmsBuffer {
             .map_err(|err| format!("create DRM framebuffer object: {err}"))?;
 
         Ok(Self {
+            id,
             framebuffer,
             buffer,
+            pending_damage: PendingDamage::Full(FullCopyReason::VirginBuffer),
+            validation_shadow: None,
         })
     }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct PixelRect {
+    x: u32,
+    y: u32,
+    width: u32,
+    height: u32,
+}
+
+impl PixelRect {
+    fn area(self) -> u64 {
+        u64::from(self.width).saturating_mul(u64::from(self.height))
+    }
+
+    fn merge_if_not_more_expensive(self, other: Self) -> Option<Self> {
+        let x = self.x.min(other.x);
+        let y = self.y.min(other.y);
+        let x_end = u64::from(self.x)
+            .saturating_add(u64::from(self.width))
+            .max(u64::from(other.x).saturating_add(u64::from(other.width)));
+        let y_end = u64::from(self.y)
+            .saturating_add(u64::from(self.height))
+            .max(u64::from(other.y).saturating_add(u64::from(other.height)));
+        let width = x_end.saturating_sub(u64::from(x));
+        let height = y_end.saturating_sub(u64::from(y));
+        let merged_area = width.saturating_mul(height);
+        if merged_area > self.area().saturating_add(other.area()) {
+            return None;
+        }
+
+        Some(Self {
+            x,
+            y,
+            width: u32::try_from(width).ok()?,
+            height: u32::try_from(height).ok()?,
+        })
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum FullCopyReason {
+    VirginBuffer,
+    NewRenderBuffer,
+    TooManyRects,
+    DamageCost,
+    ValidationSeed,
+    ValidationFallback,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+enum PendingDamage {
+    Clean,
+    Rects(Vec<PixelRect>),
+    Full(FullCopyReason),
+}
+
+impl PendingDamage {
+    fn from_physical_region(
+        region: &PhysicalRegion,
+        width: u32,
+        height: u32,
+        new_buffer: bool,
+    ) -> Self {
+        if new_buffer {
+            return Self::Full(FullCopyReason::NewRenderBuffer);
+        }
+
+        let mut rects = Vec::new();
+        for (position, size) in region.iter() {
+            let Some((x, width)) = clipped_axis(position.x, size.width, width) else {
+                continue;
+            };
+            let Some((y, height)) = clipped_axis(position.y, size.height, height) else {
+                continue;
+            };
+            let rect = PixelRect {
+                x,
+                y,
+                width,
+                height,
+            };
+            if !push_coalesced_rect(&mut rects, rect) {
+                return Self::Full(FullCopyReason::TooManyRects);
+            }
+        }
+
+        if rects.is_empty() {
+            Self::Clean
+        } else {
+            Self::Rects(rects)
+        }
+    }
+
+    fn accumulate(&mut self, damage: &Self) {
+        match (&mut *self, damage) {
+            (Self::Full(_), _) | (_, Self::Clean) => {}
+            (current, Self::Full(reason)) => *current = Self::Full(*reason),
+            (Self::Clean, Self::Rects(rects)) => {
+                let mut accumulated = Vec::with_capacity(rects.len());
+                for rect in rects {
+                    if !push_coalesced_rect(&mut accumulated, *rect) {
+                        *self = Self::Full(FullCopyReason::TooManyRects);
+                        return;
+                    }
+                }
+                *self = Self::Rects(accumulated);
+            }
+            (Self::Rects(current), Self::Rects(rects)) => {
+                for rect in rects {
+                    if !push_coalesced_rect(current, *rect) {
+                        *self = Self::Full(FullCopyReason::TooManyRects);
+                        return;
+                    }
+                }
+            }
+        }
+    }
+}
+
+fn push_coalesced_rect(rects: &mut Vec<PixelRect>, mut candidate: PixelRect) -> bool {
+    let mut index = 0;
+    while index < rects.len() {
+        if let Some(merged) = candidate.merge_if_not_more_expensive(rects[index]) {
+            candidate = merged;
+            rects.swap_remove(index);
+            index = 0;
+        } else {
+            index += 1;
+        }
+    }
+    if rects.len() >= MAX_PENDING_DAMAGE_RECTS {
+        return false;
+    }
+    rects.push(candidate);
+    true
+}
+
+fn clipped_axis(origin: i32, length: u32, limit: u32) -> Option<(u32, u32)> {
+    let limit = i64::from(limit);
+    let start = i64::from(origin).clamp(0, limit);
+    let end = (i64::from(origin) + i64::from(length)).clamp(0, limit);
+    (end > start).then(|| {
+        (
+            u32::try_from(start).unwrap_or(0),
+            u32::try_from(end - start).unwrap_or(0),
+        )
+    })
+}
+
+struct CachedRenderResult {
+    duration: Duration,
+    damage: PhysicalRegion,
+    new_buffer: bool,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum CopyMode {
+    Clean,
+    Damage,
+    Full(FullCopyReason),
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct CopyOutcome {
+    mode: CopyMode,
+    rect_count: usize,
+    copied_bytes: u64,
+    duration: Duration,
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+struct CopyStats {
+    damage_frames: u32,
+    full_frames: u32,
+    copied_bytes: u64,
+    max_damage_bytes: u64,
+}
+
+impl CopyStats {
+    fn record(&mut self, outcome: CopyOutcome) {
+        self.copied_bytes = self.copied_bytes.saturating_add(outcome.copied_bytes);
+        match outcome.mode {
+            CopyMode::Clean => {}
+            CopyMode::Damage => {
+                self.damage_frames = self.damage_frames.saturating_add(1);
+                self.max_damage_bytes = self.max_damage_bytes.max(outcome.copied_bytes);
+            }
+            CopyMode::Full(_) => self.full_frames = self.full_frames.saturating_add(1),
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+struct CopyValidationStats {
+    checks: u32,
+    mismatches: u32,
+    buffer_checks: [u32; 3],
+    damage_checks: u32,
+    clean_checks: u32,
+    full_checks: u32,
+    seed_checks: u32,
+    fallback_checks: u32,
+    fallback_verified: bool,
+}
+
+impl CopyValidationStats {
+    fn record(&mut self, buffer_id: u8, outcome: CopyOutcome, matches: bool) {
+        self.checks = self.checks.saturating_add(1);
+        if let Some(checks) = self.buffer_checks.get_mut(buffer_id as usize) {
+            *checks = checks.saturating_add(1);
+        }
+        match outcome.mode {
+            CopyMode::Clean => self.clean_checks = self.clean_checks.saturating_add(1),
+            CopyMode::Damage => self.damage_checks = self.damage_checks.saturating_add(1),
+            CopyMode::Full(reason) => {
+                self.full_checks = self.full_checks.saturating_add(1);
+                if reason == FullCopyReason::ValidationSeed && matches {
+                    self.seed_checks = self.seed_checks.saturating_add(1);
+                }
+                if reason == FullCopyReason::ValidationFallback && matches {
+                    self.fallback_checks = self.fallback_checks.saturating_add(1);
+                    self.fallback_verified = true;
+                }
+            }
+        }
+        if !matches {
+            self.mismatches = self.mismatches.saturating_add(1);
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct DrmMismatch {
+    byte_offset: usize,
+    x: usize,
+    y: usize,
+    expected: u8,
+    actual: u8,
 }
 
 struct CachedRenderBuffer {
@@ -1329,52 +2455,185 @@ impl CachedRenderBuffer {
         renderer: &SoftwareRenderer,
         format: DrmFourcc,
         stride: usize,
-    ) -> Result<Duration, String> {
+    ) -> Result<CachedRenderResult, String> {
+        let new_buffer = self.age == 0;
         self.age = 1;
         let render_start = Instant::now();
-        match (format, &mut self.pixels) {
+        let damage = match (format, &mut self.pixels) {
             (DrmFourcc::Xrgb8888 | DrmFourcc::Argb8888, CachedRenderPixels::Xrgb8888(pixels)) => {
-                renderer.render(pixels, stride);
+                renderer.render(pixels, stride)
             }
             (DrmFourcc::Bgra8888, CachedRenderPixels::Bgra8888(pixels)) => {
-                renderer.render(pixels, stride);
+                renderer.render(pixels, stride)
             }
             (DrmFourcc::Rgb565, CachedRenderPixels::Rgb565(pixels)) => {
-                renderer.render(pixels, stride);
+                renderer.render(pixels, stride)
             }
             _ => {
                 return Err(format!(
                     "cached render buffer format does not match DRM format {format:?}"
                 ));
             }
-        }
+        };
 
-        Ok(render_start.elapsed())
+        Ok(CachedRenderResult {
+            duration: render_start.elapsed(),
+            damage,
+            new_buffer,
+        })
     }
 
-    fn copy_to_drm(&self, drm_bytes: &mut [u8], format: DrmFourcc) -> Result<Duration, String> {
+    fn copy_to_drm(
+        &self,
+        drm_bytes: &mut [u8],
+        format: DrmFourcc,
+        pitch: u32,
+        width: u32,
+        height: u32,
+        damage: &PendingDamage,
+    ) -> Result<CopyOutcome, String> {
         let copy_start = Instant::now();
+        let mut outcome = match (format, &self.pixels) {
+            (DrmFourcc::Xrgb8888 | DrmFourcc::Argb8888, CachedRenderPixels::Xrgb8888(pixels)) => {
+                copy_pixels_to_drm(drm_bytes, pixels, format, pitch, width, height, damage)?
+            }
+            (DrmFourcc::Bgra8888, CachedRenderPixels::Bgra8888(pixels)) => {
+                copy_pixels_to_drm(drm_bytes, pixels, format, pitch, width, height, damage)?
+            }
+            (DrmFourcc::Rgb565, CachedRenderPixels::Rgb565(pixels)) => {
+                copy_pixels_to_drm(drm_bytes, pixels, format, pitch, width, height, damage)?
+            }
+            _ => {
+                return Err(format!(
+                    "cached render buffer format does not match DRM format {format:?}"
+                ));
+            }
+        };
+        outcome.duration = copy_start.elapsed();
+
+        Ok(outcome)
+    }
+
+    fn as_bytes(&self, format: DrmFourcc) -> Result<&[u8], String> {
         match (format, &self.pixels) {
             (DrmFourcc::Xrgb8888 | DrmFourcc::Argb8888, CachedRenderPixels::Xrgb8888(pixels)) => {
-                copy_pixels_to_drm(drm_bytes, pixels, format)?;
+                Ok(pixels_as_bytes(pixels))
             }
             (DrmFourcc::Bgra8888, CachedRenderPixels::Bgra8888(pixels)) => {
-                copy_pixels_to_drm(drm_bytes, pixels, format)?;
+                Ok(pixels_as_bytes(pixels))
             }
-            (DrmFourcc::Rgb565, CachedRenderPixels::Rgb565(pixels)) => {
-                copy_pixels_to_drm(drm_bytes, pixels, format)?;
+            (DrmFourcc::Rgb565, CachedRenderPixels::Rgb565(pixels)) => Ok(pixels_as_bytes(pixels)),
+            _ => Err(format!(
+                "cached render buffer format does not match DRM format {format:?}"
+            )),
+        }
+    }
+
+    fn update_validation_shadow(
+        &self,
+        shadow: &mut [u8],
+        format: DrmFourcc,
+        pitch: u32,
+        width: u32,
+        height: u32,
+        damage: &PendingDamage,
+        mode: CopyMode,
+    ) -> Result<Option<DrmMismatch>, String> {
+        let expected = self.as_bytes(format)?;
+        let pixel_size = bytes_per_pixel(format);
+        let pitch =
+            usize::try_from(pitch).map_err(|_| "DRM pitch does not fit usize".to_string())?;
+        let width =
+            usize::try_from(width).map_err(|_| "DRM width does not fit usize".to_string())?;
+        let height =
+            usize::try_from(height).map_err(|_| "DRM height does not fit usize".to_string())?;
+        let required = pitch
+            .checked_mul(height)
+            .ok_or_else(|| "DRM validation byte count overflow".to_string())?;
+        if shadow.len() < required {
+            return Err(format!(
+                "cached BO shadow is too small for validation: {} < {} bytes",
+                shadow.len(),
+                required
+            ));
+        }
+        if expected.len() < required {
+            return Err(format!(
+                "cached render buffer is too small for validation: {} < {required} bytes",
+                expected.len()
+            ));
+        }
+
+        match mode {
+            CopyMode::Full(_) => shadow[..required].copy_from_slice(&expected[..required]),
+            CopyMode::Clean => {
+                if !matches!(damage, PendingDamage::Clean) {
+                    return Err("clean copy mode has non-clean pending damage".to_string());
+                }
             }
-            _ => {
-                return Err(format!(
-                    "cached render buffer format does not match DRM format {format:?}"
-                ));
+            CopyMode::Damage => {
+                let PendingDamage::Rects(rects) = damage else {
+                    return Err("damage copy mode has no damage rectangles".to_string());
+                };
+                for rect in rects {
+                    let x = usize::try_from(rect.x)
+                        .map_err(|_| "validation damage x does not fit usize".to_string())?;
+                    let y = usize::try_from(rect.y)
+                        .map_err(|_| "validation damage y does not fit usize".to_string())?;
+                    let rect_width = usize::try_from(rect.width)
+                        .map_err(|_| "validation damage width does not fit usize".to_string())?;
+                    let rect_height = usize::try_from(rect.height)
+                        .map_err(|_| "validation damage height does not fit usize".to_string())?;
+                    let x_end = x
+                        .checked_add(rect_width)
+                        .ok_or_else(|| "validation damage x overflow".to_string())?;
+                    let y_end = y
+                        .checked_add(rect_height)
+                        .ok_or_else(|| "validation damage y overflow".to_string())?;
+                    if x_end > width || y_end > height {
+                        return Err(format!(
+                            "validation damage rectangle lies outside framebuffer: ({x},{y})..({x_end},{y_end}) > {width}x{height}"
+                        ));
+                    }
+                    let start_x = x
+                        .checked_mul(pixel_size)
+                        .ok_or_else(|| "validation damage byte x overflow".to_string())?;
+                    let row_bytes = rect_width
+                        .checked_mul(pixel_size)
+                        .ok_or_else(|| "validation damage row size overflow".to_string())?;
+                    for row in y..y_end {
+                        let start = row
+                            .checked_mul(pitch)
+                            .and_then(|offset| offset.checked_add(start_x))
+                            .ok_or_else(|| "validation damage row offset overflow".to_string())?;
+                        let end = start
+                            .checked_add(row_bytes)
+                            .ok_or_else(|| "validation damage row end overflow".to_string())?;
+                        shadow[start..end].copy_from_slice(&expected[start..end]);
+                    }
+                }
             }
         }
 
-        Ok(copy_start.elapsed())
+        if shadow[..required] == expected[..required] {
+            return Ok(None);
+        }
+        let Some(byte_offset) = expected[..required]
+            .iter()
+            .zip(&shadow[..required])
+            .position(|(expected, actual)| expected != actual)
+        else {
+            return Ok(None);
+        };
+        Ok(Some(DrmMismatch {
+            byte_offset,
+            x: (byte_offset % pitch) / pixel_size,
+            y: byte_offset / pitch,
+            expected: expected[byte_offset],
+            actual: shadow[byte_offset],
+        }))
     }
 
-    #[cfg(test)]
     fn byte_len(&self) -> usize {
         match &self.pixels {
             CachedRenderPixels::Xrgb8888(pixels) => mem::size_of_val(pixels.as_slice()),
@@ -1528,24 +2787,121 @@ fn pixel_format_params(format: DrmFourcc) -> Result<(u32, u32), String> {
 
 /// A pixel whose in-memory representation can be copied directly to a DRM mapping.
 ///
+/// # Safety
+///
 /// Implementors must have no uninitialized padding and every bit pattern must be valid.
-unsafe trait DrmPixel: Copy {}
+unsafe trait DrmPixel: Copy + PartialEq {}
+
+fn pixels_as_bytes<T: DrmPixel>(pixels: &[T]) -> &[u8] {
+    let byte_len = mem::size_of_val(pixels);
+    // SAFETY: DrmPixel requires a copyable representation with no uninitialized padding, and the
+    // returned byte slice has exactly the same lifetime and extent as the input pixel slice.
+    unsafe { slice::from_raw_parts(pixels.as_ptr().cast(), byte_len) }
+}
 
 fn copy_pixels_to_drm<T: DrmPixel>(
     drm_bytes: &mut [u8],
     pixels: &[T],
     format: DrmFourcc,
-) -> Result<(), String> {
+    pitch: u32,
+    width: u32,
+    height: u32,
+    damage: &PendingDamage,
+) -> Result<CopyOutcome, String> {
     let drm_pixels = cast_buffer_mut::<T>(drm_bytes, format)?;
-    if drm_pixels.len() < pixels.len() {
+    let pixel_size = mem::size_of::<T>();
+    let pitch = usize::try_from(pitch).map_err(|_| "DRM pitch does not fit usize".to_string())?;
+    if pitch % pixel_size != 0 {
         return Err(format!(
-            "DRM buffer mapping is too small for cached render: {} < {} pixels",
-            drm_pixels.len(),
-            pixels.len()
+            "DRM pitch is not aligned for {format:?}: {pitch} bytes"
         ));
     }
-    drm_pixels[..pixels.len()].copy_from_slice(pixels);
-    Ok(())
+    let stride = pitch / pixel_size;
+    let width = usize::try_from(width).map_err(|_| "DRM width does not fit usize".to_string())?;
+    let height =
+        usize::try_from(height).map_err(|_| "DRM height does not fit usize".to_string())?;
+    if width > stride {
+        return Err(format!(
+            "DRM width exceeds stride for {format:?}: {width} > {stride} pixels"
+        ));
+    }
+    let frame_pixels = stride
+        .checked_mul(height)
+        .ok_or_else(|| "DRM frame pixel count overflow".to_string())?;
+    if drm_pixels.len() < frame_pixels || pixels.len() < frame_pixels {
+        return Err(format!(
+            "DRM buffer is too small for cached render: dst={}, src={}, required={} pixels",
+            drm_pixels.len(),
+            pixels.len(),
+            frame_pixels,
+        ));
+    }
+
+    let frame_bytes = frame_pixels
+        .checked_mul(pixel_size)
+        .ok_or_else(|| "DRM frame byte count overflow".to_string())?;
+    let visible_frame_bytes = width
+        .checked_mul(height)
+        .and_then(|pixels| pixels.checked_mul(pixel_size))
+        .ok_or_else(|| "visible DRM frame byte count overflow".to_string())?;
+    let (mode, rect_count, copied_bytes) = match damage {
+        PendingDamage::Full(reason) => {
+            drm_pixels[..frame_pixels].copy_from_slice(&pixels[..frame_pixels]);
+            (CopyMode::Full(*reason), 1, frame_bytes)
+        }
+        PendingDamage::Clean => (CopyMode::Clean, 0, 0),
+        PendingDamage::Rects(rects) => {
+            let requested_bytes = rects.iter().try_fold(0usize, |total, rect| {
+                let pixels = usize::try_from(rect.width)
+                    .ok()?
+                    .checked_mul(usize::try_from(rect.height).ok()?)?;
+                total.checked_add(pixels.checked_mul(pixel_size)?)
+            });
+            if requested_bytes.is_none_or(|bytes| bytes >= visible_frame_bytes) {
+                drm_pixels[..frame_pixels].copy_from_slice(&pixels[..frame_pixels]);
+                (CopyMode::Full(FullCopyReason::DamageCost), 1, frame_bytes)
+            } else {
+                for rect in rects {
+                    let x = usize::try_from(rect.x)
+                        .map_err(|_| "damage x does not fit usize".to_string())?;
+                    let y = usize::try_from(rect.y)
+                        .map_err(|_| "damage y does not fit usize".to_string())?;
+                    let rect_width = usize::try_from(rect.width)
+                        .map_err(|_| "damage width does not fit usize".to_string())?;
+                    let rect_height = usize::try_from(rect.height)
+                        .map_err(|_| "damage height does not fit usize".to_string())?;
+                    let x_end = x
+                        .checked_add(rect_width)
+                        .ok_or_else(|| "damage x overflow".to_string())?;
+                    let y_end = y
+                        .checked_add(rect_height)
+                        .ok_or_else(|| "damage y overflow".to_string())?;
+                    if x_end > width || y_end > height {
+                        return Err(format!(
+                            "damage rectangle lies outside framebuffer: ({x},{y})..({x_end},{y_end}) > {width}x{height}"
+                        ));
+                    }
+                    for row in y..y_end {
+                        let start = row
+                            .checked_mul(stride)
+                            .and_then(|offset| offset.checked_add(x))
+                            .ok_or_else(|| "damage row offset overflow".to_string())?;
+                        let end = start
+                            .checked_add(rect_width)
+                            .ok_or_else(|| "damage row end overflow".to_string())?;
+                        drm_pixels[start..end].copy_from_slice(&pixels[start..end]);
+                    }
+                }
+                (CopyMode::Damage, rects.len(), requested_bytes.unwrap_or(0))
+            }
+        }
+    };
+    Ok(CopyOutcome {
+        mode,
+        rect_count,
+        copied_bytes: u64::try_from(copied_bytes).unwrap_or(u64::MAX),
+        duration: Duration::ZERO,
+    })
 }
 
 fn cast_buffer_mut<T: DrmPixel>(buffer: &mut [u8], format: DrmFourcc) -> Result<&mut [T], String> {
@@ -1564,7 +2920,7 @@ fn cast_buffer_mut<T: DrmPixel>(buffer: &mut [u8], format: DrmFourcc) -> Result<
 }
 
 #[repr(transparent)]
-#[derive(Clone, Copy, Default)]
+#[derive(Clone, Copy, Default, PartialEq)]
 struct Xrgb8888Pixel(u32);
 
 impl Xrgb8888Pixel {
@@ -1598,7 +2954,7 @@ impl TargetPixel for Xrgb8888Pixel {
 }
 
 #[repr(transparent)]
-#[derive(Clone, Copy, Default)]
+#[derive(Clone, Copy, Default, PartialEq)]
 struct Bgra8888Pixel(u32);
 
 impl Bgra8888Pixel {
@@ -2394,6 +3750,51 @@ mod touch_tests {
 
     fn sync(state: &mut TouchState, x_axis: Axis, y_axis: Axis) -> Option<TouchReport> {
         state.handle(event(EV_SYN, SYN_REPORT, 0), x_axis, y_axis, WIDTH, HEIGHT)
+    }
+
+    #[test]
+    fn touch_coordinates_remain_unchanged_at_one_x_scale() {
+        let position = logical_touch_position(
+            TouchReport {
+                kind: TouchKind::Move,
+                x: 321.5,
+                y: 654.25,
+            },
+            1.0,
+        );
+
+        assert_eq!(position.x, 321.5);
+        assert_eq!(position.y, 654.25);
+    }
+
+    #[test]
+    fn touch_coordinates_are_converted_to_logical_pixels_at_two_x_scale() {
+        let position = logical_touch_position(
+            TouchReport {
+                kind: TouchKind::Move,
+                x: 1439.0,
+                y: 2959.0,
+            },
+            2.0,
+        );
+
+        assert_eq!(position.x, 719.5);
+        assert_eq!(position.y, 1479.5);
+    }
+
+    #[test]
+    fn invalid_touch_scale_falls_back_to_one() {
+        let report = TouchReport {
+            kind: TouchKind::Move,
+            x: 10.0,
+            y: 20.0,
+        };
+
+        for scale_factor in [0.0, -1.0, f32::NAN, f32::INFINITY] {
+            let position = logical_touch_position(report, scale_factor);
+            assert_eq!(position.x, 10.0);
+            assert_eq!(position.y, 20.0);
+        }
     }
 
     #[test]

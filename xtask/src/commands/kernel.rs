@@ -1191,6 +1191,7 @@ fn build_device_initrd(
         ),
         features.contains("busybox"),
         features,
+        config.slint_scale_factor,
     )
 }
 

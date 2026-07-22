@@ -9,7 +9,9 @@ use toml::{Value, map::Map};
 
 use crate::Result;
 
-use super::{FeatureSet, KernelDevice, ensure_file, validate_feature};
+use super::{
+    FeatureSet, KernelDevice, cpio::validate_slint_scale_factor, ensure_file, validate_feature,
+};
 
 pub(super) const DEFAULT_BOOTIMG_KERNEL_IMAGE: &str = "Image.gz";
 
@@ -80,6 +82,7 @@ pub(super) struct KernelConfig {
 #[serde(deny_unknown_fields)]
 pub(super) struct CpioConfig {
     pub(super) target: Option<String>,
+    pub(super) slint_scale_factor: Option<f32>,
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -315,6 +318,7 @@ fn merge_layers(layers: &[ConfigLayerEntry]) -> Result<MergedConfig> {
             }
         }
     }
+    validate_slint_scale_factor(cpio.slint_scale_factor)?;
 
     Ok(MergedConfig {
         features,
@@ -452,6 +456,9 @@ fn merge_kernel(merged: &mut KernelConfig, layer: &KernelConfig) {
 fn merge_cpio(merged: &mut CpioConfig, layer: &CpioConfig) {
     if layer.target.is_some() {
         merged.target = layer.target.clone();
+    }
+    if layer.slint_scale_factor.is_some() {
+        merged.slint_scale_factor = layer.slint_scale_factor;
     }
 }
 
@@ -658,6 +665,28 @@ mod tests {
     }
 
     #[test]
+    fn cpio_layers_merge_target_and_slint_scale_factor_independently() {
+        let mut merged = CpioConfig::default();
+        merge_cpio(
+            &mut merged,
+            &CpioConfig {
+                target: Some("aarch64-unknown-linux-musl".to_string()),
+                slint_scale_factor: Some(1.5),
+            },
+        );
+        merge_cpio(
+            &mut merged,
+            &CpioConfig {
+                target: None,
+                slint_scale_factor: Some(2.0),
+            },
+        );
+
+        assert_eq!(merged.target.as_deref(), Some("aarch64-unknown-linux-musl"));
+        assert_eq!(merged.slint_scale_factor, Some(2.0));
+    }
+
+    #[test]
     fn all_checked_in_device_configs_load() {
         let workspace_root = super::super::workspace_root().unwrap();
         for device_id in [
@@ -696,6 +725,8 @@ mod tests {
         let device = KernelDevice::parse("qcom/sdm845-google-crosshatch").unwrap();
         let config = load_device_config(&workspace_root, &device).unwrap();
         let kconfig = config.kconfig_contents().unwrap();
+
+        assert_eq!(config.cpio.slint_scale_factor, Some(2.0));
 
         for symbol in [
             "DRM_MSM",

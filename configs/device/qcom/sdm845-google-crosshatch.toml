@@ -1,5 +1,10 @@
 name = "Google Pixel 3 XL (crosshatch)"
 
+[cpio]
+# Embed glyphs and other software-renderer resources for Crosshatch's high-DPI
+# panel, and make Slint expose the 1440x2960 display as 720x1480 logical pixels.
+slint_scale_factor = 2.0
+
 [kernel]
 dtbo_mask_manifest = "configs/dtbo-masks/qcom/sdm845-google-crosshatch.toml"
 

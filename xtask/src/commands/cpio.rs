@@ -51,6 +51,7 @@ fn cpio(args: CpioArgs) -> Result<()> {
         output,
         args.busybox,
         &features,
+        None,
     )?;
     println!("wrote {}", output.display());
     Ok(())
@@ -62,8 +63,9 @@ pub(super) fn build_initrd(
     output: Option<PathBuf>,
     include_busybox: bool,
     features: &FeatureSet,
+    slint_scale_factor: Option<f32>,
 ) -> Result<PathBuf> {
-    build_release(workspace_root, target, features)?;
+    build_release(workspace_root, target, features, slint_scale_factor)?;
 
     let target_dir = target_dir(workspace_root);
     let init = target_dir.join(target).join("release").join(INIT_BINARY);
@@ -86,7 +88,31 @@ pub(super) fn build_initrd(
     Ok(output)
 }
 
-fn build_release(workspace_root: &Path, target: &str, features: &FeatureSet) -> Result<()> {
+fn build_release(
+    workspace_root: &Path,
+    target: &str,
+    features: &FeatureSet,
+    slint_scale_factor: Option<f32>,
+) -> Result<()> {
+    let mut command = release_command(workspace_root, target, features, slint_scale_factor)?;
+
+    let status = command
+        .status()
+        .map_err(|err| format!("spawn cargo build: {err}"))?;
+    if !status.success() {
+        return Err(format!("cargo build failed with {status}"));
+    }
+    Ok(())
+}
+
+fn release_command(
+    workspace_root: &Path,
+    target: &str,
+    features: &FeatureSet,
+    slint_scale_factor: Option<f32>,
+) -> Result<Command> {
+    validate_slint_scale_factor(slint_scale_factor)?;
+
     let cargo = env::var_os("CARGO").unwrap_or_else(|| "cargo".into());
     let mut command = Command::new(cargo);
     command.current_dir(workspace_root).args([
@@ -100,12 +126,20 @@ fn build_release(workspace_root: &Path, target: &str, features: &FeatureSet) -> 
     if !features.is_empty() {
         command.arg("--features").arg(features.cargo_value());
     }
+    if let Some(scale_factor) = slint_scale_factor {
+        command.env("SLINT_SCALE_FACTOR", scale_factor.to_string());
+    }
 
-    let status = command
-        .status()
-        .map_err(|err| format!("spawn cargo build: {err}"))?;
-    if !status.success() {
-        return Err(format!("cargo build failed with {status}"));
+    Ok(command)
+}
+
+pub(super) fn validate_slint_scale_factor(slint_scale_factor: Option<f32>) -> Result<()> {
+    if let Some(scale_factor) = slint_scale_factor
+        && (!scale_factor.is_finite() || scale_factor <= 0.0)
+    {
+        return Err(format!(
+            "cpio slint_scale_factor must be finite and greater than zero, got {scale_factor}"
+        ));
     }
     Ok(())
 }
@@ -328,5 +362,59 @@ fn cpio_name(path: &Path) -> Result<String> {
         Err(format!("invalid cpio path: {name}"))
     } else {
         Ok(name.to_string())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::ffi::OsStr;
+
+    use super::*;
+
+    fn explicit_env<'a>(command: &'a Command, name: &str) -> Option<&'a OsStr> {
+        command
+            .get_envs()
+            .find_map(|(key, value)| (key == OsStr::new(name)).then_some(value).flatten())
+    }
+
+    #[test]
+    fn nested_cargo_build_receives_configured_slint_scale_factor() {
+        let command = release_command(
+            Path::new("/workspace"),
+            DEFAULT_TARGET,
+            &FeatureSet::default(),
+            Some(2.0),
+        )
+        .unwrap();
+
+        assert_eq!(
+            explicit_env(&command, "SLINT_SCALE_FACTOR"),
+            Some(OsStr::new("2"))
+        );
+    }
+
+    #[test]
+    fn nested_cargo_build_leaves_scale_factor_unset_without_config() {
+        let command = release_command(
+            Path::new("/workspace"),
+            DEFAULT_TARGET,
+            &FeatureSet::default(),
+            None,
+        )
+        .unwrap();
+
+        assert_eq!(explicit_env(&command, "SLINT_SCALE_FACTOR"), None);
+    }
+
+    #[test]
+    fn slint_scale_factor_must_be_finite_and_positive() {
+        for scale_factor in [0.0, -1.0, f32::NAN, f32::INFINITY, f32::NEG_INFINITY] {
+            let error = validate_slint_scale_factor(Some(scale_factor))
+                .expect_err("invalid scale factor must be rejected");
+            assert!(error.contains("finite and greater than zero"), "{error}");
+        }
+        validate_slint_scale_factor(Some(0.5)).unwrap();
+        validate_slint_scale_factor(Some(2.0)).unwrap();
+        validate_slint_scale_factor(None).unwrap();
     }
 }
