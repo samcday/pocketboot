@@ -1,6 +1,18 @@
 name = "Samsung Galaxy Tab A 9.7 (2015)"
 
 [kconfig]
+# Firmware-independent MDP5/DSI display bring-up. Keep the Adreno GPU isolated
+# while exercising the native KMS path and the mainline S6D7AA0 panel driver.
+DRM_SIMPLEDRM = false
+IOMMU_SUPPORT = true
+QCOM_IOMMU = true
+DRM_MSM = true
+DRM_MSM_MDP5 = true
+DRM_MSM_DSI = true
+DRM_MSM_DSI_28NM_PHY = true
+BACKLIGHT_CLASS_DEVICE = true
+DRM_PANEL_SAMSUNG_S6D7AA0 = true
+
 # Buttons, Hall sensor and touchscreen
 INPUT_PM8941_PWRKEY = true
 TOUCHSCREEN_ATMEL_MXT = true
@@ -31,7 +43,7 @@ tags_offset = 0x00000100
 dtb_offset = 0x0
 ramdisk_size = 1
 append_seandroid_enforce = true
-cmdline = ""
+cmdline = "msm.skip_gpu=1 msm.separate_gpu_kms=1"
 
 [bootimg.qcdt]
 entries = [

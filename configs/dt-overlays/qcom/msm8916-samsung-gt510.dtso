@@ -1,0 +1,11 @@
+/dts-v1/;
+/plugin/;
+
+/* Keep Adreno out of the firmware-independent MDP5/DSI bring-up. */
+&{/soc@0/iommu@1f08000} {
+	status = "disabled";
+};
+
+&{/soc@0/gpu@1c00000} {
+	status = "disabled";
+};

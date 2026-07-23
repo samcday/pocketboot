@@ -770,6 +770,68 @@ mod tests {
     }
 
     #[test]
+    fn gt510_enables_firmware_independent_mdp5_kms() {
+        let workspace_root = super::super::workspace_root().unwrap();
+        let device = KernelDevice::parse("qcom/msm8916-samsung-gt510").unwrap();
+        let config = load_device_config(&workspace_root, &device).unwrap();
+        let kconfig = config.kconfig_contents().unwrap();
+
+        for symbol in [
+            "IOMMU_SUPPORT",
+            "QCOM_IOMMU",
+            "DRM_MSM",
+            "DRM_MSM_MDP5",
+            "DRM_MSM_DSI",
+            "DRM_MSM_DSI_28NM_PHY",
+            "BACKLIGHT_CLASS_DEVICE",
+            "DRM_PANEL_SAMSUNG_S6D7AA0",
+        ] {
+            assert!(
+                kconfig.contains(&format!("CONFIG_{symbol}=y\n")),
+                "missing built-in CONFIG_{symbol}:\n{kconfig}"
+            );
+        }
+        assert!(
+            kconfig.contains("# CONFIG_DRM_SIMPLEDRM is not set\n"),
+            "CONFIG_DRM_SIMPLEDRM must be disabled:\n{kconfig}"
+        );
+        let bootimg = config.bootimg.as_ref().unwrap();
+        for argument in ["msm.skip_gpu=1", "msm.separate_gpu_kms=1"] {
+            assert!(
+                bootimg
+                    .cmdline
+                    .split_ascii_whitespace()
+                    .any(|arg| arg == argument),
+                "missing kernel argument {argument}: {}",
+                bootimg.cmdline
+            );
+        }
+    }
+
+    #[test]
+    fn gt510_overlay_keeps_display_and_gpu_isolation_boundaries() {
+        let workspace_root = super::super::workspace_root().unwrap();
+        let overlay = fs::read_to_string(
+            workspace_root.join("configs/dt-overlays/qcom/msm8916-samsung-gt510.dtso"),
+        )
+        .unwrap();
+
+        for enabled_path in ["/soc@0/display-subsystem@1a00000", "/soc@0/iommu@1ef0000"] {
+            assert!(
+                !overlay.contains(enabled_path),
+                "display path must not be disabled: {enabled_path}"
+            );
+        }
+        for disabled_path in ["/soc@0/iommu@1f08000", "/soc@0/gpu@1c00000"] {
+            let fragment = format!("&{{{disabled_path}}} {{\n\tstatus = \"disabled\";\n}};");
+            assert!(
+                overlay.contains(&fragment),
+                "GPU isolation path must remain disabled: {disabled_path}"
+            );
+        }
+    }
+
+    #[test]
     fn crosshatch_enables_firmware_independent_msm_kms_and_touch() {
         let workspace_root = super::super::workspace_root().unwrap();
         let device = KernelDevice::parse("qcom/sdm845-google-crosshatch").unwrap();
