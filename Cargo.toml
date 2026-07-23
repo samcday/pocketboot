@@ -14,6 +14,7 @@ async-channel = "2.5.0"
 async-executor = "1.14.0"
 async-io = "2.6.0"
 blocking = "1.6.2"
+blob-wrangler = { git = "https://github.com/samcday/blob-wrangler", rev = "506ef66df99ebf291e67954af184b626cab9544d", default-features = false, optional = true }
 drm = "0.14.1"
 flate2 = "1"
 futures-lite = "2.6.1"
@@ -21,14 +22,17 @@ gadgetry-most-foul = "0.1.1"
 libc = "0.2.177"
 mbrman = "0.6.1"
 ruzstd = "0.8.3"
+sha2 = { version = "0.10.9", optional = true }
 rustix = { version = "1", features = ["termios"] }
 slint = { version = "1.16.1", default-features = false, features = ["compat-1-2", "libm", "renderer-software", "unsafe-single-threaded"] }
 tracing = "0.1"
+tracing-log = { version = "0.2", optional = true }
 tracing-subscriber = { version = "0.3", default-features = false, features = ["fmt", "registry", "std"] }
 
 [features]
 default = []
 busybox = []
+blob-wrangler = ["dep:blob-wrangler", "dep:sha2", "dep:tracing-log"]
 qemu = []
 
 [build-dependencies]

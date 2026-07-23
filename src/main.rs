@@ -8,17 +8,22 @@ use std::{
 
 mod ab_slots;
 mod adb;
+#[cfg(feature = "blob-wrangler")]
+mod android_lp;
 mod battery;
 mod boot_state;
 mod bootflow;
 mod cmdline;
 mod fastboot;
+#[cfg(feature = "blob-wrangler")]
+mod firmware;
 mod gadget;
 mod getty;
 mod kexec;
 mod kmsg;
 #[path = "kmsg-forwarder.rs"]
 mod kmsg_forwarder;
+mod partitions;
 mod pe;
 mod power;
 #[cfg(feature = "qemu")]
@@ -70,6 +75,8 @@ async fn run() -> Result<()> {
     tracing::info!("starting up");
     reaper::spawn();
     getty::spawn(&cmdline);
+    #[cfg(feature = "blob-wrangler")]
+    let firmware_task = firmware::spawn(cmdline.clone());
 
     let boot_state = boot_state::detect();
     let boot_state_source = boot_state.source.as_ref();
@@ -125,6 +132,8 @@ async fn run() -> Result<()> {
     if let Some(ui) = &ui {
         spawn_ui_action_forwarder(ui, event_tx.clone());
     }
+    #[cfg(feature = "blob-wrangler")]
+    spawn_firmware_joiner(firmware_task, event_tx.clone());
     spawn_fastboot_joiner(fastboot_thread, event_tx.clone());
     spawn_boot_discovery(event_tx.clone());
     drop(event_tx);
@@ -136,8 +145,23 @@ async fn run() -> Result<()> {
 enum CoordinatorEvent {
     UiAction(ui::Action),
     Fastboot(Result<Option<fastboot::PostResponseAction>>),
+    #[cfg(feature = "blob-wrangler")]
+    FirmwareComplete(firmware::LoadResult),
     DiscoveryUpdate(Vec<bootflow::BootEntry>),
     DiscoveryComplete(Vec<bootflow::BootEntry>),
+}
+
+#[cfg(feature = "blob-wrangler")]
+fn spawn_firmware_joiner(
+    task: async_executor::Task<firmware::LoadResult>,
+    event_tx: async_channel::Sender<CoordinatorEvent>,
+) {
+    runtime::detach(async move {
+        let result = task.await;
+        let _ = event_tx
+            .send(CoordinatorEvent::FirmwareComplete(result))
+            .await;
+    });
 }
 
 fn spawn_ui_action_forwarder(ui: &ui::Handle, event_tx: async_channel::Sender<CoordinatorEvent>) {
@@ -250,6 +274,8 @@ async fn run_boot_coordinator(
                 tracing::info!("fastboot exited; waiting for boot discovery before default boot");
                 fastboot_requested_default = true;
             }
+            #[cfg(feature = "blob-wrangler")]
+            CoordinatorEvent::FirmwareComplete(result) => firmware::log_completion(&result),
             CoordinatorEvent::DiscoveryUpdate(entries) => {
                 apply_boot_entries_update(
                     ui,
