@@ -1,0 +1,23 @@
+['fastboot', '-s', 'cd0ee037', 'getvar', 'product']
+product: lk2nd-msm8916
+Finished. Total time: 0.002s
+['fastboot', '-s', 'cd0ee037', 'getvar', 'serialno']
+serialno: cd0ee037
+Finished. Total time: 0.002s
+['fastboot', '-s', 'cd0ee037', 'getvar', 'lk2nd:compatible']
+lk2nd:compatible: samsung,a5u-eur
+Finished. Total time: 0.003s
+['fastboot', '-s', 'cd0ee037', 'getvar', 'lk2nd:version']
+lk2nd:version: 22.0-next-e9799da44-20260621
+Finished. Total time: 0.002s
+['fastboot', '-s', 'cd0ee037', 'oem', 'log']
+(bootloader) Staged. Use 'fastboot get_staged <file>' to fetch.
+OKAY [  0.001s]
+Finished. Total time: 0.001s
+['fastboot', '-s', 'cd0ee037', 'get_staged', 'target/a5u-smp-lab/20260911/lk2nd-before-cold.log']
+Uploading 'target/a5u-smp-lab/20260911/lk2nd-before-cold.log' OKAY [  0.003s]
+Finished. Total time: 0.003s
+['fastboot', '-s', 'cd0ee037', 'boot', '/var/home/sam/src/pocketboot/target/a5u-smp-lab/20260911/cold.img']
+Sending 'boot.img' (13474 KB)                      OKAY [  0.427s]
+Booting                                            OKAY [  0.034s]
+Finished. Total time: 0.468s

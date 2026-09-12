@@ -1,0 +1,235 @@
+[    0.000000] Booting Linux on physical CPU 0x0000000000 [0x410fd030]
+[    0.000000] Linux version 7.1.0-rc6+ (sam@sam-desktop) (aarch64-linux-gnu-gcc (GCC) 16.1.1 20260501 (Red Hat Cross 16.1.1-1), GNU ld version 2.46-1.fc44) #49 SMP PREEMPT Fri Sep 11 17:51:35 AEST 2026
+[    0.000000] random: crng init done
+[    0.000000] Machine model: Samsung Galaxy A5U (EUR)
+[    0.000000] OF: reserved mem: 0x000000008e600000..0x000000008e7fffff (2048 KiB) nomap non-reusable gps
+[    0.000000] OF: reserved mem: 0x00000000854ff000..0x00000000854fffff (4 KiB) nomap non-reusable spin-table@854ff000
+[    0.000000] OF: reserved mem: 0x000000009ff80000..0x000000009fffffff (512 KiB) map non-reusable ramoops@9ff80000
+[    0.000000] OF: reserved mem: 0x0000000086000000..0x00000000862fffff (3072 KiB) nomap non-reusable tz-apps@86000000
+[    0.000000] OF: reserved mem: 0x0000000086300000..0x00000000863fffff (1024 KiB) nomap non-reusable smem@86300000
+[    0.000000] OF: reserved mem: 0x0000000086400000..0x00000000864fffff (1024 KiB) nomap non-reusable hypervisor@86400000
+[    0.000000] OF: reserved mem: 0x0000000086500000..0x000000008667ffff (1536 KiB) nomap non-reusable tz@86500000
+[    0.000000] OF: reserved mem: 0x0000000086680000..0x00000000866fffff (512 KiB) nomap non-reusable reserved@86680000
+[    0.000000] OF: reserved mem: 0x0000000086700000..0x00000000867dffff (896 KiB) nomap non-reusable rmtfs@86700000
+[    0.000000] OF: reserved mem: 0x00000000867e0000..0x00000000867fffff (128 KiB) nomap non-reusable rfsa@867e0000
+[    0.000000] OF: reserved mem: 0x0000000085500000..0x0000000085ffffff (11264 KiB) nomap non-reusable tz-apps@85500000
+[    0.000000] OF: reserved mem: 0x000000008e000000..0x000000008e2a2fff (2700 KiB) nomap non-reusable framebuffer@8e000000
+[    0.000000] Zone ranges:
+[    0.000000]   Normal   [mem 0x0000000080000000-0x00000000ffffffff]
+[    0.000000] Movable zone start for each node
+[    0.000000] Early memory node ranges
+[    0.000000]   node   0: [mem 0x0000000080000000-0x00000000854fefff]
+[    0.000000]   node   0: [mem 0x00000000854ff000-0x00000000867fffff]
+[    0.000000]   node   0: [mem 0x0000000086800000-0x000000008dffffff]
+[    0.000000]   node   0: [mem 0x000000008e000000-0x000000008e2a2fff]
+[    0.000000]   node   0: [mem 0x000000008e2a3000-0x000000008e5fffff]
+[    0.000000]   node   0: [mem 0x000000008e600000-0x000000008e7fffff]
+[    0.000000]   node   0: [mem 0x000000008e800000-0x00000000ffffffff]
+[    0.000000] Initmem setup node 0 [mem 0x0000000080000000-0x00000000ffffffff]
+[    0.000000] percpu: Embedded 14 pages/cpu s28544 r0 d28800 u57344
+[    0.000000] pcpu-alloc: s28544 r0 d28800 u57344 alloc=14*4096
+[    0.000000] pcpu-alloc: [0] 0 [0] 1 [0] 2 [0] 3 
+[    0.000000] Detected VIPT I-cache on CPU0
+[    0.000000] CPU features: kernel page table isolation disabled by kernel configuration
+[    0.000000] alternatives: applying boot alternatives
+[    0.000000] Kernel command line: msm.skip_gpu=1 msm.separate_gpu_kms=1 panic=5 oops=panic printk.time=1 pocketboot.lab=a5-ramoops-cold
+[    0.000000] printk: log buffer data + meta data: 131072 + 458752 = 589824 bytes
+[    0.000000] Dentry cache hash table entries: 262144 (order: 9, 2097152 bytes, linear)
+[    0.000000] Inode-cache hash table entries: 131072 (order: 8, 1048576 bytes, linear)
+[    0.000000] software IO TLB: SWIOTLB bounce buffer size adjusted to 2MB
+[    0.000000] software IO TLB: area num 4.
+[    0.000000] software IO TLB: mapped [mem 0x00000000fd600000-0x00000000fd800000] (2MB)
+[    0.000000] Built 1 zonelists, mobility grouping on.  Total pages: 524288
+[    0.000000] mem auto-init: stack:all(zero), heap alloc:off, heap free:off
+[    0.000000] SLUB: HWalign=64, Order=0-3, MinObjects=0, CPUs=4, Nodes=1
+[    0.000000] rcu: Hierarchical RCU implementation.
+[    0.000000] rcu: RCU calculated value of scheduler-enlistment delay is 25 jiffies.
+[    0.000000] NR_IRQS: 64, nr_irqs: 64, preallocated irqs: 0
+[    0.000000] Root IRQ handler: gic_handle_irq
+[    0.000000] rcu: srcu_init: Setting srcu_struct sizes based on contention.
+[    0.000000] arch_timer: cp15 timer running at 19.20MHz (virt).
+[    0.000000] clocksource: arch_sys_counter: mask: 0xffffffffffffff max_cycles: 0x46d987e47, max_idle_ns: 440795202767 ns
+[    0.000000] sched_clock: 56 bits at 19MHz, resolution 52ns, wraps every 4398046511078ns
+[    0.000154] Console: colour dummy device 80x25
+[    0.000169] printk: legacy console [tty0] enabled
+[    0.000788] Calibrating delay loop (skipped), value calculated using timer frequency.. 38.40 BogoMIPS (lpj=76800)
+[    0.000821] pid_max: default: 32768 minimum: 301
+[    0.001037] Mount-cache hash table entries: 4096 (order: 3, 32768 bytes, linear)
+[    0.001081] Mountpoint-cache hash table entries: 4096 (order: 3, 32768 bytes, linear)
+[    0.001418] VFS: Finished mounting rootfs on nullfs
+[    0.002064] Pocketboot spin-table v1: persistent page at 0x00000000854ff000
+[    0.003039] rcu: Hierarchical SRCU implementation.
+[    0.003062] rcu: 	Max phase no-delay instances is 1000.
+[    0.003574] smp: Bringing up secondary CPUs ...
+[    0.004084] Detected VIPT I-cache on CPU1
+[    0.004242] CPU1: Booted secondary processor 0x0000000001 [0x410fd030]
+[    0.004765] Detected VIPT I-cache on CPU2
+[    0.004907] CPU2: Booted secondary processor 0x0000000002 [0x410fd030]
+[    0.005394] Detected VIPT I-cache on CPU3
+[    0.005528] CPU3: Booted secondary processor 0x0000000003 [0x410fd030]
+[    0.005621] smp: Brought up 1 node, 4 CPUs
+[    0.005699] SMP: Total of 4 processors activated.
+[    0.005714] CPU: All CPU(s) started at EL1
+[    0.005729] CPU features: detected: 32-bit EL0 Support
+[    0.005745] CPU features: detected: CRC32 instructions
+[    0.005798] alternatives: applying system-wide alternatives
+[    0.006696] Memory: 2014984K/2097152K available (5760K kernel code, 852K rwdata, 1712K rodata, 2624K init, 242K bss, 78904K reserved, 0K cma-reserved)
+[    0.007377] devtmpfs: initialized
+[    0.021207] clocksource: jiffies: mask: 0xffffffff max_cycles: 0xffffffff, max_idle_ns: 7645041785100000 ns
+[    0.021286] posixtimers hash table entries: 2048 (order: 3, 32768 bytes, linear)
+[    0.021407] futex hash table entries: 1024 (65536 bytes on 1 NUMA nodes, total 64 KiB, linear).
+[    0.022261] NET: Registered PF_NETLINK/PF_ROUTE protocol family
+[    0.022859] DMA: preallocated 256 KiB GFP_KERNEL pool for atomic allocations
+[    0.024535] ASID allocator initialised with 65536 entries
+[    0.025640] ramoops: uncorrectable error in header
+[    0.026058] ramoops: uncorrectable error in header
+[    0.026526] ramoops: uncorrectable error in header
+[    0.026912] ramoops: uncorrectable error in header
+[    0.027350] ramoops: uncorrectable error in header
+[    0.027726] ramoops: uncorrectable error in header
+[    0.028264] ramoops: uncorrectable error in header
+[    0.028790] ramoops: uncorrectable error in header
+[    0.029204] ramoops: uncorrectable error in header
+[    0.029608] ramoops: uncorrectable error in header
+[    0.040228] pstore: Using crash dump compression: deflate
+[    0.040253] printk: legacy console [ramoops-1] enabled
+[    0.068657] pstore: Registered ramoops as persistent store backend
+[    0.069061] ramoops: using 0x80000@0x9ff80000, ecc: 64
+[    0.078291] /soc@0/clock-controller@1800000: Fixed dependency cycle(s) with /soc@0/display-subsystem@1a00000/phy@1a98300
+[    0.078766] /soc@0/display-subsystem@1a00000/display-controller@1a01000: Fixed dependency cycle(s) with /soc@0/display-subsystem@1a00000/dsi@1a98000
+[    0.079212] /soc@0/display-subsystem@1a00000/dsi@1a98000: Fixed dependency cycle(s) with /soc@0/display-subsystem@1a00000/dsi@1a98000/panel@0
+[    0.079829] /soc@0/display-subsystem@1a00000/dsi@1a98000: Fixed dependency cycle(s) with /soc@0/display-subsystem@1a00000/display-controller@1a01000
+[    0.080308] /soc@0/display-subsystem@1a00000/dsi@1a98000/panel@0: Fixed dependency cycle(s) with /soc@0/display-subsystem@1a00000/dsi@1a98000
+[    0.080756] /soc@0/display-subsystem@1a00000/phy@1a98300: Fixed dependency cycle(s) with /soc@0/clock-controller@1800000
+[    0.081446] /soc@0/usb@78d9000: Fixed dependency cycle(s) with /soc@0/usb@78d9000/ulpi/phy
+[    0.081883] /soc@0/usb@78d9000/ulpi/phy: Fixed dependency cycle(s) with /soc@0/usb@78d9000
+[    0.082126] /soc@0/interrupt-controller@b000000: Fixed dependency cycle(s) with /soc@0/interrupt-controller@b000000
+[    0.086577] /soc@0/clock-controller@1800000: Fixed dependency cycle(s) with /soc@0/display-subsystem@1a00000/phy@1a98300
+[    0.090934] /soc@0/display-subsystem@1a00000/display-controller@1a01000: Fixed dependency cycle(s) with /soc@0/display-subsystem@1a00000/dsi@1a98000
+[    0.091447] /soc@0/display-subsystem@1a00000/dsi@1a98000: Fixed dependency cycle(s) with /soc@0/display-subsystem@1a00000/dsi@1a98000/panel@0
+[    0.092059] /soc@0/display-subsystem@1a00000/dsi@1a98000: Fixed dependency cycle(s) with /soc@0/display-subsystem@1a00000/display-controller@1a01000
+[    0.092508] /soc@0/display-subsystem@1a00000/dsi@1a98000/panel@0: Fixed dependency cycle(s) with /soc@0/display-subsystem@1a00000/dsi@1a98000
+[    0.096278] /soc@0/usb@78d9000: Fixed dependency cycle(s) with /soc@0/usb@78d9000/ulpi/phy
+[    0.096774] /soc@0/usb@78d9000/ulpi/phy: Fixed dependency cycle(s) with /soc@0/usb@78d9000
+[    0.103485] iommu: Default domain type: Translated
+[    0.103908] iommu: DMA domain TLB invalidation policy: strict mode
+[    0.105695] SCSI subsystem initialized
+[    0.106265] usbcore: registered new interface driver usbfs
+[    0.106526] usbcore: registered new interface driver hub
+[    0.106962] usbcore: registered new device driver usb
+[    0.107894] i2c-gpio i2c-muic: using lines 617 (SDA) and 618 (SCL)
+[    0.108791] i2c-gpio i2c-tkey: using lines 528 (SDA) and 529 (SCL)
+[    0.109543] i2c-gpio i2c-nfc: using lines 512 (SDA) and 513 (SCL)
+[    0.110395] qcom_scm: convention: smc arm 32
+[    0.136988] sm5502 0-0025: Device type: version: 0x0, vendor: 0x1
+[    0.140550] clocksource: Switched to clocksource arch_sys_counter
+[    0.147656] NET: Registered PF_UNIX/PF_LOCAL protocol family
+[    0.153655] workingset: timestamp_bits=62 (anon: 58) max_order=19 bucket_order=0 (anon: 0)
+[    0.178479] msm_serial 78b0000.serial: msm_serial: detected port #0
+[    0.178984] msm_serial 78b0000.serial: uartclk = 7372800
+[    0.179586] 78b0000.serial: ttyMSM0 at MMIO 0x78b0000 (irq = 31, base_baud = 460800) is a MSM
+[    0.180032] msm_serial: console setup on port #0
+[    0.180497] printk: legacy console [ttyMSM0] enabled
+[    0.218675] Unpacking initramfs...
+[    0.222242] msm_serial: driver initialized
+[    1.099827] qcom-iommu 1ef0000.iommu: iommu sec: pgtable size: 94208
+[    1.129090] platform 1a01000.display-controller: Adding to iommu group 0
+[    1.129703] /soc@0/display-subsystem@1a00000/display-controller@1a01000: Fixed dependency cycle(s) with /soc@0/display-subsystem@1a00000/dsi@1a98000
+[    1.135865] /soc@0/display-subsystem@1a00000/display-controller@1a01000: Fixed dependency cycle(s) with /soc@0/display-subsystem@1a00000/dsi@1a98000
+[    1.148747] /soc@0/display-subsystem@1a00000/dsi@1a98000: Fixed dependency cycle(s) with /soc@0/display-subsystem@1a00000/dsi@1a98000/panel@0
+[    1.161859] /soc@0/display-subsystem@1a00000/dsi@1a98000: Fixed dependency cycle(s) with /soc@0/display-subsystem@1a00000/display-controller@1a01000
+[    1.174655] /soc@0/display-subsystem@1a00000/dsi@1a98000/panel@0: Fixed dependency cycle(s) with /soc@0/display-subsystem@1a00000/dsi@1a98000
+[    1.194804] loop: module loaded
+[    1.200709] spmi_pmic_arb 200f000.spmi: PMIC arbiter version v2 (0x20010000)
+[    1.222392] input: pwm-vibrator as /devices/platform/vibrator/input/input0
+[    1.223221] i2c_qup 78b5000.i2c: using default clock-frequency 100000
+[    1.229426] i2c_qup 78b6000.i2c: using default clock-frequency 100000
+[    1.235835] i2c_qup 78b8000.i2c: using default clock-frequency 100000
+[    1.242292] i2c_qup 78b9000.i2c: using default clock-frequency 100000
+[    1.248756] i2c_qup 78ba000.i2c: using default clock-frequency 100000
+[    1.256562] rt5033 7-0034: Device found (rev. 6)
+[    1.264938] platform rt5033-charger: DMA mask not set
+[    1.265706] rt5033-led: Failed to locate of_node [id: -1]
+[    1.272275] input: pm8941_pwrkey as /devices/platform/soc@0/200f000.spmi/spmi-0/0-00/200f000.spmi:pmic@0:pon@800/200f000.spmi:pmic@0:pon@800:pwrkey/input/input1
+[    1.277215] input: pm8941_resin as /devices/platform/soc@0/200f000.spmi/spmi-0/0-00/200f000.spmi:pmic@0:pon@800/200f000.spmi:pmic@0:pon@800:resin/input/input2
+[    1.341455] clocksource: arch_mmio_counter: mask: 0xffffffffffffff max_cycles: 0x46d987e47, max_idle_ns: 440795202767 ns
+[    1.341917] arch-timer-mmio b020000.timer: mmio timer running at 19.20MHz (virt)
+[    1.375501] msm_mdp 1a01000.display-controller: No interconnect support may cause display underflows!
+[    1.383196] msm_hsusb 78d9000.usb: Failed to create device link (0x180) with supplier remoteproc for /soc@0/usb@78d9000/ulpi/phy
+[    1.386125] sdhci_msm 7864900.mmc: Got CD GPIO
+[    1.386658] tm2-touchkey 1-0020: failed to get regulators: -517
+[    1.401200] mms114 6-0048: Unable to get the IO regulator (-517)
+[    1.407997] tm2-touchkey 1-0020: failed to get regulators: -517
+[    1.409339] sdhci_msm 7864900.mmc: Got CD GPIO
+[    1.411267] s3: Bringing 0uV into 1250000-1250000uV
+[    1.411639] s4: Bringing 0uV into 1850000-1850000uV
+[    1.412280] mms114 6-0048: Unable to get the IO regulator (-517)
+[    1.412952] l2: Bringing 0uV into 1200000-1200000uV
+[    1.413522] l5: Bringing 0uV into 1800000-1800000uV
+[    1.413851] l6: Bringing 0uV into 1800000-1800000uV
+[    1.414084] l7: Bringing 0uV into 1800000-1800000uV
+[    1.414410] l8: Bringing 0uV into 2900000-2900000uV
+[    1.414659] l9: Bringing 0uV into 3300000-3300000uV
+[    1.415102] l11: Bringing 0uV into 2950000-2950000uV
+[    1.415343] l12: Bringing 0uV into 1800000-1800000uV
+[    1.415573] l13: Bringing 0uV into 3075000-3075000uV
+[    1.416436] l17: Bringing 0uV into 2850000-2850000uV
+[    1.452563] mmc0: SDHCI controller on 7824900.mmc [7824900.mmc] using ADMA
+[    1.456750] mmc1: SDHCI controller on 7864900.mmc [7864900.mmc] using ADMA
+[    1.571108] mmc1: new UHS-I speed SDR104 SDXC card at address aaaa
+[    1.571895] mmcblk1: mmc1:aaaa SR128 119 GiB
+[    1.575391] mmc0: Card appears overclocked; req 177770000 Hz, actual 177777777 Hz
+[    1.581269] mmc0: Card appears overclocked; req 177770000 Hz, actual 177777777 Hz
+[    1.589138] mmc0: new HS200 MMC card at address 0001
+[    1.596262] mmcblk0: mmc0:0001 Q313MB 14.7 GiB
+[    1.603555]  mmcblk0: p1 p2 p3 p4 p5 p6 p7 p8 p9 p10 p11 p12 p13 p14 p15 p16 p17 p18 p19 p20 p21 p22 p23 p24 p25 p26
+[    1.605523] GPT:Primary header thinks Alt. header is not at the end of the disk.
+[    1.612013] mmcblk0boot0: mmc0:0001 Q313MB 4.00 MiB
+[    1.615434] GPT:29337599 != 249737215
+[    1.623914] mmcblk0boot1: mmc0:0001 Q313MB 4.00 MiB
+[    1.627396] GPT:Alternate GPT header not at the end of the disk.
+[    1.627401] GPT:29337599 != 249737215
+[    1.627406] GPT: Use GNU Parted to correct GPT errors.
+[    1.627442]  mmcblk1: p1 p2 p3
+[    1.632204] mmcblk0rpmb: mmc0:0001 Q313MB 4.00 MiB, chardev (249:0)
+[    1.632713] input: tm2-touchkey as /devices/platform/i2c-tkey/i2c-1/1-0020/input/input5
+[    1.637807] input: MELFAS MMS345 Touchscreen as /devices/platform/soc@0/78b9000.i2c/i2c-6/6-0048/input/input6
+[    1.671459] /soc@0/display-subsystem@1a00000/dsi@1a98000: Fixed dependency cycle(s) with /soc@0/display-subsystem@1a00000/dsi@1a98000/panel@0
+[    1.678504] /soc@0/display-subsystem@1a00000/dsi@1a98000/panel@0: Fixed dependency cycle(s) with /soc@0/display-subsystem@1a00000/dsi@1a98000
+[    1.692023] msm_mdp 1a01000.display-controller: bound 1a98000.dsi (ops 0xffff8000806384a8)
+[    1.703955] msm_mdp 1a01000.display-controller: [drm:mdp5_kms_init] MDP5 version v1.6
+[    1.728680] msm_mdp 1a01000.display-controller: fall back to the other CTL category for INTF 1!
+[    1.730027] [drm] Initialized msm-kms 1.13.0 for 1a01000.display-controller on minor 0
+[    1.736891] gcc-msm8916 1800000.clock-controller: sync_state() pending due to chosen:framebuffer@8e000000
+[    1.745439] input: GPIO Buttons as /devices/platform/gpio-keys/input/input7
+[    1.754886] input: GPIO Hall Effect Sensor as /devices/platform/gpio-hall-sensor/input/input8
+[    1.761893] clk: Disabling unused clocks
+[    1.769749] PM: genpd: Disabling unused power domains
+[    1.775884] Freeing unused kernel memory: 2624K
+[    1.776517] Run /init as init process
+[    1.779451]   with arguments:
+[    1.779458]     /init
+[    1.779466]   with environment:
+[    1.779473]     HOME=/
+[    1.779480]     TERM=linux
+[    1.795608] msm_mdp 1a01000.display-controller: no GPU device was found
+[    1.798330] file system registered
+[    1.801787] read descriptors
+[    1.804806] read strings
+[    1.808483] read descriptors
+[    1.810631] read strings
+[    1.814035] Mass Storage Function, version: 2009/09/11
+[    1.815664] LUN: removable file: (no medium)
+[    1.821100] LUN: removable file: (no medium)
+[    1.825282] LUN: removable file: (no medium)
+[    1.829544] LUN: removable file: (no medium)
+[    1.833833] LUN: removable file: (no medium)
+[    1.838031] LUN: removable file: (no medium)
+[    1.842469] LUN: removable file: (no medium)
+[    1.846523] LUN: removable file: (no medium)
+[    1.851284] l13: voltage operation not allowed
+[    2.096617] mms114 6-0048: TSP FW Rev: bootloader 0x6 / core 0x26 / config 0x26
+[    2.299540] EXT4-fs (mmcblk1p2): orphan cleanup on readonly fs
+[    2.300708] EXT4-fs (mmcblk1p2): mounted filesystem 5077d4c6-b4a5-4429-af95-ee9691dbb6ca ro without journal. Quota mode: disabled.
+[    2.514892] [drm:mdp5_irq_error_handler] *ERROR* errors: 04000000
+[   17.492562] rt5033-charger rt5033-charger: USB mode. connector type: 5

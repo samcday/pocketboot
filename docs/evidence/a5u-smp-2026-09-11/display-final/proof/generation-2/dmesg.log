@@ -1,0 +1,1051 @@
+[    0.000000] Booting Linux on physical CPU 0x0000000000 [0x410fd030]
+[    0.000000] Linux version 7.1.0-rc6+ (sam@sam-desktop) (aarch64-linux-gnu-gcc (GCC) 16.1.1 20260501 (Red Hat Cross 16.1.1-1), GNU ld version 2.46-1.fc44) #56 SMP PREEMPT Fri Sep 11 18:35:00 AEST 2026
+[    0.000000] Machine model: Samsung Galaxy A5U (EUR)
+[    0.000000] OF: reserved mem: 0x000000008e600000..0x000000008e7fffff (2048 KiB) nomap non-reusable gps
+[    0.000000] OF: reserved mem: 0x000000009ff80000..0x000000009fffffff (512 KiB) map non-reusable ramoops@9ff80000
+[    0.000000] OF: reserved mem: 0x0000000086000000..0x00000000862fffff (3072 KiB) nomap non-reusable tz-apps@86000000
+[    0.000000] OF: reserved mem: 0x0000000086300000..0x00000000863fffff (1024 KiB) nomap non-reusable smem@86300000
+[    0.000000] OF: reserved mem: 0x0000000086400000..0x00000000864fffff (1024 KiB) nomap non-reusable hypervisor@86400000
+[    0.000000] OF: reserved mem: 0x0000000086500000..0x000000008667ffff (1536 KiB) nomap non-reusable tz@86500000
+[    0.000000] OF: reserved mem: 0x0000000086680000..0x00000000866fffff (512 KiB) nomap non-reusable reserved@86680000
+[    0.000000] OF: reserved mem: 0x0000000086700000..0x00000000867dffff (896 KiB) nomap non-reusable rmtfs@86700000
+[    0.000000] OF: reserved mem: 0x00000000867e0000..0x00000000867fffff (128 KiB) nomap non-reusable rfsa@867e0000
+[    0.000000] OF: reserved mem: 0x0000000085500000..0x0000000085ffffff (11264 KiB) nomap non-reusable tz-apps@85500000
+[    0.000000] OF: reserved mem: 0x000000008e000000..0x000000008e2a2fff (2700 KiB) nomap non-reusable framebuffer@8e000000
+[    0.000000] OF: reserved mem: 0x00000000854ff000..0x00000000854fffff (4 KiB) nomap non-reusable spin-table@854ff000
+[    0.000000] Zone ranges:
+[    0.000000]   Normal   [mem 0x0000000080000000-0x00000000ffffffff]
+[    0.000000] Movable zone start for each node
+[    0.000000] Early memory node ranges
+[    0.000000]   node   0: [mem 0x0000000080000000-0x00000000854fefff]
+[    0.000000]   node   0: [mem 0x00000000854ff000-0x00000000867fffff]
+[    0.000000]   node   0: [mem 0x0000000086800000-0x000000008dffffff]
+[    0.000000]   node   0: [mem 0x000000008e000000-0x000000008e2a2fff]
+[    0.000000]   node   0: [mem 0x000000008e2a3000-0x000000008e5fffff]
+[    0.000000]   node   0: [mem 0x000000008e600000-0x000000008e7fffff]
+[    0.000000]   node   0: [mem 0x000000008e800000-0x00000000ffffffff]
+[    0.000000] Initmem setup node 0 [mem 0x0000000080000000-0x00000000ffffffff]
+[    0.000000] percpu: Embedded 14 pages/cpu s28544 r0 d28800 u57344
+[    0.000000] pcpu-alloc: s28544 r0 d28800 u57344 alloc=14*4096
+[    0.000000] pcpu-alloc: [0] 0 [0] 1 [0] 2 [0] 3 
+[    0.000000] Detected VIPT I-cache on CPU0
+[    0.000000] CPU features: kernel page table isolation disabled by kernel configuration
+[    0.000000] alternatives: applying boot alternatives
+[    0.000000] Kernel command line: msm.skip_gpu=1 msm.separate_gpu_kms=1 panic=5 oops=panic printk.time=1 pocketboot.log=info pocketboot.drm_page_flips=16 drm.debug=0x6 pocketboot.lab=display-final-2
+[    0.000000] printk: log buffer data + meta data: 131072 + 458752 = 589824 bytes
+[    0.000000] Dentry cache hash table entries: 262144 (order: 9, 2097152 bytes, linear)
+[    0.000000] Inode-cache hash table entries: 131072 (order: 8, 1048576 bytes, linear)
+[    0.000000] software IO TLB: SWIOTLB bounce buffer size adjusted to 2MB
+[    0.000000] software IO TLB: area num 4.
+[    0.000000] software IO TLB: mapped [mem 0x00000000fd600000-0x00000000fd800000] (2MB)
+[    0.000000] Built 1 zonelists, mobility grouping on.  Total pages: 524288
+[    0.000000] mem auto-init: stack:all(zero), heap alloc:off, heap free:off
+[    0.000000] SLUB: HWalign=64, Order=0-3, MinObjects=0, CPUs=4, Nodes=1
+[    0.000000] rcu: Hierarchical RCU implementation.
+[    0.000000] rcu: RCU calculated value of scheduler-enlistment delay is 25 jiffies.
+[    0.000000] NR_IRQS: 64, nr_irqs: 64, preallocated irqs: 0
+[    0.000000] Root IRQ handler: gic_handle_irq
+[    0.000000] rcu: srcu_init: Setting srcu_struct sizes based on contention.
+[    0.000000] arch_timer: cp15 timer running at 19.20MHz (virt).
+[    0.000000] clocksource: arch_sys_counter: mask: 0xffffffffffffff max_cycles: 0x46d987e47, max_idle_ns: 440795202767 ns
+[    0.000000] sched_clock: 56 bits at 19MHz, resolution 52ns, wraps every 4398046511078ns
+[    0.000091] Console: colour dummy device 80x25
+[    0.000103] printk: legacy console [tty0] enabled
+[    0.000735] Calibrating delay loop (skipped), value calculated using timer frequency.. 38.40 BogoMIPS (lpj=76800)
+[    0.000768] pid_max: default: 32768 minimum: 301
+[    0.000988] Mount-cache hash table entries: 4096 (order: 3, 32768 bytes, linear)
+[    0.001027] Mountpoint-cache hash table entries: 4096 (order: 3, 32768 bytes, linear)
+[    0.001392] VFS: Finished mounting rootfs on nullfs
+[    0.002006] Pocketboot spin-table v1: persistent page at 0x00000000854ff000
+[    0.002937] rcu: Hierarchical SRCU implementation.
+[    0.002958] rcu: 	Max phase no-delay instances is 1000.
+[    0.003447] smp: Bringing up secondary CPUs ...
+[    0.003894] Detected VIPT I-cache on CPU1
+[    0.004043] CPU1: Booted secondary processor 0x0000000001 [0x410fd030]
+[    0.004545] Detected VIPT I-cache on CPU2
+[    0.004680] CPU2: Booted secondary processor 0x0000000002 [0x410fd030]
+[    0.005153] Detected VIPT I-cache on CPU3
+[    0.005281] CPU3: Booted secondary processor 0x0000000003 [0x410fd030]
+[    0.005372] smp: Brought up 1 node, 4 CPUs
+[    0.005451] SMP: Total of 4 processors activated.
+[    0.005466] CPU: All CPU(s) started at EL1
+[    0.005481] CPU features: detected: 32-bit EL0 Support
+[    0.005496] CPU features: detected: CRC32 instructions
+[    0.005548] alternatives: applying system-wide alternatives
+[    0.006436] Memory: 2014992K/2097152K available (5760K kernel code, 852K rwdata, 1712K rodata, 2624K init, 242K bss, 78896K reserved, 0K cma-reserved)
+[    0.007084] devtmpfs: initialized
+[    0.020875] clocksource: jiffies: mask: 0xffffffff max_cycles: 0xffffffff, max_idle_ns: 7645041785100000 ns
+[    0.020947] posixtimers hash table entries: 2048 (order: 3, 32768 bytes, linear)
+[    0.021047] futex hash table entries: 1024 (65536 bytes on 1 NUMA nodes, total 64 KiB, linear).
+[    0.022087] NET: Registered PF_NETLINK/PF_ROUTE protocol family
+[    0.022676] DMA: preallocated 256 KiB GFP_KERNEL pool for atomic allocations
+[    0.024315] ASID allocator initialised with 65536 entries
+[    0.025700] ramoops: error in header, 13
+[    0.026072] ramoops: error in header, 12
+[    0.026478] ramoops: error in header, 16
+[    0.026893] ramoops: error in header, 17
+[    0.027265] ramoops: error in header, 13
+[    0.027703] ramoops: error in header, 18
+[    0.028103] ramoops: error in header, 13
+[    0.028584] ramoops: error in header, 22
+[    0.028990] ramoops: error in header, 16
+[    0.029354] ramoops: error in header, 12
+[    0.029732] ramoops: error in header, 13
+[    0.030098] ramoops: error in header, 12
+[    0.030500] ramoops: error in header, 15
+[    0.030869] ramoops: error in header, 13
+[    0.031202] ramoops: error in header, 9
+[    0.031564] ramoops: error in header, 12
+[    0.031989] ramoops: error in header, 18
+[    0.032419] ramoops: error in header, 17
+[    0.032786] ramoops: error in header, 12
+[    0.033101] ramoops: error in header, 7
+[    0.033455] ramoops: error in header, 11
+[    0.033728] ramoops: error in header, 3
+[    0.034053] ramoops: error in header, 7
+[    0.034425] ramoops: error in header, 13
+[    0.034894] ramoops: error in header, 22
+[    0.035200] ramoops: error in header, 6
+[    0.035573] ramoops: error in header, 13
+[    0.035939] ramoops: error in header, 12
+[    0.036384] ramoops: error in header, 19
+[    0.036730] ramoops: error in header, 10
+[    0.387268] pstore: Using crash dump compression: deflate
+[    0.387292] printk: legacy console [ramoops-1] enabled
+[    0.420526] pstore: Registered ramoops as persistent store backend
+[    0.420746] ramoops: using 0x80000@0x9ff80000, ecc: 64
+[    0.430070] /soc@0/clock-controller@1800000: Fixed dependency cycle(s) with /soc@0/display-subsystem@1a00000/phy@1a98300
+[    0.430357] /soc@0/display-subsystem@1a00000/display-controller@1a01000: Fixed dependency cycle(s) with /soc@0/display-subsystem@1a00000/dsi@1a98000
+[    0.430802] /soc@0/display-subsystem@1a00000/dsi@1a98000: Fixed dependency cycle(s) with /soc@0/display-subsystem@1a00000/dsi@1a98000/panel@0
+[    0.431237] /soc@0/display-subsystem@1a00000/dsi@1a98000: Fixed dependency cycle(s) with /soc@0/display-subsystem@1a00000/display-controller@1a01000
+[    0.431713] /soc@0/display-subsystem@1a00000/dsi@1a98000/panel@0: Fixed dependency cycle(s) with /soc@0/display-subsystem@1a00000/dsi@1a98000
+[    0.432140] /soc@0/display-subsystem@1a00000/phy@1a98300: Fixed dependency cycle(s) with /soc@0/clock-controller@1800000
+[    0.432817] /soc@0/usb@78d9000: Fixed dependency cycle(s) with /soc@0/usb@78d9000/ulpi/phy
+[    0.433250] /soc@0/usb@78d9000/ulpi/phy: Fixed dependency cycle(s) with /soc@0/usb@78d9000
+[    0.433695] /soc@0/interrupt-controller@b000000: Fixed dependency cycle(s) with /soc@0/interrupt-controller@b000000
+[    0.438025] /soc@0/clock-controller@1800000: Fixed dependency cycle(s) with /soc@0/display-subsystem@1a00000/phy@1a98300
+[    0.442146] /soc@0/display-subsystem@1a00000/display-controller@1a01000: Fixed dependency cycle(s) with /soc@0/display-subsystem@1a00000/dsi@1a98000
+[    0.442834] /soc@0/display-subsystem@1a00000/dsi@1a98000: Fixed dependency cycle(s) with /soc@0/display-subsystem@1a00000/dsi@1a98000/panel@0
+[    0.443270] /soc@0/display-subsystem@1a00000/dsi@1a98000: Fixed dependency cycle(s) with /soc@0/display-subsystem@1a00000/display-controller@1a01000
+[    0.443718] /soc@0/display-subsystem@1a00000/dsi@1a98000/panel@0: Fixed dependency cycle(s) with /soc@0/display-subsystem@1a00000/dsi@1a98000
+[    0.447431] /soc@0/usb@78d9000: Fixed dependency cycle(s) with /soc@0/usb@78d9000/ulpi/phy
+[    0.447927] /soc@0/usb@78d9000/ulpi/phy: Fixed dependency cycle(s) with /soc@0/usb@78d9000
+[    0.454553] iommu: Default domain type: Translated
+[    0.454793] iommu: DMA domain TLB invalidation policy: strict mode
+[    0.457013] SCSI subsystem initialized
+[    0.457387] usbcore: registered new interface driver usbfs
+[    0.457644] usbcore: registered new interface driver hub
+[    0.458083] usbcore: registered new device driver usb
+[    0.458977] i2c-gpio i2c-muic: using lines 617 (SDA) and 618 (SCL)
+[    0.459877] i2c-gpio i2c-tkey: using lines 528 (SDA) and 529 (SCL)
+[    0.460592] i2c-gpio i2c-nfc: using lines 512 (SDA) and 513 (SCL)
+[    0.461489] qcom_scm: convention: smc arm 32
+[    0.486922] sm5502 0-0025: Device type: version: 0x0, vendor: 0x1
+[    0.490333] clocksource: Switched to clocksource arch_sys_counter
+[    0.498189] NET: Registered PF_UNIX/PF_LOCAL protocol family
+[    0.507395] workingset: timestamp_bits=62 (anon: 58) max_order=19 bucket_order=0 (anon: 0)
+[    0.515674] msm_serial 78b0000.serial: msm_serial: detected port #0
+[    0.515982] msm_serial 78b0000.serial: uartclk = 3686400
+[    0.516739] 78b0000.serial: ttyMSM0 at MMIO 0x78b0000 (irq = 31, base_baud = 230400) is a MSM
+[    0.517003] msm_serial: console setup on port #0
+[    0.517441] printk: legacy console [ttyMSM0] enabled
+[    1.502550] msm_serial: driver initialized
+[    1.506317] [drm:msm_drm_register] init
+[    1.506443] [drm:msm_mdp_register] 
+[    1.506599] [drm:msm_dsi_register] 
+[    1.530854] platform 1a01000.display-controller: Adding to iommu group 0
+[    1.531282] /soc@0/display-subsystem@1a00000/display-controller@1a01000: Fixed dependency cycle(s) with /soc@0/display-subsystem@1a00000/dsi@1a98000
+[    1.537207] [drm:mdss_runtime_resume] 
+[    1.537650] /soc@0/display-subsystem@1a00000/display-controller@1a01000: Fixed dependency cycle(s) with /soc@0/display-subsystem@1a00000/dsi@1a98000
+[    1.550369] [drm:mdss_runtime_suspend] 
+[    1.550677] /soc@0/display-subsystem@1a00000/dsi@1a98000: Fixed dependency cycle(s) with /soc@0/display-subsystem@1a00000/dsi@1a98000/panel@0
+[    1.563617] /soc@0/display-subsystem@1a00000/dsi@1a98000: Fixed dependency cycle(s) with /soc@0/display-subsystem@1a00000/display-controller@1a01000
+[    1.576406] /soc@0/display-subsystem@1a00000/dsi@1a98000/panel@0: Fixed dependency cycle(s) with /soc@0/display-subsystem@1a00000/dsi@1a98000
+[    1.589708] [drm:mdss_runtime_resume] 
+[    1.591391] [drm:mdss_runtime_suspend] 
+[    1.596428] loop: module loaded
+[    1.602411] spmi_pmic_arb 200f000.spmi: PMIC arbiter version v2 (0x20010000)
+[    1.638198] input: pwm-vibrator as /devices/platform/vibrator/input/input0
+[    1.639199] i2c_qup 78b5000.i2c: using default clock-frequency 100000
+[    1.644966] i2c_qup 78b6000.i2c: using default clock-frequency 100000
+[    1.651738] i2c_qup 78b8000.i2c: using default clock-frequency 100000
+[    1.657929] i2c_qup 78b9000.i2c: using default clock-frequency 100000
+[    1.664657] i2c_qup 78ba000.i2c: using default clock-frequency 100000
+[    1.671221] rt5033 7-0034: Device found (rev. 6)
+[    1.678698] platform rt5033-charger: DMA mask not set
+[    1.681307] rt5033-led: Failed to locate of_node [id: -1]
+[    1.687988] input: pm8941_pwrkey as /devices/platform/soc@0/200f000.spmi/spmi-0/0-00/200f000.spmi:pmic@0:pon@800/200f000.spmi:pmic@0:pon@800:pwrkey/input/input1
+[    1.692821] input: pm8941_resin as /devices/platform/soc@0/200f000.spmi/spmi-0/0-00/200f000.spmi:pmic@0:pon@800/200f000.spmi:pmic@0:pon@800:resin/input/input2
+[    1.739147] clocksource: arch_mmio_counter: mask: 0xffffffffffffff max_cycles: 0x46d987e47, max_idle_ns: 440795202767 ns
+[    1.739595] arch-timer-mmio b020000.timer: mmio timer running at 19.20MHz (virt)
+[    1.772397] [drm:mdss_runtime_resume] 
+[    1.772655] [drm:mdp5_dev_probe] 
+[    1.772686] msm_mdp 1a01000.display-controller: No interconnect support may cause display underflows!
+[    1.773179] [drm:mdp5_dev_probe] skipping lut
+[    1.773205] [drm:mdp5_dev_probe] skipping tbu
+[    1.773227] [drm:mdp5_dev_probe] skipping tbu_rt
+[    1.774834] [drm:mdss_runtime_suspend] 
+[    1.790107] [drm:mdss_runtime_resume] 
+[    1.790791] [drm:mdss_runtime_suspend] 
+[    1.790866] [drm:mdss_runtime_resume] 
+[    1.794348] [drm:mdss_runtime_suspend] 
+[    1.806658] [drm:mdss_runtime_resume] 
+[    1.810348] [drm:mdss_runtime_suspend] 
+[    1.823190] msm_hsusb 78d9000.usb: Failed to create device link (0x180) with supplier remoteproc for /soc@0/usb@78d9000/ulpi/phy
+[    1.824477] [drm:mdss_runtime_resume] 
+[    1.826366] [drm:mdss_runtime_suspend] 
+[    1.827644] sdhci_msm 7864900.mmc: Got CD GPIO
+[    1.841345] tm2-touchkey 1-0020: failed to get regulators: -517
+[    1.842145] mms114 6-0048: Unable to get the IO regulator (-517)
+[    1.846503] [drm:mdss_runtime_resume] 
+[    1.847064] [drm:mdss_runtime_suspend] 
+[    1.855131] s3: Bringing 0uV into 1250000-1250000uV
+[    1.856133] s4: Bringing 0uV into 1850000-1850000uV
+[    1.859691] l2: Bringing 0uV into 1200000-1200000uV
+[    1.862548] tm2-touchkey 1-0020: failed to get regulators: -517
+[    1.864202] l5: Bringing 0uV into 1800000-1800000uV
+[    1.869191] mms114 6-0048: Unable to get the IO regulator (-517)
+[    1.871045] sdhci_msm 7864900.mmc: Got CD GPIO
+[    1.874729] l6: Bringing 0uV into 1800000-1800000uV
+[    1.879484] [drm:mdss_runtime_resume] 
+[    1.885847] l7: Bringing 0uV into 1800000-1800000uV
+[    1.890416] [drm:pll_28nm_register] 0
+[    1.894867] l8: Bringing 0uV into 2900000-2900000uV
+[    1.895017] [drm:dsi_pll_28nm_clk_recalc_rate] returning vco rate = 1056000000
+[    1.899699] l9: Bringing 0uV into 3300000-3300000uV
+[    1.902397] [drm:mdss_runtime_suspend] 
+[    1.904792] l11: Bringing 0uV into 2950000-2950000uV
+[    1.910467] l12: Bringing 0uV into 1800000-1800000uV
+[    1.915056] l13: Bringing 0uV into 3075000-3075000uV
+[    1.920477] l17: Bringing 0uV into 2850000-2850000uV
+[    1.942347] mmc0: SDHCI controller on 7824900.mmc [7824900.mmc] using ADMA
+[    2.021164] mmc0: Card appears overclocked; req 177770000 Hz, actual 177777777 Hz
+[    2.021606] mmc0: Card appears overclocked; req 177770000 Hz, actual 177777777 Hz
+[    2.028642] mmc0: new HS200 MMC card at address 0001
+[    2.035952] mmcblk0: mmc0:0001 Q313MB 14.7 GiB
+[    2.043262]  mmcblk0: p1 p2 p3 p4 p5 p6 p7 p8 p9 p10 p11 p12 p13 p14 p15 p16 p17 p18 p19 p20 p21 p22 p23 p24 p25 p26
+[    2.048469] mmcblk0boot0: mmc0:0001 Q313MB 4.00 MiB
+[    2.056383] mmcblk0boot1: mmc0:0001 Q313MB 4.00 MiB
+[    2.060786] mmcblk0rpmb: mmc0:0001 Q313MB 4.00 MiB, chardev (249:0)
+[    2.070496] input: tm2-touchkey as /devices/platform/i2c-tkey/i2c-1/1-0020/input/input5
+[    2.073651] sdhci_msm 7864900.mmc: Got CD GPIO
+[    2.074557] input: MELFAS MMS345 Touchscreen as /devices/platform/soc@0/78b9000.i2c/i2c-6/6-0048/input/input6
+[    2.084102] [drm:mdss_runtime_resume] 
+[    2.084560] [drm:dsi_dev_probe] 
+[    2.084584] [drm:dsi_dev_probe] dsi probed=(____ptrval____)
+[    2.084651] [drm:msm_dsi_host_init] dsi_get_config: Version 3:10030001
+[    2.085129] [drm:msm_dsi_host_init] Dsi Host 0 initialized
+[    2.085301] /soc@0/display-subsystem@1a00000/dsi@1a98000: Fixed dependency cycle(s) with /soc@0/display-subsystem@1a00000/dsi@1a98000/panel@0
+[    2.093901] /soc@0/display-subsystem@1a00000/dsi@1a98000/panel@0: Fixed dependency cycle(s) with /soc@0/display-subsystem@1a00000/dsi@1a98000
+[    2.107279] msm_mdp 1a01000.display-controller: bound 1a98000.dsi (ops 0xffff8000806384a8)
+[    2.119145] [drm:mdp5_runtime_resume] 
+[    2.119169] [drm:mdp5_runtime_resume] 
+[    2.119191] [drm:mdp5_runtime_suspend] 
+[    2.119206] [drm:mdp5_runtime_suspend] 
+[    2.119240] msm_mdp 1a01000.display-controller: [drm:mdp5_kms_init] MDP5 version v1.6
+[    2.126540] mmc1: SDHCI controller on 7864900.mmc [7864900.mmc] using ADMA
+[    2.126774] [drm:mdp5_cfg_init] MDP5: msm8x16 hw config selected
+[    2.135301] [drm:mdp5_ctlm_init] Pool of 5 CTLs created.
+[    2.136047] [drm:mdp5_runtime_resume] 
+[    2.136066] [drm:mdp5_runtime_resume] 
+[    2.152117] [drm:mdp5_runtime_suspend] 
+[    2.152135] [drm:mdp5_runtime_suspend] 
+[    2.152169] msm_mdp 1a01000.display-controller: fall back to the other CTL category for INTF 1!
+[    2.152592] [drm:mdp5_ctlm_request] CTL 0 allocated
+[    2.152857] [drm:mdp5_runtime_resume] 
+[    2.152876] [drm:mdp5_runtime_resume] 
+[    2.152898] [drm:mdp5_runtime_suspend] 
+[    2.152913] [drm:mdp5_runtime_suspend] 
+[    2.153113] [drm:mdp5_runtime_resume] 
+[    2.153132] [drm:mdp5_runtime_resume] 
+[    2.153184] [drm:mdp5_runtime_suspend] 
+[    2.153200] [drm:mdp5_runtime_suspend] 
+[    2.153581] msm_mdp 1a01000.display-controller: [drm:drm_sysfs_connector_add] [CONNECTOR:36:DSI-1] adding connector to sysfs
+[    2.153701] msm_mdp 1a01000.display-controller: [drm:drm_sysfs_connector_hotplug_event] [CONNECTOR:36:DSI-1] generating connector hotplug event
+[    2.153742] [drm] Initialized msm-kms 1.13.0 for 1a01000.display-controller on minor 0
+[    2.160086] [drm:dsi_host_attach] id=0
+[    2.162494] [drm:mdss_runtime_suspend] 
+[    2.176387] gcc-msm8916 1800000.clock-controller: sync_state() pending due to chosen:framebuffer@8e000000
+[    2.177625] input: GPIO Buttons as /devices/platform/gpio-keys/input/input7
+[    2.185830] input: GPIO Hall Effect Sensor as /devices/platform/gpio-hall-sensor/input/input8
+[    2.193033] clk: Disabling unused clocks
+[    2.200618] [drm:mdss_runtime_resume] 
+[    2.200898] PM: genpd: Disabling unused power domains
+[    2.202345] [drm:mdss_runtime_suspend] 
+[    2.206885] Freeing unused kernel memory: 2624K
+[    2.207344] Run /init as init process
+[    2.210441]   with arguments:
+[    2.210448]     /init
+[    2.210456]   with environment:
+[    2.210463]     HOME=/
+[    2.210470]     TERM=linux
+[    2.213564]  INFO pocketboot: starting up
+[    2.214634]  INFO pocketboot::reaper: PID 1 reaper thread spawned thread="pocketboot-reaper"
+[    2.219115]  INFO pocketboot::getty: getty supervisor spawned pid=105 tty="tty0" baud="115200"
+[    2.227190]  INFO pocketboot::getty: getty supervisor spawned pid=107 tty="ttyMSM0" baud="115200"
+[    2.243073]  INFO pocketboot: detected boot state reboot_mode=None hard_reset=Some(true) power_key=Some(false) charger=Some(true) warm_reset=Some(false) source_backend="qcom-pon" source_detail="root=samsung,a5u-eur|qcom,msm8916 spmi=0-00 pmic=qcom,pm8916 pmic_node=qcom,pm8916|qcom,spmi-pmic pon=qcom,pm8916-pon pon_node=qcom,pm8916-pon gen=gen1 pon_base=0x800 pon_reason1=0x11 pon_reasons=hard-reset|usb-charger warm_reset_reason1=0x00 warm_reset_reason2=0x00 soft_rb_spare=0x00 reboot_mode=none"
+[    2.266359]  INFO pocketboot: selected device serialno serialno=cd0ee037
+[    2.288146]  INFO pocketboot::battery: battery watcher thread spawned thread="pocketboot-battery"
+[    2.294682]  INFO pocketboot::ui: UI thread spawned thread="pocketboot-ui"
+[    2.294859] msm_mdp 1a01000.display-controller: no GPU device was found
+[    2.303326]  INFO pocketboot::gadget: USB gadget thread spawned thread="pocketboot-fastboot" mode="fastboot"
+[    2.305130] file system registered
+[    2.305419] read descriptors
+[    2.305439] read strings
+[    2.306070] read descriptors
+[    2.306086] read strings
+[    2.306719]  INFO pocketboot::gadget: USB gadget registered path=/sys/kernel/config/usb_gadget/gadgetry-most-foul0
+[    2.306772] Mass Storage Function, version: 2009/09/11
+[    2.306779] LUN: removable file: (no medium)
+[    2.307031] LUN: removable file: (no medium)
+[    2.307260] LUN: removable file: (no medium)
+[    2.307494] LUN: removable file: (no medium)
+[    2.307750] LUN: removable file: (no medium)
+[    2.307977] LUN: removable file: (no medium)
+[    2.308201] LUN: removable file: (no medium)
+[    2.308424] LUN: removable file: (no medium)
+[    2.308729]  INFO pocketboot::gadget: UMS function registered path=/sys/kernel/config/usb_gadget/gadgetry-most-foul0/functions/mass_storage.pocketboot-ums luns=8
+[    2.309945]  INFO pocketboot::battery: battery state updated percent=99 status=Charging
+[    2.310578] l13: voltage operation not allowed
+[    2.316355]  INFO pocketboot: CDC-ACM disabled param="pocketboot.acm"
+[    2.316601]  INFO pocketboot::gadget: USB gadget bound udc=ci_hdrc.0
+[    2.329727] msm_mdp 1a01000.display-controller: [drm:drm_helper_probe_single_connector_modes] [CONNECTOR:36:DSI-1]
+[    2.335176]  INFO pocketboot: waiting for UI boot selection or fastboot exit
+[    2.437923] msm_mdp 1a01000.display-controller: [drm:drm_helper_probe_single_connector_modes] [CONNECTOR:36:DSI-1] status updated from unknown to connected
+[    2.438048] msm_mdp 1a01000.display-controller: [drm:drm_sysfs_hotplug_event] generating hotplug event
+[    2.438160] msm_mdp 1a01000.display-controller: [drm:drm_helper_probe_single_connector_modes] [CONNECTOR:36:DSI-1] probed modes:
+[    2.438190] msm_mdp 1a01000.display-controller: [drm:drm_helper_probe_single_connector_modes] Probed mode: "720x1280": 60 80117 720 800 896 1024 1280 1294 1296 1304 0x48 0x0
+[    2.438442] msm_mdp 1a01000.display-controller: [drm:drm_mode_addfb2] [FB:62]
+[    2.438512] msm_mdp 1a01000.display-controller: [drm:drm_mode_addfb2] [FB:63]
+[    2.438571] msm_mdp 1a01000.display-controller: [drm:drm_mode_addfb2] [FB:64]
+[    2.455509]  INFO pocketboot::ui: POCKETBOOT_UI_SCALE scale_factor_milli=1000 physical_width=720 physical_height=1280 logical_width=720 logical_height=1280
+[    2.476475] mmc1: new UHS-I speed SDR104 SDXC card at address aaaa
+[    2.477744] mmcblk1: mmc1:aaaa SR128 119 GiB
+[    2.487159] GPT:Primary header thinks Alt. header is not at the end of the disk.
+[    2.487590] GPT:29337599 != 249737215
+[    2.493840] GPT:Alternate GPT header not at the end of the disk.
+[    2.497577] GPT:29337599 != 249737215
+[    2.503468] GPT: Use GNU Parted to correct GPT errors.
+[    2.507226]  mmcblk1: p1 p2 p3
+[    2.602377]  INFO pocketboot::adb: adb function enabled
+[    2.602712]  INFO pocketboot::fastboot: fastboot function enabled
+[    2.730400] mms114 6-0048: TSP FW Rev: bootloader 0x6 / core 0x26 / config 0x26
+[    2.730916]  INFO pocketboot::ui: opened touch input device path=/dev/input/event4
+[    2.802255]  INFO pocketboot::adb: adb connection opened version=16777217 max_payload=1048576
+[    2.834415]  INFO pocketboot::ui: opened hardware button input device path=/dev/input/event5
+[    2.862426]  INFO pocketboot::ui: opened hardware button input device path=/dev/input/event2
+[    2.862737]  INFO pocketboot::ui: opened hardware button input device path=/dev/input/event1
+[    2.890450]  INFO pocketboot::ui: starting frankenSlint UI path=/dev/dri/card0 connector=DSI-1 width=720 height=1280 format=DrmFourcc(XR24)
+[    2.915255] msm_mdp 1a01000.display-controller: [drm:drm_mode_setcrtc] [CRTC:61:crtc-0]
+[    2.915312] msm_mdp 1a01000.display-controller: [drm:drm_mode_setcrtc] [CONNECTOR:36:DSI-1]
+[    2.915395] [drm:mdp5_plane_atomic_check] plane-0: check (0 -> 0)
+[    2.915442] [drm:mdp5_pipe_assign] DMA0: alloc SMP blocks
+[    2.915460] [drm:mdp5_smp_assign] DMA0[0]: request 1 SMP blocks
+[    2.915479] [drm:mdp5_pipe_assign] DMA0: assign to plane plane-0 for caps 0
+[    2.915499] [drm:mdp5_crtc_atomic_check] crtc-0: check
+[    2.915515] [drm:mdp5_mixer_assign] assigning Layer Mixer 0 to crtc crtc-0
+[    2.915533] [drm:mdp5_crtc_atomic_check] crtc-0: assign pipe plane-0 on stage=1
+[    2.915622] [drm:mdss_runtime_resume] 
+[    2.915683] [drm:mdp5_runtime_resume] 
+[    2.915701] [drm:mdp5_runtime_resume] 
+[    2.915726] [drm:mdp5_smp_prepare_commit] assign DMA0:0, 1 blks
+[    2.915746] [drm:mdp5_smp_prepare_commit] assign DMA0:1, 1 blks
+[    2.915764] [drm:mdp5_smp_prepare_commit] assign DMA0:2, 1 blks
+[    2.915791] [drm:mdp5_crtc_mode_set_nofb] crtc-0: set mode: "720x1280": 60 80117 720 800 896 1024 1280 1294 1296 1304 0x48 0x0
+[    2.915821] [drm:dsi_mgr_bridge_mode_set] set mode: "720x1280": 60 80117 720 800 896 1024 1280 1294 1296 1304 0x48 0x0
+[    2.915848] [drm:mdp5_crtc_atomic_begin] crtc-0: begin
+[    2.915863] [drm:mdp5_plane_atomic_update] plane-0: update
+[    2.915880] [drm:mdp5_plane_mode_set] plane-0: FB[63] 0,0,720,1280 -> CRTC[61] 0,0,720,1280
+[    2.915905] [drm:mdp5_plane_mode_set] scale config = 0
+[    2.915927] [drm:mdp5_crtc_atomic_flush] crtc-0: event: (____ptrval____)
+[    2.915953] [drm:mdp5_ctl_blend] lm0: blend config = 0x00040000. ext_cfg = 0x00000000
+[    2.915970] [drm:mdp5_crtc_atomic_flush] crtc-0: flush=00000840
+[    2.915990] [drm:mdp5_crtc_atomic_enable] crtc-0
+[    2.916013] [drm:mdp5_crtc_mode_set_nofb] crtc-0: set mode: "720x1280": 60 80117 720 800 896 1024 1280 1294 1296 1304 0x48 0x0
+[    2.916043] [drm:dsi_mgr_bridge_pre_enable] id=0
+[    2.916058] [drm:dsi_mgr_bridge_pre_enable] id=0
+[    2.916072] [drm:msm_dsi_host_reset_phy] 
+[    2.917191] [drm:dsi_calc_pclk] pclk=80117000, bclk=60087750
+[    2.917279] [drm:dsi_28nm_phy_enable] 
+[    2.917297] [drm:msm_dsi_dphy_timing_calc] PHY timings: 28, 4, 0, 139, 30, 20, 68, 70, 24, 32, 25
+[    2.917394] [drm:dsi_link_clk_set_rate_6g] Set clk rates: pclk=80117000, byteclk=60087750
+[    2.917482] [drm:dsi_pll_28nm_clk_set_rate] refclk_cfg = 1
+[    2.917500] [drm:dsi_pll_28nm_clk_set_rate] div_fb = 12518
+[    2.917515] [drm:dsi_pll_28nm_clk_set_rate] frac_n_value = 33947
+[    2.917529] [drm:dsi_pll_28nm_clk_set_rate] Generated VCO Clock: 480691200
+[    2.917544] [drm:dsi_pll_28nm_clk_set_rate] sdm_cfg0=0
+[    2.917558] [drm:dsi_pll_28nm_clk_set_rate] sdm_cfg1=75
+[    2.917572] [drm:dsi_pll_28nm_clk_set_rate] sdm_cfg2=155
+[    2.917587] [drm:dsi_pll_28nm_clk_set_rate] sdm_cfg3=132
+[    2.917601] [drm:dsi_pll_28nm_clk_set_rate] cal_cfg10=224, cal_cfg11=1
+[    2.918623] [drm:dsi_pll_28nm_clk_recalc_rate] sdm_dc_off = 11
+[    2.918641] [drm:dsi_pll_28nm_clk_recalc_rate] sdm_freq_seed = 33947
+[    2.918656] [drm:dsi_pll_28nm_clk_recalc_rate] vco rate = 480690820
+[    2.918671] [drm:dsi_pll_28nm_clk_recalc_rate] returning vco rate = 480690820
+[    2.918743] [drm:dsi_pll_28nm_vco_prepare_lp] id=0
+[    2.919279] [drm:dsi_pll_28nm_vco_prepare_lp] DSI PLL is locked
+[    2.919294] [drm:dsi_pll_28nm_vco_prepare_lp] DSI PLL lock success
+[    2.919318] [drm:msm_dsi_host_power_on] 
+[    2.935216]  INFO pocketboot: local flash settled elapsed_ms=599 disks=4 partitions=29 events=4 snapshot_changes=1 snapshot=mmcblk0:179:0:30777344[mmcblk0p1|mmcblk0p10|mmcblk0p11|mmcblk0p12|mmcblk0p13|mmcblk0p14|mmcblk0p15|mmcblk0p16|mmcblk0p17|mmcblk0p18|mmcblk0p19|mmcblk0p2|mmcblk0p20|mmcblk0p21|mmcblk0p22|mmcblk0p23|mmcblk0p24|mmcblk0p25|mmcblk0p26|mmcblk0p3|mmcblk0p4|mmcblk0p5|mmcblk0p6|mmcblk0p7|mmcblk0p8|mmcblk0p9],mmcblk0boot0:179:8:8192[-],mmcblk0boot1:179:16:8192[-],mmcblk1:179:24:249737216[mmcblk1p1|mmcblk1p2|mmcblk1p3]
+[    2.942345] [drm:dsi_intr_ctrl] intr=2220aa02 enable=1
+[    2.959893] [drm:msm_dsi_host_power_on] lane number=4
+[    2.969933]  INFO pocketboot: block devices found count=12
+[    2.981504]  INFO pocketboot: block device device=loop0 description=loop0 dev=7:0 size=0 sectors/0 MiB rw
+[    2.987180]  INFO pocketboot: block device device=loop1 description=loop1 dev=7:1 size=0 sectors/0 MiB rw
+[    2.996800]  INFO pocketboot: block device device=loop2 description=loop2 dev=7:2 size=0 sectors/0 MiB rw
+[    3.006351]  INFO pocketboot: block device device=loop3 description=loop3 dev=7:3 size=0 sectors/0 MiB rw
+[    3.010340] [drm:dsi_link_clk_set_rate_6g] Set clk rates: pclk=80117000, byteclk=60087750
+[    3.015477]  INFO pocketboot: block device device=loop4 description=loop4 dev=7:4 size=0 sectors/0 MiB rw
+[    3.015519] [drm:dsi_pll_28nm_clk_set_rate] refclk_cfg = 1
+[    3.025024]  INFO pocketboot: block device device=loop5 description=loop5 dev=7:5 size=0 sectors/0 MiB rw
+[    3.025178] [drm:dsi_pll_28nm_clk_set_rate] div_fb = 12518
+[    3.034591]  INFO pocketboot: block device device=loop6 description=loop6 dev=7:6 size=0 sectors/0 MiB rw
+[    3.034739] [drm:dsi_pll_28nm_clk_set_rate] frac_n_value = 33947
+[    3.044122]  INFO pocketboot: block device device=loop7 description=loop7 dev=7:7 size=0 sectors/0 MiB rw
+[    3.044273] [drm:dsi_pll_28nm_clk_set_rate] Generated VCO Clock: 480691200
+[    3.053707]  INFO pocketboot: block device device=mmcblk0 description=mmcblk0 dev=179:0 size=30777344 sectors/15028 MiB rw
+[    3.053815] [drm:dsi_pll_28nm_clk_set_rate] sdm_cfg0=0
+[    3.063270]  INFO pocketboot: block partition partition=mmcblk0p1 description=mmcblk0p1 dev=179:1 size=30720 sectors/15 MiB rw partname=apnhlos
+[    3.063374] [drm:dsi_pll_28nm_clk_set_rate] sdm_cfg1=75
+[    3.074196]  INFO pocketboot: block partition partition=mmcblk0p10 description=mmcblk0p10 dev=259:2 size=32 sectors/0 MiB rw partname=sec
+[    3.074308] [drm:dsi_pll_28nm_clk_set_rate] sdm_cfg2=155
+[    3.086970]  INFO pocketboot: block partition partition=mmcblk0p11 description=mmcblk0p11 dev=259:3 size=21536 sectors/10 MiB rw partname=pad
+[    3.087072] [drm:dsi_pll_28nm_clk_set_rate] sdm_cfg3=132
+[    3.099459]  INFO pocketboot: block partition partition=mmcblk0p12 description=mmcblk0p12 dev=259:4 size=20480 sectors/10 MiB rw partname=param
+[    3.099574] [drm:dsi_pll_28nm_clk_set_rate] cal_cfg10=224, cal_cfg11=1
+[    3.112139]  INFO pocketboot: block partition partition=mmcblk0p13 description=mmcblk0p13 dev=259:5 size=28672 sectors/14 MiB rw partname=efs
+[    3.113258] [drm:dsi_pll_28nm_clk_recalc_rate] sdm_dc_off = 11
+[    3.124808]  INFO pocketboot: block partition partition=mmcblk0p14 description=mmcblk0p14 dev=259:6 size=6144 sectors/3 MiB rw partname=modemst1
+[    3.125110] [drm:dsi_pll_28nm_clk_recalc_rate] sdm_freq_seed = 33947
+[    3.137655]  INFO pocketboot: block partition partition=mmcblk0p15 description=mmcblk0p15 dev=259:7 size=6144 sectors/3 MiB rw partname=modemst2
+[    3.137775] [drm:dsi_pll_28nm_clk_recalc_rate] vco rate = 480690820
+[    3.150673]  INFO pocketboot: block partition partition=mmcblk0p16 description=mmcblk0p16 dev=259:8 size=26624 sectors/13 MiB rw partname=boot
+[    3.150796] [drm:dsi_pll_28nm_clk_recalc_rate] returning vco rate = 480690820
+[    3.163604]  INFO pocketboot: block partition partition=mmcblk0p17 description=mmcblk0p17 dev=259:9 size=30720 sectors/15 MiB rw partname=recovery
+[    3.163758] [drm:dsi_intr_ctrl] intr=2220aa02 enable=1
+[    3.176194]  INFO pocketboot: block partition partition=mmcblk0p18 description=mmcblk0p18 dev=259:10 size=10242 sectors/5 MiB rw partname=fota
+[    3.176330] [drm:dsi_host_irq] isr=0x2220aa03, id=0
+[    3.189302]  INFO pocketboot: block partition partition=mmcblk0p19 description=mmcblk0p19 dev=259:11 size=14318 sectors/6 MiB rw partname=backup
+[    3.189424] [drm:dsi_cmds2buf_tx] ret=47
+[    3.202060]  INFO pocketboot: block partition partition=mmcblk0p2 description=mmcblk0p2 dev=179:2 size=117632 sectors/57 MiB rw partname=modem
+[    3.202184] [drm:dsi_intr_ctrl] intr=2220aa00 enable=0
+[    3.215167]  INFO pocketboot: block partition partition=mmcblk0p20 description=mmcblk0p20 dev=259:12 size=6144 sectors/3 MiB rw partname=fsc
+[    3.215476] [drm:dsi_link_clk_set_rate_6g] Set clk rates: pclk=80117000, byteclk=60087750
+[    3.227765]  INFO pocketboot: block partition partition=mmcblk0p21 description=mmcblk0p21 dev=259:13 size=16 sectors/0 MiB rw partname=ssd
+[    3.227924] [drm:dsi_pll_28nm_clk_set_rate] refclk_cfg = 1
+[    3.240532]  INFO pocketboot: block partition partition=mmcblk0p22 description=mmcblk0p22 dev=259:14 size=16384 sectors/8 MiB rw partname=persist
+[    3.240639] [drm:dsi_pll_28nm_clk_set_rate] div_fb = 12518
+[    3.252763]  INFO pocketboot: block partition partition=mmcblk0p23 description=mmcblk0p23 dev=259:15 size=18432 sectors/9 MiB rw partname=persdata
+[    3.252873] [drm:dsi_pll_28nm_clk_set_rate] frac_n_value = 33947
+[    3.265858]  INFO pocketboot: block partition partition=mmcblk0p24 description=mmcblk0p24 dev=259:16 size=204800 sectors/100 MiB rw
+[    3.265986] [drm:dsi_pll_28nm_clk_set_rate] Generated VCO Clock: 480691200
+[    3.278880]  INFO pocketboot: block partition partition=mmcblk0p25 description=mmcblk0p25 dev=259:17 size=1024000 sectors/500 MiB rw
+[    3.278995] [drm:dsi_pll_28nm_clk_set_rate] sdm_cfg0=0
+[    3.290620]  INFO pocketboot: block partition partition=mmcblk0p26 description=mmcblk0p26 dev=259:18 size=29169664 sectors/14243 MiB rw
+[    3.290718] [drm:dsi_pll_28nm_clk_set_rate] sdm_cfg1=75
+[    3.302874] [drm:dsi_pll_28nm_clk_set_rate] sdm_cfg2=155
+[    3.302890] [drm:dsi_pll_28nm_clk_set_rate] sdm_cfg3=132
+[    3.302905] [drm:dsi_pll_28nm_clk_set_rate] cal_cfg10=224, cal_cfg11=1
+[    3.303927] [drm:dsi_pll_28nm_clk_recalc_rate] sdm_dc_off = 11
+[    3.303942] [drm:dsi_pll_28nm_clk_recalc_rate] sdm_freq_seed = 33947
+[    3.303957] [drm:dsi_pll_28nm_clk_recalc_rate] vco rate = 480690820
+[    3.303972] [drm:dsi_pll_28nm_clk_recalc_rate] returning vco rate = 480690820
+[    3.304017] [drm:dsi_intr_ctrl] intr=2220aa02 enable=1
+[    3.304052] [drm:dsi_host_irq] isr=0x2220aa03, id=0
+[    3.304077] [drm:dsi_cmds2buf_tx] ret=50
+[    3.304095] [drm:dsi_intr_ctrl] intr=2220aa00 enable=0
+[    3.304117] [drm:dsi_link_clk_set_rate_6g] Set clk rates: pclk=80117000, byteclk=60087750
+[    3.304182] [drm:dsi_pll_28nm_clk_set_rate] refclk_cfg = 1
+[    3.304199] [drm:dsi_pll_28nm_clk_set_rate] div_fb = 12518
+[    3.304213] [drm:dsi_pll_28nm_clk_set_rate] frac_n_value = 33947
+[    3.304227] [drm:dsi_pll_28nm_clk_set_rate] Generated VCO Clock: 480691200
+[    3.304242] [drm:dsi_pll_28nm_clk_set_rate] sdm_cfg0=0
+[    3.304256] [drm:dsi_pll_28nm_clk_set_rate] sdm_cfg1=75
+[    3.304270] [drm:dsi_pll_28nm_clk_set_rate] sdm_cfg2=155
+[    3.304283] [drm:dsi_pll_28nm_clk_set_rate] sdm_cfg3=132
+[    3.304297] [drm:dsi_pll_28nm_clk_set_rate] cal_cfg10=224, cal_cfg11=1
+[    3.304333]  INFO pocketboot: block partition partition=mmcblk0p3 description=mmcblk0p3 dev=179:3 size=1024 sectors/0 MiB rw partname=sbl1
+[    3.305318] [drm:dsi_pll_28nm_clk_recalc_rate] sdm_dc_off = 11
+[    3.314945] [drm:dsi_pll_28nm_clk_recalc_rate] sdm_freq_seed = 33947
+[    3.314966] [drm:dsi_pll_28nm_clk_recalc_rate] vco rate = 480690820
+[    3.314981] [drm:dsi_pll_28nm_clk_recalc_rate] returning vco rate = 480690820
+[    3.315033] [drm:dsi_intr_ctrl] intr=2220aa02 enable=1
+[    3.315067] [drm:dsi_host_irq] isr=0x2220aa03, id=0
+[    3.315092] [drm:dsi_cmds2buf_tx] ret=50
+[    3.315110] [drm:dsi_intr_ctrl] intr=2220aa00 enable=0
+[    3.315117]  INFO pocketboot: block partition partition=mmcblk0p4 description=mmcblk0p4 dev=179:4 size=64 sectors/0 MiB rw partname=ddr
+[    3.315420]  INFO pocketboot: block partition partition=mmcblk0p5 description=mmcblk0p5 dev=179:5 size=4096 sectors/2 MiB rw partname=aboot
+[    3.326868] [drm:dsi_link_clk_set_rate_6g] Set clk rates: pclk=80117000, byteclk=60087750
+[    3.339216]  INFO pocketboot: block partition partition=mmcblk0p6 description=mmcblk0p6 dev=179:6 size=1024 sectors/0 MiB rw partname=rpm
+[    3.339566] [drm:dsi_pll_28nm_clk_set_rate] refclk_cfg = 1
+[    3.351726]  INFO pocketboot: block partition partition=mmcblk0p7 description=mmcblk0p7 dev=179:7 size=1024 sectors/0 MiB rw partname=qsee
+[    3.351845] [drm:dsi_pll_28nm_clk_set_rate] div_fb = 12518
+[    3.364231]  INFO pocketboot: block partition partition=mmcblk0p8 description=mmcblk0p8 dev=259:0 size=1024 sectors/0 MiB rw partname=qhee
+[    3.364331] [drm:dsi_pll_28nm_clk_set_rate] frac_n_value = 33947
+[    3.376542]  INFO pocketboot: block partition partition=mmcblk0p9 description=mmcblk0p9 dev=259:1 size=6144 sectors/3 MiB rw partname=fsg
+[    3.376659] [drm:dsi_pll_28nm_clk_set_rate] Generated VCO Clock: 480691200
+[    3.388959]  INFO pocketboot: block device device=mmcblk0boot0 description=mmcblk0boot0 dev=179:8 size=8192 sectors/4 MiB ro
+[    3.389078] [drm:dsi_pll_28nm_clk_set_rate] sdm_cfg0=0
+[    3.401368]  INFO pocketboot: block device device=mmcblk0boot1 description=mmcblk0boot1 dev=179:16 size=8192 sectors/4 MiB ro
+[    3.401481] [drm:dsi_pll_28nm_clk_set_rate] sdm_cfg1=75
+[    3.412658]  INFO pocketboot: block device device=mmcblk1 description=mmcblk1 dev=179:24 size=249737216 sectors/121942 MiB rw
+[    3.412765] [drm:dsi_pll_28nm_clk_set_rate] sdm_cfg2=155
+[    3.423845]  INFO pocketboot: block partition partition=mmcblk1p1 description=mmcblk1p1 dev=179:25 size=1026048 sectors/501 MiB rw
+[    3.423962] [drm:dsi_pll_28nm_clk_set_rate] sdm_cfg3=132
+[    3.435130]  INFO pocketboot: block partition partition=mmcblk1p2 description=mmcblk1p2 dev=179:26 size=2097152 sectors/1024 MiB rw
+[    3.435255] [drm:dsi_pll_28nm_clk_set_rate] cal_cfg10=224, cal_cfg11=1
+[    3.446768]  INFO pocketboot: block partition partition=mmcblk1p3 description=mmcblk1p3 dev=179:27 size=26212319 sectors/12798 MiB rw
+[    3.447886] [drm:dsi_pll_28nm_clk_recalc_rate] sdm_dc_off = 11
+[    3.459002] [drm:dsi_pll_28nm_clk_recalc_rate] sdm_freq_seed = 33947
+[    3.459018] [drm:dsi_pll_28nm_clk_recalc_rate] vco rate = 480690820
+[    3.459033] [drm:dsi_pll_28nm_clk_recalc_rate] returning vco rate = 480690820
+[    3.459094] [drm:dsi_intr_ctrl] intr=2220aa02 enable=1
+[    3.459133] [drm:dsi_host_irq] isr=0x2220aa03, id=0
+[    3.459159] [drm:dsi_cmds2buf_tx] ret=50
+[    3.459177] [drm:dsi_intr_ctrl] intr=2220aa00 enable=0
+[    3.459202] [drm:dsi_link_clk_set_rate_6g] Set clk rates: pclk=80117000, byteclk=60087750
+[    3.459284] [drm:dsi_pll_28nm_clk_set_rate] refclk_cfg = 1
+[    3.459301] [drm:dsi_pll_28nm_clk_set_rate] div_fb = 12518
+[    3.459315] [drm:dsi_pll_28nm_clk_set_rate] frac_n_value = 33947
+[    3.459329] [drm:dsi_pll_28nm_clk_set_rate] Generated VCO Clock: 480691200
+[    3.459344] [drm:dsi_pll_28nm_clk_set_rate] sdm_cfg0=0
+[    3.459357] [drm:dsi_pll_28nm_clk_set_rate] sdm_cfg1=75
+[    3.459371] [drm:dsi_pll_28nm_clk_set_rate] sdm_cfg2=155
+[    3.459385] [drm:dsi_pll_28nm_clk_set_rate] sdm_cfg3=132
+[    3.459399] [drm:dsi_pll_28nm_clk_set_rate] cal_cfg10=224, cal_cfg11=1
+[    3.460424] [drm:dsi_pll_28nm_clk_recalc_rate] sdm_dc_off = 11
+[    3.460441] [drm:dsi_pll_28nm_clk_recalc_rate] sdm_freq_seed = 33947
+[    3.460455] [drm:dsi_pll_28nm_clk_recalc_rate] vco rate = 480690820
+[    3.460470] [drm:dsi_pll_28nm_clk_recalc_rate] returning vco rate = 480690820
+[    3.460529] [drm:dsi_intr_ctrl] intr=2220aa02 enable=1
+[    3.460571] [drm:dsi_host_irq] isr=0x2220aa03, id=0
+[    3.460609] [drm:dsi_cmds2buf_tx] ret=50
+[    3.460635] [drm:dsi_intr_ctrl] intr=2220aa00 enable=0
+[    3.460664] [drm:dsi_link_clk_set_rate_6g] Set clk rates: pclk=80117000, byteclk=60087750
+[    3.460729] [drm:dsi_pll_28nm_clk_set_rate] refclk_cfg = 1
+[    3.460746] [drm:dsi_pll_28nm_clk_set_rate] div_fb = 12518
+[    3.460761] [drm:dsi_pll_28nm_clk_set_rate] frac_n_value = 33947
+[    3.460775] [drm:dsi_pll_28nm_clk_set_rate] Generated VCO Clock: 480691200
+[    3.460790] [drm:dsi_pll_28nm_clk_set_rate] sdm_cfg0=0
+[    3.460803] [drm:dsi_pll_28nm_clk_set_rate] sdm_cfg1=75
+[    3.460817] [drm:dsi_pll_28nm_clk_set_rate] sdm_cfg2=155
+[    3.460831] [drm:dsi_pll_28nm_clk_set_rate] sdm_cfg3=132
+[    3.460845] [drm:dsi_pll_28nm_clk_set_rate] cal_cfg10=224, cal_cfg11=1
+[    3.461866] [drm:dsi_pll_28nm_clk_recalc_rate] sdm_dc_off = 11
+[    3.461884] [drm:dsi_pll_28nm_clk_recalc_rate] sdm_freq_seed = 33947
+[    3.461898] [drm:dsi_pll_28nm_clk_recalc_rate] vco rate = 480690820
+[    3.461913] [drm:dsi_pll_28nm_clk_recalc_rate] returning vco rate = 480690820
+[    3.461953] [drm:dsi_intr_ctrl] intr=2220aa02 enable=1
+[    3.461986] [drm:dsi_host_irq] isr=0x2220aa03, id=0
+[    3.462065] [drm:dsi_cmds2buf_tx] ret=50
+[    3.462085] [drm:dsi_intr_ctrl] intr=2220aa00 enable=0
+[    3.462107] [drm:dsi_link_clk_set_rate_6g] Set clk rates: pclk=80117000, byteclk=60087750
+[    3.462172] [drm:dsi_pll_28nm_clk_set_rate] refclk_cfg = 1
+[    3.462188] [drm:dsi_pll_28nm_clk_set_rate] div_fb = 12518
+[    3.462202] [drm:dsi_pll_28nm_clk_set_rate] frac_n_value = 33947
+[    3.462216] [drm:dsi_pll_28nm_clk_set_rate] Generated VCO Clock: 480691200
+[    3.462237] [drm:dsi_pll_28nm_clk_set_rate] sdm_cfg0=0
+[    3.462257] [drm:dsi_pll_28nm_clk_set_rate] sdm_cfg1=75
+[    3.462272] [drm:dsi_pll_28nm_clk_set_rate] sdm_cfg2=155
+[    3.462286] [drm:dsi_pll_28nm_clk_set_rate] sdm_cfg3=132
+[    3.462299] [drm:dsi_pll_28nm_clk_set_rate] cal_cfg10=224, cal_cfg11=1
+[    3.463320] [drm:dsi_pll_28nm_clk_recalc_rate] sdm_dc_off = 11
+[    3.463338] [drm:dsi_pll_28nm_clk_recalc_rate] sdm_freq_seed = 33947
+[    3.463353] [drm:dsi_pll_28nm_clk_recalc_rate] vco rate = 480690820
+[    3.463367] [drm:dsi_pll_28nm_clk_recalc_rate] returning vco rate = 480690820
+[    3.463411] [drm:dsi_intr_ctrl] intr=2220aa02 enable=1
+[    3.463456] [drm:dsi_host_irq] isr=0x2220aa03, id=0
+[    3.463511] [drm:dsi_cmds2buf_tx] ret=50
+[    3.463530] [drm:dsi_intr_ctrl] intr=2220aa00 enable=0
+[    3.463552] [drm:dsi_link_clk_set_rate_6g] Set clk rates: pclk=80117000, byteclk=60087750
+[    3.463618] [drm:dsi_pll_28nm_clk_set_rate] refclk_cfg = 1
+[    3.463634] [drm:dsi_pll_28nm_clk_set_rate] div_fb = 12518
+[    3.463649] [drm:dsi_pll_28nm_clk_set_rate] frac_n_value = 33947
+[    3.463664] [drm:dsi_pll_28nm_clk_set_rate] Generated VCO Clock: 480691200
+[    3.463678] [drm:dsi_pll_28nm_clk_set_rate] sdm_cfg0=0
+[    3.463707] [drm:dsi_pll_28nm_clk_set_rate] sdm_cfg1=75
+[    3.463721] [drm:dsi_pll_28nm_clk_set_rate] sdm_cfg2=155
+[    3.463735] [drm:dsi_pll_28nm_clk_set_rate] sdm_cfg3=132
+[    3.463749] [drm:dsi_pll_28nm_clk_set_rate] cal_cfg10=224, cal_cfg11=1
+[    3.464769] [drm:dsi_pll_28nm_clk_recalc_rate] sdm_dc_off = 11
+[    3.464785] [drm:dsi_pll_28nm_clk_recalc_rate] sdm_freq_seed = 33947
+[    3.464800] [drm:dsi_pll_28nm_clk_recalc_rate] vco rate = 480690820
+[    3.464814] [drm:dsi_pll_28nm_clk_recalc_rate] returning vco rate = 480690820
+[    3.464858] [drm:dsi_intr_ctrl] intr=2220aa02 enable=1
+[    3.464890] [drm:dsi_host_irq] isr=0x2220aa03, id=0
+[    3.464945] [drm:dsi_cmds2buf_tx] ret=50
+[    3.464964] [drm:dsi_intr_ctrl] intr=2220aa00 enable=0
+[    3.464987] [drm:dsi_link_clk_set_rate_6g] Set clk rates: pclk=80117000, byteclk=60087750
+[    3.465056] [drm:dsi_pll_28nm_clk_set_rate] refclk_cfg = 1
+[    3.465072] [drm:dsi_pll_28nm_clk_set_rate] div_fb = 12518
+[    3.465086] [drm:dsi_pll_28nm_clk_set_rate] frac_n_value = 33947
+[    3.465100] [drm:dsi_pll_28nm_clk_set_rate] Generated VCO Clock: 480691200
+[    3.465115] [drm:dsi_pll_28nm_clk_set_rate] sdm_cfg0=0
+[    3.465128] [drm:dsi_pll_28nm_clk_set_rate] sdm_cfg1=75
+[    3.465142] [drm:dsi_pll_28nm_clk_set_rate] sdm_cfg2=155
+[    3.465156] [drm:dsi_pll_28nm_clk_set_rate] sdm_cfg3=132
+[    3.465170] [drm:dsi_pll_28nm_clk_set_rate] cal_cfg10=224, cal_cfg11=1
+[    3.466191] [drm:dsi_pll_28nm_clk_recalc_rate] sdm_dc_off = 11
+[    3.466208] [drm:dsi_pll_28nm_clk_recalc_rate] sdm_freq_seed = 33947
+[    3.466222] [drm:dsi_pll_28nm_clk_recalc_rate] vco rate = 480690820
+[    3.466237] [drm:dsi_pll_28nm_clk_recalc_rate] returning vco rate = 480690820
+[    3.466277] [drm:dsi_intr_ctrl] intr=2220aa02 enable=1
+[    3.466309] [drm:dsi_host_irq] isr=0x2220aa03, id=0
+[    3.466373] [drm:dsi_cmds2buf_tx] ret=49
+[    3.466392] [drm:dsi_intr_ctrl] intr=2220aa00 enable=0
+[    3.466415] [drm:dsi_link_clk_set_rate_6g] Set clk rates: pclk=80117000, byteclk=60087750
+[    3.466481] [drm:dsi_pll_28nm_clk_set_rate] refclk_cfg = 1
+[    3.466497] [drm:dsi_pll_28nm_clk_set_rate] div_fb = 12518
+[    3.466513] [drm:dsi_pll_28nm_clk_set_rate] frac_n_value = 33947
+[    3.466527] [drm:dsi_pll_28nm_clk_set_rate] Generated VCO Clock: 480691200
+[    3.466542] [drm:dsi_pll_28nm_clk_set_rate] sdm_cfg0=0
+[    3.466556] [drm:dsi_pll_28nm_clk_set_rate] sdm_cfg1=75
+[    3.466569] [drm:dsi_pll_28nm_clk_set_rate] sdm_cfg2=155
+[    3.466583] [drm:dsi_pll_28nm_clk_set_rate] sdm_cfg3=132
+[    3.466597] [drm:dsi_pll_28nm_clk_set_rate] cal_cfg10=224, cal_cfg11=1
+[    3.467617] [drm:dsi_pll_28nm_clk_recalc_rate] sdm_dc_off = 11
+[    3.467635] [drm:dsi_pll_28nm_clk_recalc_rate] sdm_freq_seed = 33947
+[    3.467649] [drm:dsi_pll_28nm_clk_recalc_rate] vco rate = 480690820
+[    3.467663] [drm:dsi_pll_28nm_clk_recalc_rate] returning vco rate = 480690820
+[    3.467705] [drm:dsi_intr_ctrl] intr=2220aa02 enable=1
+[    3.467737] [drm:dsi_host_irq] isr=0x2220aa03, id=0
+[    3.467788] [drm:dsi_cmds2buf_tx] ret=50
+[    3.467808] [drm:dsi_intr_ctrl] intr=2220aa00 enable=0
+[    3.467830] [drm:dsi_link_clk_set_rate_6g] Set clk rates: pclk=80117000, byteclk=60087750
+[    3.467895] [drm:dsi_pll_28nm_clk_set_rate] refclk_cfg = 1
+[    3.467911] [drm:dsi_pll_28nm_clk_set_rate] div_fb = 12518
+[    3.467925] [drm:dsi_pll_28nm_clk_set_rate] frac_n_value = 33947
+[    3.467939] [drm:dsi_pll_28nm_clk_set_rate] Generated VCO Clock: 480691200
+[    3.467954] [drm:dsi_pll_28nm_clk_set_rate] sdm_cfg0=0
+[    3.467967] [drm:dsi_pll_28nm_clk_set_rate] sdm_cfg1=75
+[    3.467981] [drm:dsi_pll_28nm_clk_set_rate] sdm_cfg2=155
+[    3.467995] [drm:dsi_pll_28nm_clk_set_rate] sdm_cfg3=132
+[    3.468009] [drm:dsi_pll_28nm_clk_set_rate] cal_cfg10=224, cal_cfg11=1
+[    3.469030] [drm:dsi_pll_28nm_clk_recalc_rate] sdm_dc_off = 11
+[    3.469044] [drm:dsi_pll_28nm_clk_recalc_rate] sdm_freq_seed = 33947
+[    3.469060] [drm:dsi_pll_28nm_clk_recalc_rate] vco rate = 480690820
+[    3.469074] [drm:dsi_pll_28nm_clk_recalc_rate] returning vco rate = 480690820
+[    3.469115] [drm:dsi_intr_ctrl] intr=2220aa02 enable=1
+[    3.469146] [drm:dsi_host_irq] isr=0x2220aa03, id=0
+[    3.469170] [drm:dsi_cmds2buf_tx] ret=50
+[    3.469187] [drm:dsi_intr_ctrl] intr=2220aa00 enable=0
+[    3.469208] [drm:dsi_link_clk_set_rate_6g] Set clk rates: pclk=80117000, byteclk=60087750
+[    3.469270] [drm:dsi_pll_28nm_clk_set_rate] refclk_cfg = 1
+[    3.469286] [drm:dsi_pll_28nm_clk_set_rate] div_fb = 12518
+[    3.469301] [drm:dsi_pll_28nm_clk_set_rate] frac_n_value = 33947
+[    3.469315] [drm:dsi_pll_28nm_clk_set_rate] Generated VCO Clock: 480691200
+[    3.469330] [drm:dsi_pll_28nm_clk_set_rate] sdm_cfg0=0
+[    3.469343] [drm:dsi_pll_28nm_clk_set_rate] sdm_cfg1=75
+[    3.469357] [drm:dsi_pll_28nm_clk_set_rate] sdm_cfg2=155
+[    3.469371] [drm:dsi_pll_28nm_clk_set_rate] sdm_cfg3=132
+[    3.469385] [drm:dsi_pll_28nm_clk_set_rate] cal_cfg10=224, cal_cfg11=1
+[    3.470405] [drm:dsi_pll_28nm_clk_recalc_rate] sdm_dc_off = 11
+[    3.470423] [drm:dsi_pll_28nm_clk_recalc_rate] sdm_freq_seed = 33947
+[    3.470438] [drm:dsi_pll_28nm_clk_recalc_rate] vco rate = 480690820
+[    3.470453] [drm:dsi_pll_28nm_clk_recalc_rate] returning vco rate = 480690820
+[    3.470492] [drm:dsi_intr_ctrl] intr=2220aa02 enable=1
+[    3.470521] [drm:dsi_host_irq] isr=0x2220aa03, id=0
+[    3.470545] [drm:dsi_cmds2buf_tx] ret=50
+[    3.470562] [drm:dsi_intr_ctrl] intr=2220aa00 enable=0
+[    3.470583] [drm:dsi_link_clk_set_rate_6g] Set clk rates: pclk=80117000, byteclk=60087750
+[    3.470644] [drm:dsi_pll_28nm_clk_set_rate] refclk_cfg = 1
+[    3.470660] [drm:dsi_pll_28nm_clk_set_rate] div_fb = 12518
+[    3.470674] [drm:dsi_pll_28nm_clk_set_rate] frac_n_value = 33947
+[    3.470688] [drm:dsi_pll_28nm_clk_set_rate] Generated VCO Clock: 480691200
+[    3.470703] [drm:dsi_pll_28nm_clk_set_rate] sdm_cfg0=0
+[    3.470717] [drm:dsi_pll_28nm_clk_set_rate] sdm_cfg1=75
+[    3.470731] [drm:dsi_pll_28nm_clk_set_rate] sdm_cfg2=155
+[    3.470745] [drm:dsi_pll_28nm_clk_set_rate] sdm_cfg3=132
+[    3.470759] [drm:dsi_pll_28nm_clk_set_rate] cal_cfg10=224, cal_cfg11=1
+[    3.471780] [drm:dsi_pll_28nm_clk_recalc_rate] sdm_dc_off = 11
+[    3.471795] [drm:dsi_pll_28nm_clk_recalc_rate] sdm_freq_seed = 33947
+[    3.471809] [drm:dsi_pll_28nm_clk_recalc_rate] vco rate = 480690820
+[    3.471823] [drm:dsi_pll_28nm_clk_recalc_rate] returning vco rate = 480690820
+[    3.471864] [drm:dsi_intr_ctrl] intr=2220aa02 enable=1
+[    3.471895] [drm:dsi_host_irq] isr=0x2220aa03, id=0
+[    3.471921] [drm:dsi_cmds2buf_tx] ret=50
+[    3.471940] [drm:dsi_intr_ctrl] intr=2220aa00 enable=0
+[    3.471970] [drm:dsi_link_clk_set_rate_6g] Set clk rates: pclk=80117000, byteclk=60087750
+[    3.472038] [drm:dsi_pll_28nm_clk_set_rate] refclk_cfg = 1
+[    3.472054] [drm:dsi_pll_28nm_clk_set_rate] div_fb = 12518
+[    3.472074] [drm:dsi_pll_28nm_clk_set_rate] frac_n_value = 33947
+[    3.472090] [drm:dsi_pll_28nm_clk_set_rate] Generated VCO Clock: 480691200
+[    3.472104] [drm:dsi_pll_28nm_clk_set_rate] sdm_cfg0=0
+[    3.472118] [drm:dsi_pll_28nm_clk_set_rate] sdm_cfg1=75
+[    3.472132] [drm:dsi_pll_28nm_clk_set_rate] sdm_cfg2=155
+[    3.472163] [drm:dsi_pll_28nm_clk_set_rate] sdm_cfg3=132
+[    3.472179] [drm:dsi_pll_28nm_clk_set_rate] cal_cfg10=224, cal_cfg11=1
+[    3.473200] [drm:dsi_pll_28nm_clk_recalc_rate] sdm_dc_off = 11
+[    3.473216] [drm:dsi_pll_28nm_clk_recalc_rate] sdm_freq_seed = 33947
+[    3.473231] [drm:dsi_pll_28nm_clk_recalc_rate] vco rate = 480690820
+[    3.473246] [drm:dsi_pll_28nm_clk_recalc_rate] returning vco rate = 480690820
+[    3.473288] [drm:dsi_intr_ctrl] intr=2220aa02 enable=1
+[    3.473319] [drm:dsi_host_irq] isr=0x2220aa03, id=0
+[    3.473425] [drm:dsi_cmds2buf_tx] ret=50
+[    3.473446] [drm:dsi_intr_ctrl] intr=2220aa00 enable=0
+[    3.477138]  INFO pocketboot::bootflow: mounted boot partition candidate disk=mmcblk0 partition=mmcblk0p24 role="esp" path=/dev/mmcblk0p24 mount=/run/pocketboot/boot/esp-mmcblk0p24 fstype="vfat"
+[    3.510237]  INFO pocketboot::bootflow: mounted boot partition candidate disk=mmcblk1 partition=mmcblk1p1 role="esp" path=/dev/mmcblk1p1 mount=/run/pocketboot/boot/esp-mmcblk1p1 fstype="vfat"
+[    3.535500] EXT4-fs (mmcblk1p2): orphan cleanup on readonly fs
+[    3.536622] EXT4-fs (mmcblk1p2): mounted filesystem 5077d4c6-b4a5-4429-af95-ee9691dbb6ca ro without journal. Quota mode: disabled.
+[    3.540776]  INFO pocketboot::bootflow: mounted boot partition candidate disk=mmcblk1 partition=mmcblk1p2 role="xbootldr" path=/dev/mmcblk1p2 mount=/run/pocketboot/boot/xbootldr-mmcblk1p2 fstype="ext4"
+[    3.566814]  INFO pocketboot: boot entries discovered count=1
+[    3.570228]  INFO pocketboot: boot entry index=0 id=ostree-1.conf title="Fedora Linux 44-a5u-test (phosh) (ostree:0)" version="7.2.0-0.rc1.15.msm8916.fc44.aarch64" architecture="" role=Xbootldr disk=mmcblk1 partition=mmcblk1p2 source=/run/pocketboot/boot/xbootldr-mmcblk1p2/loader/entries/ostree-1.conf preferred=false directly_bootable=true
+[    3.584417]  INFO pocketboot: boot discovery complete; holding for fastboot or UI selection
+[    3.594344] [drm:dsi_link_clk_set_rate_6g] Set clk rates: pclk=80117000, byteclk=60087750
+[    3.605990] [drm:dsi_pll_28nm_clk_set_rate] refclk_cfg = 1
+[    3.606008] [drm:dsi_pll_28nm_clk_set_rate] div_fb = 12518
+[    3.606023] [drm:dsi_pll_28nm_clk_set_rate] frac_n_value = 33947
+[    3.606038] [drm:dsi_pll_28nm_clk_set_rate] Generated VCO Clock: 480691200
+[    3.606053] [drm:dsi_pll_28nm_clk_set_rate] sdm_cfg0=0
+[    3.606067] [drm:dsi_pll_28nm_clk_set_rate] sdm_cfg1=75
+[    3.606082] [drm:dsi_pll_28nm_clk_set_rate] sdm_cfg2=155
+[    3.606097] [drm:dsi_pll_28nm_clk_set_rate] sdm_cfg3=132
+[    3.606111] [drm:dsi_pll_28nm_clk_set_rate] cal_cfg10=224, cal_cfg11=1
+[    3.607132] [drm:dsi_pll_28nm_clk_recalc_rate] sdm_dc_off = 11
+[    3.607148] [drm:dsi_pll_28nm_clk_recalc_rate] sdm_freq_seed = 33947
+[    3.607163] [drm:dsi_pll_28nm_clk_recalc_rate] vco rate = 480690820
+[    3.607178] [drm:dsi_pll_28nm_clk_recalc_rate] returning vco rate = 480690820
+[    3.607228] [drm:dsi_intr_ctrl] intr=2220aa02 enable=1
+[    3.607269] [drm:dsi_host_irq] isr=0x2220aa03, id=0
+[    3.607296] [drm:dsi_cmds2buf_tx] ret=50
+[    3.607315] [drm:dsi_intr_ctrl] intr=2220aa00 enable=0
+[    3.607339] [drm:dsi_link_clk_set_rate_6g] Set clk rates: pclk=80117000, byteclk=60087750
+[    3.607408] [drm:dsi_pll_28nm_clk_set_rate] refclk_cfg = 1
+[    3.607425] [drm:dsi_pll_28nm_clk_set_rate] div_fb = 12518
+[    3.607440] [drm:dsi_pll_28nm_clk_set_rate] frac_n_value = 33947
+[    3.607454] [drm:dsi_pll_28nm_clk_set_rate] Generated VCO Clock: 480691200
+[    3.607469] [drm:dsi_pll_28nm_clk_set_rate] sdm_cfg0=0
+[    3.607483] [drm:dsi_pll_28nm_clk_set_rate] sdm_cfg1=75
+[    3.607497] [drm:dsi_pll_28nm_clk_set_rate] sdm_cfg2=155
+[    3.607511] [drm:dsi_pll_28nm_clk_set_rate] sdm_cfg3=132
+[    3.607525] [drm:dsi_pll_28nm_clk_set_rate] cal_cfg10=224, cal_cfg11=1
+[    3.608546] [drm:dsi_pll_28nm_clk_recalc_rate] sdm_dc_off = 11
+[    3.608561] [drm:dsi_pll_28nm_clk_recalc_rate] sdm_freq_seed = 33947
+[    3.608576] [drm:dsi_pll_28nm_clk_recalc_rate] vco rate = 480690820
+[    3.608591] [drm:dsi_pll_28nm_clk_recalc_rate] returning vco rate = 480690820
+[    3.608632] [drm:dsi_intr_ctrl] intr=2220aa02 enable=1
+[    3.608662] [drm:dsi_host_irq] isr=0x2220aa03, id=0
+[    3.608687] [drm:dsi_cmds2buf_tx] ret=50
+[    3.608704] [drm:dsi_intr_ctrl] intr=2220aa00 enable=0
+[    3.608731] [drm:dsi_mgr_bridge_enable] id=0
+[    3.608749] [drm:mdp5_encoder_enable] set mode: "720x1280": 60 80117 720 800 896 1024 1280 1294 1296 1304 0x48 0x0
+[    3.608791] [drm:mdp5_crtc_vblank_irq] crtc-0: send event: (____ptrval____)
+[    3.608817] [drm:mdp5_ctl_set_encoder_state] intf_1: on
+[    3.608920] [drm:mdp5_crtc_err_irq] crtc-0: error: 04000000
+[    3.608939] [drm:mdp5_irq_error_handler] *ERROR* errors: 04000000
+[    3.625559]  INFO pocketboot::ui: POCKETBOOT_DRM_READY path=/dev/dri/card0 connector=DSI-1 width=720 height=1280
+[    3.626033]  INFO pocketboot::ui: POCKETBOOT_DRM_PAGE_FLIP_TEST_START requested=16
+[    3.665327] [drm:mdp5_plane_atomic_check] plane-0: check (1 -> 1)
+[    3.665389] [drm:mdp5_crtc_atomic_check] crtc-0: check
+[    3.665409] [drm:mdp5_crtc_atomic_check] crtc-0: assign pipe plane-0 on stage=1
+[    3.665581] [drm:mdp5_crtc_atomic_begin] crtc-0: begin
+[    3.665603] [drm:mdp5_plane_atomic_update] plane-0: update
+[    3.665638] [drm:mdp5_plane_mode_set] plane-0: FB[62] 0,0,720,1280 -> CRTC[61] 0,0,720,1280
+[    3.665665] [drm:mdp5_plane_mode_set] scale config = 0
+[    3.665687] [drm:mdp5_crtc_atomic_flush] crtc-0: event: (____ptrval____)
+[    3.665713] [drm:mdp5_ctl_blend] lm0: blend config = 0x00040000. ext_cfg = 0x00000000
+[    3.665731] [drm:mdp5_crtc_atomic_flush] crtc-0: flush=00000840
+[    3.675467] [drm:mdp5_crtc_vblank_irq] crtc-0: send event: (____ptrval____)
+[    3.678366] [drm:mdp5_plane_cleanup_fb] plane-0: cleanup: FB[63]
+[    3.678688]  INFO pocketboot::ui: POCKETBOOT_DRM_PAGE_FLIP sequence=1 remaining=15
+[    3.679028] [drm:mdp5_plane_atomic_check] plane-0: check (1 -> 1)
+[    3.679057] [drm:mdp5_crtc_atomic_check] crtc-0: check
+[    3.679075] [drm:mdp5_crtc_atomic_check] crtc-0: assign pipe plane-0 on stage=1
+[    3.679210] [drm:mdp5_crtc_atomic_begin] crtc-0: begin
+[    3.679230] [drm:mdp5_plane_atomic_update] plane-0: update
+[    3.679262] [drm:mdp5_plane_mode_set] plane-0: FB[64] 0,0,720,1280 -> CRTC[61] 0,0,720,1280
+[    3.679289] [drm:mdp5_plane_mode_set] scale config = 0
+[    3.679310] [drm:mdp5_crtc_atomic_flush] crtc-0: event: (____ptrval____)
+[    3.679334] [drm:mdp5_ctl_blend] lm0: blend config = 0x00040000. ext_cfg = 0x00000000
+[    3.679351] [drm:mdp5_crtc_atomic_flush] crtc-0: flush=00000840
+[    3.692134] [drm:mdp5_crtc_vblank_irq] crtc-0: send event: (____ptrval____)
+[    3.692205] [drm:mdp5_plane_cleanup_fb] plane-0: cleanup: FB[62]
+[    3.692324]  INFO pocketboot::ui: POCKETBOOT_DRM_PAGE_FLIP sequence=2 remaining=14
+[    3.692797] [drm:mdp5_plane_atomic_check] plane-0: check (1 -> 1)
+[    3.692824] [drm:mdp5_crtc_atomic_check] crtc-0: check
+[    3.692842] [drm:mdp5_crtc_atomic_check] crtc-0: assign pipe plane-0 on stage=1
+[    3.692911] [drm:mdp5_crtc_atomic_begin] crtc-0: begin
+[    3.692929] [drm:mdp5_plane_atomic_update] plane-0: update
+[    3.692945] [drm:mdp5_plane_mode_set] plane-0: FB[63] 0,0,720,1280 -> CRTC[61] 0,0,720,1280
+[    3.692970] [drm:mdp5_plane_mode_set] scale config = 0
+[    3.692992] [drm:mdp5_crtc_atomic_flush] crtc-0: event: (____ptrval____)
+[    3.693016] [drm:mdp5_ctl_blend] lm0: blend config = 0x00040000. ext_cfg = 0x00000000
+[    3.693033] [drm:mdp5_crtc_atomic_flush] crtc-0: flush=00000840
+[    3.708795] [drm:mdp5_crtc_vblank_irq] crtc-0: send event: (____ptrval____)
+[    3.708852] [drm:mdp5_plane_cleanup_fb] plane-0: cleanup: FB[64]
+[    3.708968]  INFO pocketboot::ui: POCKETBOOT_DRM_PAGE_FLIP sequence=3 remaining=13
+[    3.709482] [drm:mdp5_plane_atomic_check] plane-0: check (1 -> 1)
+[    3.709523] [drm:mdp5_crtc_atomic_check] crtc-0: check
+[    3.709540] [drm:mdp5_crtc_atomic_check] crtc-0: assign pipe plane-0 on stage=1
+[    3.709603] [drm:mdp5_crtc_atomic_begin] crtc-0: begin
+[    3.709635] [drm:mdp5_plane_atomic_update] plane-0: update
+[    3.709652] [drm:mdp5_plane_mode_set] plane-0: FB[62] 0,0,720,1280 -> CRTC[61] 0,0,720,1280
+[    3.709677] [drm:mdp5_plane_mode_set] scale config = 0
+[    3.709697] [drm:mdp5_crtc_atomic_flush] crtc-0: event: (____ptrval____)
+[    3.709719] [drm:mdp5_ctl_blend] lm0: blend config = 0x00040000. ext_cfg = 0x00000000
+[    3.709736] [drm:mdp5_crtc_atomic_flush] crtc-0: flush=00000840
+[    3.725461] [drm:mdp5_crtc_vblank_irq] crtc-0: send event: (____ptrval____)
+[    3.725528] [drm:mdp5_plane_cleanup_fb] plane-0: cleanup: FB[63]
+[    3.725637]  INFO pocketboot::ui: POCKETBOOT_DRM_PAGE_FLIP sequence=4 remaining=12
+[    3.725945] [drm:mdp5_plane_atomic_check] plane-0: check (1 -> 1)
+[    3.725969] [drm:mdp5_crtc_atomic_check] crtc-0: check
+[    3.725985] [drm:mdp5_crtc_atomic_check] crtc-0: assign pipe plane-0 on stage=1
+[    3.726057] [drm:mdp5_crtc_atomic_begin] crtc-0: begin
+[    3.726074] [drm:mdp5_plane_atomic_update] plane-0: update
+[    3.726090] [drm:mdp5_plane_mode_set] plane-0: FB[64] 0,0,720,1280 -> CRTC[61] 0,0,720,1280
+[    3.726130] [drm:mdp5_plane_mode_set] scale config = 0
+[    3.726152] [drm:mdp5_crtc_atomic_flush] crtc-0: event: (____ptrval____)
+[    3.726174] [drm:mdp5_ctl_blend] lm0: blend config = 0x00040000. ext_cfg = 0x00000000
+[    3.726190] [drm:mdp5_crtc_atomic_flush] crtc-0: flush=00000840
+[    3.742133] [drm:mdp5_crtc_vblank_irq] crtc-0: send event: (____ptrval____)
+[    3.742183] [drm:mdp5_plane_cleanup_fb] plane-0: cleanup: FB[62]
+[    3.742283]  INFO pocketboot::ui: POCKETBOOT_DRM_PAGE_FLIP sequence=5 remaining=11
+[    3.742746] [drm:mdp5_plane_atomic_check] plane-0: check (1 -> 1)
+[    3.742770] [drm:mdp5_crtc_atomic_check] crtc-0: check
+[    3.742786] [drm:mdp5_crtc_atomic_check] crtc-0: assign pipe plane-0 on stage=1
+[    3.742842] [drm:mdp5_crtc_atomic_begin] crtc-0: begin
+[    3.742859] [drm:mdp5_plane_atomic_update] plane-0: update
+[    3.742875] [drm:mdp5_plane_mode_set] plane-0: FB[63] 0,0,720,1280 -> CRTC[61] 0,0,720,1280
+[    3.742900] [drm:mdp5_plane_mode_set] scale config = 0
+[    3.742920] [drm:mdp5_crtc_atomic_flush] crtc-0: event: (____ptrval____)
+[    3.742942] [drm:mdp5_ctl_blend] lm0: blend config = 0x00040000. ext_cfg = 0x00000000
+[    3.742958] [drm:mdp5_crtc_atomic_flush] crtc-0: flush=00000840
+[    3.758796] [drm:mdp5_crtc_vblank_irq] crtc-0: send event: (____ptrval____)
+[    3.758846] [drm:mdp5_plane_cleanup_fb] plane-0: cleanup: FB[64]
+[    3.758926]  INFO pocketboot::ui: POCKETBOOT_DRM_PAGE_FLIP sequence=6 remaining=10
+[    3.759377] [drm:mdp5_plane_atomic_check] plane-0: check (1 -> 1)
+[    3.759400] [drm:mdp5_crtc_atomic_check] crtc-0: check
+[    3.759416] [drm:mdp5_crtc_atomic_check] crtc-0: assign pipe plane-0 on stage=1
+[    3.759470] [drm:mdp5_crtc_atomic_begin] crtc-0: begin
+[    3.759487] [drm:mdp5_plane_atomic_update] plane-0: update
+[    3.759503] [drm:mdp5_plane_mode_set] plane-0: FB[62] 0,0,720,1280 -> CRTC[61] 0,0,720,1280
+[    3.759527] [drm:mdp5_plane_mode_set] scale config = 0
+[    3.759548] [drm:mdp5_crtc_atomic_flush] crtc-0: event: (____ptrval____)
+[    3.759569] [drm:mdp5_ctl_blend] lm0: blend config = 0x00040000. ext_cfg = 0x00000000
+[    3.759586] [drm:mdp5_crtc_atomic_flush] crtc-0: flush=00000840
+[    3.775463] [drm:mdp5_crtc_vblank_irq] crtc-0: send event: (____ptrval____)
+[    3.775513] [drm:mdp5_plane_cleanup_fb] plane-0: cleanup: FB[63]
+[    3.775587]  INFO pocketboot::ui: POCKETBOOT_DRM_PAGE_FLIP sequence=7 remaining=9
+[    3.775857] [drm:mdp5_plane_atomic_check] plane-0: check (1 -> 1)
+[    3.775880] [drm:mdp5_crtc_atomic_check] crtc-0: check
+[    3.775895] [drm:mdp5_crtc_atomic_check] crtc-0: assign pipe plane-0 on stage=1
+[    3.775946] [drm:mdp5_crtc_atomic_begin] crtc-0: begin
+[    3.775964] [drm:mdp5_plane_atomic_update] plane-0: update
+[    3.775980] [drm:mdp5_plane_mode_set] plane-0: FB[64] 0,0,720,1280 -> CRTC[61] 0,0,720,1280
+[    3.776004] [drm:mdp5_plane_mode_set] scale config = 0
+[    3.776024] [drm:mdp5_crtc_atomic_flush] crtc-0: event: (____ptrval____)
+[    3.776045] [drm:mdp5_ctl_blend] lm0: blend config = 0x00040000. ext_cfg = 0x00000000
+[    3.776062] [drm:mdp5_crtc_atomic_flush] crtc-0: flush=00000840
+[    3.792129] [drm:mdp5_crtc_vblank_irq] crtc-0: send event: (____ptrval____)
+[    3.792178] [drm:mdp5_plane_cleanup_fb] plane-0: cleanup: FB[62]
+[    3.792251]  INFO pocketboot::ui: POCKETBOOT_DRM_PAGE_FLIP sequence=8 remaining=8
+[    3.792696] [drm:mdp5_plane_atomic_check] plane-0: check (1 -> 1)
+[    3.792719] [drm:mdp5_crtc_atomic_check] crtc-0: check
+[    3.792735] [drm:mdp5_crtc_atomic_check] crtc-0: assign pipe plane-0 on stage=1
+[    3.792787] [drm:mdp5_crtc_atomic_begin] crtc-0: begin
+[    3.792804] [drm:mdp5_plane_atomic_update] plane-0: update
+[    3.792820] [drm:mdp5_plane_mode_set] plane-0: FB[63] 0,0,720,1280 -> CRTC[61] 0,0,720,1280
+[    3.792845] [drm:mdp5_plane_mode_set] scale config = 0
+[    3.792864] [drm:mdp5_crtc_atomic_flush] crtc-0: event: (____ptrval____)
+[    3.792885] [drm:mdp5_ctl_blend] lm0: blend config = 0x00040000. ext_cfg = 0x00000000
+[    3.792902] [drm:mdp5_crtc_atomic_flush] crtc-0: flush=00000840
+[    3.808797] [drm:mdp5_crtc_vblank_irq] crtc-0: send event: (____ptrval____)
+[    3.808846] [drm:mdp5_plane_cleanup_fb] plane-0: cleanup: FB[64]
+[    3.808921]  INFO pocketboot::ui: POCKETBOOT_DRM_PAGE_FLIP sequence=9 remaining=7
+[    3.809362] [drm:mdp5_plane_atomic_check] plane-0: check (1 -> 1)
+[    3.809385] [drm:mdp5_crtc_atomic_check] crtc-0: check
+[    3.809400] [drm:mdp5_crtc_atomic_check] crtc-0: assign pipe plane-0 on stage=1
+[    3.809450] [drm:mdp5_crtc_atomic_begin] crtc-0: begin
+[    3.809466] [drm:mdp5_plane_atomic_update] plane-0: update
+[    3.809483] [drm:mdp5_plane_mode_set] plane-0: FB[62] 0,0,720,1280 -> CRTC[61] 0,0,720,1280
+[    3.809507] [drm:mdp5_plane_mode_set] scale config = 0
+[    3.809527] [drm:mdp5_crtc_atomic_flush] crtc-0: event: (____ptrval____)
+[    3.809547] [drm:mdp5_ctl_blend] lm0: blend config = 0x00040000. ext_cfg = 0x00000000
+[    3.809564] [drm:mdp5_crtc_atomic_flush] crtc-0: flush=00000840
+[    3.825465] [drm:mdp5_crtc_vblank_irq] crtc-0: send event: (____ptrval____)
+[    3.825515] [drm:mdp5_plane_cleanup_fb] plane-0: cleanup: FB[63]
+[    3.825592]  INFO pocketboot::ui: POCKETBOOT_DRM_PAGE_FLIP sequence=10 remaining=6
+[    3.825859] [drm:mdp5_plane_atomic_check] plane-0: check (1 -> 1)
+[    3.825882] [drm:mdp5_crtc_atomic_check] crtc-0: check
+[    3.825898] [drm:mdp5_crtc_atomic_check] crtc-0: assign pipe plane-0 on stage=1
+[    3.825949] [drm:mdp5_crtc_atomic_begin] crtc-0: begin
+[    3.825966] [drm:mdp5_plane_atomic_update] plane-0: update
+[    3.825982] [drm:mdp5_plane_mode_set] plane-0: FB[64] 0,0,720,1280 -> CRTC[61] 0,0,720,1280
+[    3.826006] [drm:mdp5_plane_mode_set] scale config = 0
+[    3.826026] [drm:mdp5_crtc_atomic_flush] crtc-0: event: (____ptrval____)
+[    3.826047] [drm:mdp5_ctl_blend] lm0: blend config = 0x00040000. ext_cfg = 0x00000000
+[    3.826063] [drm:mdp5_crtc_atomic_flush] crtc-0: flush=00000840
+[    3.842131] [drm:mdp5_crtc_vblank_irq] crtc-0: send event: (____ptrval____)
+[    3.842184] [drm:mdp5_plane_cleanup_fb] plane-0: cleanup: FB[62]
+[    3.842259]  INFO pocketboot::ui: POCKETBOOT_DRM_PAGE_FLIP sequence=11 remaining=5
+[    3.842725] [drm:mdp5_plane_atomic_check] plane-0: check (1 -> 1)
+[    3.842748] [drm:mdp5_crtc_atomic_check] crtc-0: check
+[    3.842764] [drm:mdp5_crtc_atomic_check] crtc-0: assign pipe plane-0 on stage=1
+[    3.842817] [drm:mdp5_crtc_atomic_begin] crtc-0: begin
+[    3.842834] [drm:mdp5_plane_atomic_update] plane-0: update
+[    3.842850] [drm:mdp5_plane_mode_set] plane-0: FB[63] 0,0,720,1280 -> CRTC[61] 0,0,720,1280
+[    3.842874] [drm:mdp5_plane_mode_set] scale config = 0
+[    3.842894] [drm:mdp5_crtc_atomic_flush] crtc-0: event: (____ptrval____)
+[    3.842915] [drm:mdp5_ctl_blend] lm0: blend config = 0x00040000. ext_cfg = 0x00000000
+[    3.842932] [drm:mdp5_crtc_atomic_flush] crtc-0: flush=00000840
+[    3.858798] [drm:mdp5_crtc_vblank_irq] crtc-0: send event: (____ptrval____)
+[    3.858846] [drm:mdp5_plane_cleanup_fb] plane-0: cleanup: FB[64]
+[    3.858918]  INFO pocketboot::ui: POCKETBOOT_DRM_PAGE_FLIP sequence=12 remaining=4
+[    3.859360] [drm:mdp5_plane_atomic_check] plane-0: check (1 -> 1)
+[    3.859383] [drm:mdp5_crtc_atomic_check] crtc-0: check
+[    3.859398] [drm:mdp5_crtc_atomic_check] crtc-0: assign pipe plane-0 on stage=1
+[    3.859448] [drm:mdp5_crtc_atomic_begin] crtc-0: begin
+[    3.859465] [drm:mdp5_plane_atomic_update] plane-0: update
+[    3.859481] [drm:mdp5_plane_mode_set] plane-0: FB[62] 0,0,720,1280 -> CRTC[61] 0,0,720,1280
+[    3.859506] [drm:mdp5_plane_mode_set] scale config = 0
+[    3.859526] [drm:mdp5_crtc_atomic_flush] crtc-0: event: (____ptrval____)
+[    3.859547] [drm:mdp5_ctl_blend] lm0: blend config = 0x00040000. ext_cfg = 0x00000000
+[    3.859563] [drm:mdp5_crtc_atomic_flush] crtc-0: flush=00000840
+[    3.875465] [drm:mdp5_crtc_vblank_irq] crtc-0: send event: (____ptrval____)
+[    3.875512] [drm:mdp5_plane_cleanup_fb] plane-0: cleanup: FB[63]
+[    3.875583]  INFO pocketboot::ui: POCKETBOOT_DRM_PAGE_FLIP sequence=13 remaining=3
+[    3.875847] [drm:mdp5_plane_atomic_check] plane-0: check (1 -> 1)
+[    3.875870] [drm:mdp5_crtc_atomic_check] crtc-0: check
+[    3.875885] [drm:mdp5_crtc_atomic_check] crtc-0: assign pipe plane-0 on stage=1
+[    3.875935] [drm:mdp5_crtc_atomic_begin] crtc-0: begin
+[    3.875952] [drm:mdp5_plane_atomic_update] plane-0: update
+[    3.875968] [drm:mdp5_plane_mode_set] plane-0: FB[64] 0,0,720,1280 -> CRTC[61] 0,0,720,1280
+[    3.875993] [drm:mdp5_plane_mode_set] scale config = 0
+[    3.876013] [drm:mdp5_crtc_atomic_flush] crtc-0: event: (____ptrval____)
+[    3.876033] [drm:mdp5_ctl_blend] lm0: blend config = 0x00040000. ext_cfg = 0x00000000
+[    3.876050] [drm:mdp5_crtc_atomic_flush] crtc-0: flush=00000840
+[    3.892133] [drm:mdp5_crtc_vblank_irq] crtc-0: send event: (____ptrval____)
+[    3.892181] [drm:mdp5_plane_cleanup_fb] plane-0: cleanup: FB[62]
+[    3.892256]  INFO pocketboot::ui: POCKETBOOT_DRM_PAGE_FLIP sequence=14 remaining=2
+[    3.892701] [drm:mdp5_plane_atomic_check] plane-0: check (1 -> 1)
+[    3.892723] [drm:mdp5_crtc_atomic_check] crtc-0: check
+[    3.892739] [drm:mdp5_crtc_atomic_check] crtc-0: assign pipe plane-0 on stage=1
+[    3.892787] [drm:mdp5_crtc_atomic_begin] crtc-0: begin
+[    3.892804] [drm:mdp5_plane_atomic_update] plane-0: update
+[    3.892820] [drm:mdp5_plane_mode_set] plane-0: FB[63] 0,0,720,1280 -> CRTC[61] 0,0,720,1280
+[    3.892845] [drm:mdp5_plane_mode_set] scale config = 0
+[    3.892864] [drm:mdp5_crtc_atomic_flush] crtc-0: event: (____ptrval____)
+[    3.892885] [drm:mdp5_ctl_blend] lm0: blend config = 0x00040000. ext_cfg = 0x00000000
+[    3.892901] [drm:mdp5_crtc_atomic_flush] crtc-0: flush=00000840
+[    3.908800] [drm:mdp5_crtc_vblank_irq] crtc-0: send event: (____ptrval____)
+[    3.908847] [drm:mdp5_plane_cleanup_fb] plane-0: cleanup: FB[64]
+[    3.908917]  INFO pocketboot::ui: POCKETBOOT_DRM_PAGE_FLIP sequence=15 remaining=1
+[    3.909359] [drm:mdp5_plane_atomic_check] plane-0: check (1 -> 1)
+[    3.909381] [drm:mdp5_crtc_atomic_check] crtc-0: check
+[    3.909396] [drm:mdp5_crtc_atomic_check] crtc-0: assign pipe plane-0 on stage=1
+[    3.909445] [drm:mdp5_crtc_atomic_begin] crtc-0: begin
+[    3.909462] [drm:mdp5_plane_atomic_update] plane-0: update
+[    3.909478] [drm:mdp5_plane_mode_set] plane-0: FB[62] 0,0,720,1280 -> CRTC[61] 0,0,720,1280
+[    3.909502] [drm:mdp5_plane_mode_set] scale config = 0
+[    3.909522] [drm:mdp5_crtc_atomic_flush] crtc-0: event: (____ptrval____)
+[    3.909543] [drm:mdp5_ctl_blend] lm0: blend config = 0x00040000. ext_cfg = 0x00000000
+[    3.909559] [drm:mdp5_crtc_atomic_flush] crtc-0: flush=00000840
+[    3.925466] [drm:mdp5_crtc_vblank_irq] crtc-0: send event: (____ptrval____)
+[    3.925507] [drm:mdp5_plane_cleanup_fb] plane-0: cleanup: FB[63]
+[    3.925574]  INFO pocketboot::ui: POCKETBOOT_DRM_PAGE_FLIP sequence=16 remaining=0
+[    3.925849]  INFO pocketboot::ui: POCKETBOOT_DRM_PAGE_FLIP_TEST_RESULT requested=16 completed=16
+[    9.169782]  INFO pocketboot::fastboot: fastboot command received command="getvar:product"
+[    9.172996]  INFO pocketboot::fastboot: fastboot command received command="getvar:serialno"
+[    9.179293]  INFO pocketboot::fastboot: fastboot command received command="getvar:compatible"
+[    9.224362]  INFO pocketboot::fastboot: fastboot command received command="getvar:product"
+[    9.226565]  INFO pocketboot::fastboot: fastboot command received command="getvar:serialno"
+[    9.233664]  INFO pocketboot::fastboot: fastboot command received command="getvar:compatible"
+[    9.241931]  INFO pocketboot::fastboot: fastboot command received command="getvar:is-userspace"
+[    9.250790]  INFO pocketboot::fastboot: fastboot command received command="download:0000a05e"
+[    9.257381]  INFO pocketboot::fastboot: fastboot download requested command="download:0000a05e" bytes=41054
+[    9.268878]  INFO pocketboot::fastboot: download staged bytes=41054
+[    9.277789]  INFO pocketboot::fastboot: fastboot command received command="oem shell-staged"
+[    9.312914]  INFO pocketboot::fastboot: fastboot command received command="download:0000a02e"
+[    9.313440]  INFO pocketboot::fastboot: fastboot download requested command="download:0000a02e" bytes=41006
+[    9.323658]  INFO pocketboot::fastboot: download staged bytes=41006
+[    9.332785]  INFO pocketboot::fastboot: fastboot command received command="oem shell-staged"
+[    9.368696]  INFO pocketboot::fastboot: fastboot command received command="download:0000a02e"
+[    9.369217]  INFO pocketboot::fastboot: fastboot download requested command="download:0000a02e" bytes=41006
+[    9.379479]  INFO pocketboot::fastboot: download staged bytes=41006
+[    9.388267]  INFO pocketboot::fastboot: fastboot command received command="oem shell-staged"
+[    9.424912]  INFO pocketboot::fastboot: fastboot command received command="download:0000a02e"
+[    9.425433]  INFO pocketboot::fastboot: fastboot download requested command="download:0000a02e" bytes=41006
+[    9.435702]  INFO pocketboot::fastboot: download staged bytes=41006
+[    9.444566]  INFO pocketboot::fastboot: fastboot command received command="oem shell-staged"
+[    9.480741]  INFO pocketboot::fastboot: fastboot command received command="download:0000a02e"
+[    9.481265]  INFO pocketboot::fastboot: fastboot download requested command="download:0000a02e" bytes=41006
+[    9.491466]  INFO pocketboot::fastboot: download staged bytes=41006
+[    9.500465]  INFO pocketboot::fastboot: fastboot command received command="oem shell-staged"
+[    9.536840]  INFO pocketboot::fastboot: fastboot command received command="download:0000a02e"
+[    9.537357]  INFO pocketboot::fastboot: fastboot download requested command="download:0000a02e" bytes=41006
+[    9.547606]  INFO pocketboot::fastboot: download staged bytes=41006
+[    9.556282]  INFO pocketboot::fastboot: fastboot command received command="oem shell-staged"
+[    9.592855]  INFO pocketboot::fastboot: fastboot command received command="download:0000a02e"
+[    9.593370]  INFO pocketboot::fastboot: fastboot download requested command="download:0000a02e" bytes=41006
+[    9.603579]  INFO pocketboot::fastboot: download staged bytes=41006
+[    9.612286]  INFO pocketboot::fastboot: fastboot command received command="oem shell-staged"
+[    9.648650]  INFO pocketboot::fastboot: fastboot command received command="download:0000a02e"
+[    9.649166]  INFO pocketboot::fastboot: fastboot download requested command="download:0000a02e" bytes=41006
+[    9.659257]  INFO pocketboot::fastboot: download staged bytes=41006
+[    9.668459]  INFO pocketboot::fastboot: fastboot command received command="oem shell-staged"
+[    9.704660]  INFO pocketboot::fastboot: fastboot command received command="download:00002d04"
+[    9.705175]  INFO pocketboot::fastboot: fastboot download requested command="download:00002d04" bytes=11524
+[    9.713446]  INFO pocketboot::fastboot: download staged bytes=11524
+[    9.724253]  INFO pocketboot::fastboot: fastboot command received command="oem shell-staged"
+[    9.756773]  INFO pocketboot::fastboot: fastboot command received command="download:0000a070"
+[    9.757109]  INFO pocketboot::fastboot: fastboot download requested command="download:0000a070" bytes=41072
+[    9.767493]  INFO pocketboot::fastboot: download staged bytes=41072
+[    9.776239]  INFO pocketboot::fastboot: fastboot command received command="oem shell-staged"
+[    9.812870]  INFO pocketboot::fastboot: fastboot command received command="download:0000a034"
+[    9.813207]  INFO pocketboot::fastboot: fastboot download requested command="download:0000a034" bytes=41012
+[    9.823651]  INFO pocketboot::fastboot: download staged bytes=41012
+[    9.832671]  INFO pocketboot::fastboot: fastboot command received command="oem shell-staged"
+[    9.868726]  INFO pocketboot::fastboot: fastboot command received command="download:0000a034"
+[    9.869066]  INFO pocketboot::fastboot: fastboot download requested command="download:0000a034" bytes=41012
+[    9.879440]  INFO pocketboot::fastboot: download staged bytes=41012
+[    9.888185]  INFO pocketboot::fastboot: fastboot command received command="oem shell-staged"
+[    9.924678]  INFO pocketboot::fastboot: fastboot command received command="download:0000a034"
+[    9.925199]  INFO pocketboot::fastboot: fastboot download requested command="download:0000a034" bytes=41012
+[    9.935496]  INFO pocketboot::fastboot: download staged bytes=41012
+[    9.944212]  INFO pocketboot::fastboot: fastboot command received command="oem shell-staged"
+[    9.980957]  INFO pocketboot::fastboot: fastboot command received command="download:0000a034"
+[    9.981477]  INFO pocketboot::fastboot: fastboot download requested command="download:0000a034" bytes=41012
+[    9.991730]  INFO pocketboot::fastboot: download staged bytes=41012
+[   10.000612]  INFO pocketboot::fastboot: fastboot command received command="oem shell-staged"
+[   10.036846]  INFO pocketboot::fastboot: fastboot command received command="download:0000a034"
+[   10.037366]  INFO pocketboot::fastboot: fastboot download requested command="download:0000a034" bytes=41012
+[   10.047609]  INFO pocketboot::fastboot: download staged bytes=41012
+[   10.056536]  INFO pocketboot::fastboot: fastboot command received command="oem shell-staged"
+[   10.092851]  INFO pocketboot::fastboot: fastboot command received command="download:0000a034"
+[   10.093372]  INFO pocketboot::fastboot: fastboot download requested command="download:0000a034" bytes=41012
+[   10.103563]  INFO pocketboot::fastboot: download staged bytes=41012
+[   10.112477]  INFO pocketboot::fastboot: fastboot command received command="oem shell-staged"
+[   10.149189]  INFO pocketboot::fastboot: fastboot command received command="download:0000a034"
+[   10.149710]  INFO pocketboot::fastboot: fastboot download requested command="download:0000a034" bytes=41012
+[   10.159999]  INFO pocketboot::fastboot: download staged bytes=41012
+[   10.168563]  INFO pocketboot::fastboot: fastboot command received command="oem shell-staged"
+[   10.204533]  INFO pocketboot::fastboot: fastboot command received command="download:000025e6"
+[   10.205053]  INFO pocketboot::fastboot: fastboot download requested command="download:000025e6" bytes=9702
+[   10.213413]  INFO pocketboot::fastboot: download staged bytes=9702
+[   10.223760]  INFO pocketboot::fastboot: fastboot command received command="oem shell-staged"
+[   10.256871]  INFO pocketboot::fastboot: fastboot command received command="download:0000036a"
+[   10.257386]  INFO pocketboot::fastboot: fastboot download requested command="download:0000036a" bytes=874
+[   10.265107]  INFO pocketboot::fastboot: download staged bytes=874
+[   10.276339]  INFO pocketboot::fastboot: fastboot command received command="oem shell-staged"
+[   10.813159]  INFO pocketboot::fastboot: fastboot command received command="upload"
+[   10.813649]  INFO pocketboot::fastboot: uploading staged data name=shell-output bytes=2013
+[   10.828294]  INFO pocketboot::fastboot: fastboot command received command="download:00000057"
+[   10.828851]  INFO pocketboot::fastboot: fastboot download requested command="download:00000057" bytes=87
+[   10.837190]  INFO pocketboot::fastboot: download staged bytes=87
+[   10.848380]  INFO pocketboot::fastboot: fastboot command received command="oem shell-staged"
+[   11.070361] random: crng init done
+[   11.076749]  INFO pocketboot::fastboot: fastboot command received command="upload"
+[   11.077047]  INFO pocketboot::fastboot: uploading staged data name=shell-output bytes=797
+[   11.091651]  INFO pocketboot::fastboot: fastboot command received command="oem cat:/sys/firmware/fdt"
+[   11.094990]  INFO pocketboot::fastboot: fastboot command received command="upload"
+[   11.100941]  INFO pocketboot::fastboot: uploading staged data name=cat:/sys/firmware/fdt bytes=59818
+[   11.118422]  INFO pocketboot::fastboot: fastboot command received command="oem dmesg"
+[   11.146387]  INFO pocketboot::fastboot: fastboot command received command="upload"
+[   11.146870]  INFO pocketboot::fastboot: uploading staged data name=dmesg bytes=79459
+[   11.163799]  INFO pocketboot::fastboot: fastboot command received command="download:00000093"
+[   11.164323]  INFO pocketboot::fastboot: fastboot download requested command="download:00000093" bytes=147
+[   11.172081]  INFO pocketboot::fastboot: download staged bytes=147
+[   11.183244]  INFO pocketboot::fastboot: fastboot command received command="oem shell-staged"
+[   11.216686]  INFO pocketboot::fastboot: fastboot command received command="upload"
+[   11.217165]  INFO pocketboot::fastboot: uploading staged data name=shell-output bytes=7249
+[   11.231754]  INFO pocketboot::fastboot: fastboot command received command="oem dmesg"

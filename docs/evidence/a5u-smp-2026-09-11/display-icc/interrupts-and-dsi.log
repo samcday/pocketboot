@@ -1,0 +1,264 @@
+           CPU0       CPU1       CPU2       CPU3       
+ 12:     109225     109310     109213     109334 GIC-0  20 Level     arch_timer
+ 15:          3          0          0          0  msmgpio  12 Edge      sm5502
+ 16:          0          0          0          1   sm5502   0 Edge      muic-attach
+ 17:          0          0          0          0   sm5502   1 Edge      muic-detach
+ 18:          0          0          0          0   sm5502   2 Edge      muic-kp
+ 19:          0          0          0          0   sm5502   3 Edge      muic-lkp
+ 20:          0          0          0          0   sm5502   4 Edge      muic-lkr
+ 21:          0          0          0          0   sm5502   5 Edge      muic-ovp-event
+ 22:          0          0          0          0   sm5502   6 Edge      muic-ocp-event
+ 23:          0          0          0          0   sm5502   7 Edge      muic-ovp-ocp-dis
+ 24:          0          0          0          0   sm5502   8 Edge      muic-vbus-det
+ 25:          0          0          0          0   sm5502   9 Edge      muic-rev-acce
+ 26:          0          0          0          0   sm5502  10 Edge      muic-adc-chg
+ 27:          0          0          0          0   sm5502  11 Edge      muic-stuck-key
+ 28:          0          0          0          0   sm5502  12 Edge      muic-stuck-key-rcv
+ 29:          0          0          0          0   sm5502  13 Edge      muic-mhl
+ 30:          0          0          0          0 GIC-0 270 Level     bam_dma
+ 31:          4          0          0          0 GIC-0 140 Level     msm_serial0
+ 32:    2096154          0          0          0 GIC-0 102 Level     qcom-iommu-fault
+ 35:          0          0          0          0 GIC-0 127 Level     i2c_qup
+ 36:          0          0          0          0 GIC-0 128 Level     i2c_qup
+ 37:       2598          0          0          0 GIC-0 130 Level     i2c_qup
+ 38:          3          0          0          0 GIC-0 131 Level     i2c_qup
+ 39:       1364          0          0          0 GIC-0 132 Level     i2c_qup
+ 40:          0          0          0          0 pmic_arb 524289 Edge      pm8941_pwrkey
+ 41:          0          0          0          0 pmic_arb 532481 Edge      pm8941_resin
+ 43:          0          0          0          0 GIC-0  39 Level     arch_mem_timer
+ 44:        122          0          0          0 GIC-0 200 Edge      smd-edge
+ 45:        162          0          0          0 GIC-0 155 Level     mmc0
+ 46:        417          0          0          0 GIC-0 157 Level     mmc1
+ 47:          0          0          0          0  msmgpio  98 Edge      tm2-touchkey
+ 48:          0          0          0          0  msmgpio  13 Edge      6-0048
+ 49:      22227          0          0          0 msm_mdss   0 Edge      msm-kms
+ 50:          2          0          0          0 GIC-0 170 Level     7824900.mmc
+ 51:       6030          0          0          0 GIC-0 166 Level     ci_hdrc_msm
+ 52:          2          0          0          0 GIC-0 253 Level     7864900.mmc
+ 53:          0          0          0          0  msmgpio  38 Edge      7864900.mmc cd
+ 54:         16          0          0          0 msm_mdss   4 Edge      dsi_isr
+ 55:          0          0          0          0  msmgpio 107 Edge      Volume Up
+ 56:          0          0          0          0  msmgpio 109 Edge      Home
+ 58:          0          0          0          0  msmgpio  52 Edge      Hall Effect Sensor
+ 62:          0          0          0          0  msmgpio  62 Edge      rt5033
+IPI0:        30         31         19         50       Rescheduling interrupts
+IPI1:       260       6420        478        980       Function call interrupts
+IPI2:         0          0          0          0       CPU stop interrupts
+IPI3:         0          0          0          0       CPU stop NMIs
+IPI4:         0          0          0          0       Timer broadcast interrupts
+IPI5:         8          6          9          1       IRQ work interrupts
+IPI6:         0          0          0          0       CPU backtrace interrupts
+IPI7:         0          0          0          0       KGDB roundup interrupts
+Err:          0
+---
+kernel: 7.1.0-rc6+
+module: msm
+dpu devcoredump
+time: 437.400544260
+====================dsi0_ctrl================
+0x0 : 000001f3 00000008 00001000 00009230
+0x10 : 31211101 3e2e1e0e 00001900 00000000
+0x20 : 03b000e0 050a000a 051703ff 00600000
+0x30 : 00000000 00020000 14000000 06100006
+0x40 : 00003c2c 00001000 00000004 00000000
+0x50 : 00000900 00000000 00000000 00000000
+0x60 : 00000000 00000000 00000000 00000000
+0x70 : 00000000 00000000 22211211 001c1a02
+0x80 : 80001004 00000000 00000000 00000001
+0x90 : 00000000 00000000 00000000 00000000
+0xa0 : 00000000 00001f00 10000000 00000000
+0xb0 : 00088888 ffffffff 0000ffff 00000001
+0xc0 : 0000041c 010f0f08 00000000 00000000
+0xd0 : 00000000 00000000 00000000 00000000
+0xe0 : 00000000 00000000 00000000 00000000
+0xf0 : 00000000 00000000 00000000 00000000
+0x100 : 00000000 00000000 13ff3be0 2221aa00
+0x110 : 00000000 00000000 0000023f 000047cf
+0x120 : 00000000 00000000 00000000 00000000
+0x130 : ffffffff ffffffff ffffffff ffffffff
+0x140 : 00000000 0000ffff 0000ffff 0000ffff
+0x150 : 0000ffff 00000000 00000004 00000000
+0x160 : 00000000 00000000 00000000 00000000
+0x170 : 00000000 00000000 00000000 00000000
+0x180 : 00000000 00000000 00000000 00000000
+0x190 : 00000000 00000000 00000000 00000000
+0x1a0 : 00000001 00ff0000 00400040 000000ff
+0x1b0 : 00000024 00000006 00000000 00000000
+0x1c0 : 00000000 ffffffff 00000000 00290000
+0x1d0 : 00000000 00000000 00000000 00000000
+0x1e0 : 00000000 00000000 00000000 00000000
+0x1f0 : 03000104 00000000 00000000 80000000
+0x200 : 00000000 00000000 00000000 00000000
+0x210 : 00000000 00000000 00000000 00000000
+0x220 : 00000000 00000000 00000000 00000000
+0x230 : 00000000 00000000 00000000 00000000
+0x240 : 00000000 00000000 00000000 00000000
+0x250 : 00000000 00000000
+====================dsi0_phy================
+0x0 : 00000000 00000000 00000000 00000000
+0x10 : 00000000 00000000 00000000 00000001
+0x20 : 00000097 00000000 00000000 00000000
+0x30 : 00000097 00000000 00000000 00000000
+0x40 : 00000000 00000000 00000000 00000000
+0x50 : 00000000 00000000 00000000 00000001
+0x60 : 00000097 00000000 00000000 00000000
+0x70 : 00000097 00000000 00000000 00000000
+0x80 : 00000000 00000000 00000000 00000000
+0x90 : 00000000 00000000 00000000 00000001
+0xa0 : 00000097 00000000 00000000 00000000
+0xb0 : 00000097 00000000 00000000 00000000
+0xc0 : 00000000 00000000 00000000 00000000
+0xd0 : 00000000 00000000 00000000 00000001
+0xe0 : 00000097 00000000 00000000 00000000
+0xf0 : 00000097 00000000 00000000 00000000
+0x100 : 00000000 000000c0 00000000 00000000
+0x110 : 00000000 00000000 00000000 00000001
+0x120 : 000000bb 00000000 00000000 00000000
+0x130 : 000000bb 00000000 00000000 00000000
+0x140 : 0000008b 0000001e 00000014 00000000
+0x150 : 00000044 00000046 00000018 00000020
+0x160 : 00000019 00000003 00000004 00000000
+0x170 : 0000005f 00000000 00000000 00000008
+0x180 : 00000008 000000ff 00000006 00000000
+0x190 : 00000000 00000000 00000000 00000001
+0x1a0 : 0000005a 00000010 0000000a 00000000
+0x1b0 : 00000000 00000000 00000000 000000b1
+0x1c0 : 000000ff 00000000 00000000 00000000
+0x1d0 : 00000000 00000001 00000000 00000000
+0x1e0 : 00000001 00000000 00000008 00000008
+0x1f0 : 00000000 00000000 00000000 00000000
+0x200 : 00000000 00000000 00000000 00000010
+0x210 : 00000000 00000001 00000000 00000011
+0x220 : 0000005b 00000010 0000000a 00000018
+0x230 : 00000000 00000000 00000000 000000b1
+0x240 : 00000000 00000000 00000000 00000000
+0x250 : 00000000 00000000 00000000 00000000
+0x260 : 00000000 00000000 00000000 00000000
+0x270 : 00000000 00000000 00000000 00000000
+====================dsi0_pll================
+0x0 : 00000001 00000000 00000002 00000031
+0x10 : 00000002 00000000 00000000 00000000
+0x20 : 0000000f 00000003 00000005 00000008
+0x30 : 00000070 00000015 00000000 0000004b
+0x40 : 0000009b 00000084 00000000 0000009a
+0x50 : 00000000 00000000 00000020 00000010
+0x60 : 0000001a 0000000d 00000000 00000012
+0x70 : 00000034 00000004 0000002b 00000006
+0x80 : 00000006 00000030 00000000 00000060
+0x90 : 00000000 000000e0 00000001 00000020
+0xa0 : 00000000 00000000 00000000 00000000
+0xb0 : 00000000 00000000 00000000 00000000
+0xc0 : 00000001 00000000 00000000 00000000
+0xd0 : 00000000
+====================dsi0_reg================
+0x0 : 00000007 00000009 00000003 00000000
+0x10 : 00000020 00000000 00000001 00000015
+0x20 : 00000000 00000000 00000000 00000000
+===================dpu drm state================
+plane[37]: plane-0
+	crtc=crtc-0
+	fb=64
+		allocated by = pocketboot-ui
+		refcount=3
+		format=XR24 little-endian (0x34325258)
+		modifier=0x0
+		size=720x1280
+		layers:
+			size[0]=720x1280
+			pitch[0]=2944
+			offset[0]=0
+			obj[0]:
+				name=0
+				refcount=3
+				start=00100731
+				size=3768320
+				imported=no
+	crtc-pos=720x1280+0+0
+	src-pos=720.000000x1280.000000+0.000000+0.000000
+	rotation=1
+	normalized-zpos=0
+	color-encoding=ITU-R BT.601 YCbCr
+	color-range=YCbCr limited range
+	color_mgmt_changed=0
+	color-pipeline=0
+	hwpipe=DMA0
+	blend_mode=0
+	zpos=1
+	normalized_zpos=0
+	alpha=65535
+	stage=STAGE_BASE
+plane[43]: plane-1
+	crtc=(null)
+	fb=0
+	crtc-pos=0x0+0+0
+	src-pos=0.000000x0.000000+0.000000+0.000000
+	rotation=1
+	normalized-zpos=3
+	color-encoding=ITU-R BT.601 YCbCr
+	color-range=YCbCr limited range
+	color_mgmt_changed=0
+	color-pipeline=0
+	hwpipe=(null)
+	blend_mode=0
+	zpos=3
+	normalized_zpos=3
+	alpha=65535
+	stage=STAGE_UNUSED
+plane[49]: plane-2
+	crtc=(null)
+	fb=0
+	crtc-pos=0x0+0+0
+	src-pos=0.000000x0.000000+0.000000+0.000000
+	rotation=1
+	normalized-zpos=4
+	color-encoding=ITU-R BT.601 YCbCr
+	color-range=YCbCr limited range
+	color_mgmt_changed=0
+	color-pipeline=0
+	hwpipe=(null)
+	blend_mode=0
+	zpos=4
+	normalized_zpos=4
+	alpha=65535
+	stage=STAGE_UNUSED
+plane[55]: plane-3
+	crtc=(null)
+	fb=0
+	crtc-pos=0x0+0+0
+	src-pos=0.000000x0.000000+0.000000+0.000000
+	rotation=1
+	normalized-zpos=5
+	color-encoding=ITU-R BT.601 YCbCr
+	color-range=YCbCr limited range
+	color_mgmt_changed=0
+	color-pipeline=0
+	hwpipe=(null)
+	blend_mode=0
+	zpos=5
+	normalized_zpos=5
+	alpha=65535
+	stage=STAGE_UNUSED
+crtc[61]: crtc-0
+	enable=1
+	active=1
+	self_refresh_active=0
+	planes_changed=0
+	mode_changed=0
+	active_changed=0
+	connectors_changed=0
+	color_mgmt_changed=0
+	plane_mask=1
+	connector_mask=1
+	encoder_mask=1
+	mode: "720x1280": 60 80117 720 800 896 1024 1280 1294 1296 1304 0x48 0x0
+	background_color=ffff000000000000
+	ctl=0
+	hwmixer=LM0
+	cmd_mode=0
+connector[36]: DSI-1
+	crtc=crtc-0
+	self_refresh_aware=0
+	interlace_allowed=0
+	ycbcr_420_allowed=0
+	max_requested_bpc=0
+	colorspace=Default

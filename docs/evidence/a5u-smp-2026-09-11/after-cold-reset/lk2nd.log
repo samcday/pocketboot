@@ -1,0 +1,27 @@
+[0] welcome to lk
+
+[10] platform_init()
+[10] target_init()
+[20] MMC card: Q313MB (0.0, 02 2007), manufacturer: 15, OEM: 100, capacity: 15758000128 bytes
+[30] SDHC Running in HS200 mode
+[80] Done initialization of the card
+[90] lk2nd_init()
+[90] Booted @ 0x80008000, r0=0x0, r1=0x0, r2=0x81e00000
+[100] Found valid DTB with 19883 bytes total
+[100] Command line from previous bootloader: lk2nd androidboot.sec_atd.tty=/dev/ttyHSL0 loglevel=4 sec_log=0x100000@0xafe00008 sec_dbg=0x80000@0xaff00008 androidboot.revision=2 androidboot.warranty_bit=1 androidboot.bootloader=A500FUXXU1CSB1 lpm_levels.sleep_disabled=1 fg_reset=0 androidboot.boot_recovery=0 sec_debug.reset_reason=0x5 androidboot.debug_level=0x4f4c sec_debug.enable=0 sec_debug.enable_user=0 androidboot.cp_debug_level=0x55FF sec_debug.enable_cp_debug=0 vmalloc=340M cordon=651c0707a4d59c678fed67a282b6b1d6 connie=SM-A500FU_OPEN_EUR_89923814b673d2afa111d77f1d3e2af3 lcd_id=0x822003 androidboot.security_mode=1526595584 androidboot.emmc=true androidboot.serialno=cd0ee037 androidboot.baseband=msm lcd_id=0x822003 mdss_mdp.panel=1:dsi:0:ss_dsi_panel_EA8061V_AMS497EE01_HD:1:none
+[170] Detected device: Samsung Galaxy A5U (SM-A500FU) (compatible: samsung,a5u-eur)
+[180] Unexpected DTB selected by bootloader, need to override
+[190] MDP continuous splash detected: pipe RGB_0, base: 0x8e000000, stride: 2160, src: 720x1280 (0,0), img: 720x1280, out: 720x1280 (0,0), format: 0x2243f (bpp: 3)
+[210] Display refresh: cmd mode: 0, auto refresh: 0 (sel: 0x1f20)
+[210] Fastboot mode was forced with compile-time flag.
+[220] fastboot_init()
+[320] USB init ept @ 0x8f68c000
+[340] udc_start()
+[490] -- reset --
+[490] -- portchange --
+[560] -- reset --
+[560] -- portchange --
+[640] fastboot: processing commands
+[198020] fastboot: getvar:product
+[198020] fastboot: getvar:lk2nd:compatible
+[198030] fastboot: oem log

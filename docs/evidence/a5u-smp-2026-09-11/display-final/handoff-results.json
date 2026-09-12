@@ -1,0 +1,62 @@
+[
+  {
+    "phase": 0,
+    "marker": "display-final",
+    "four_core_workloads": "PASS",
+    "coherency": "PASS",
+    "iommu_fault_counts": [
+      0,
+      0,
+      0,
+      0
+    ],
+    "page_flips": 16,
+    "mdp_error_events": 1,
+    "preboot_reentry": false
+  },
+  {
+    "phase": 1,
+    "marker": "display-final-1",
+    "four_core_workloads": "PASS",
+    "coherency": "PASS",
+    "iommu_fault_counts": [
+      0,
+      0,
+      0,
+      0
+    ],
+    "page_flips": 16,
+    "mdp_error_events": 1,
+    "preboot_reentry": false
+  },
+  {
+    "phase": 2,
+    "marker": "display-final-2",
+    "four_core_workloads": "PASS",
+    "coherency": "PASS",
+    "iommu_fault_counts": [
+      0,
+      0,
+      0,
+      0
+    ],
+    "page_flips": 16,
+    "mdp_error_events": 1,
+    "preboot_reentry": false
+  },
+  {
+    "phase": 3,
+    "marker": "display-final-3",
+    "four_core_workloads": "PASS",
+    "coherency": "PASS",
+    "iommu_fault_counts": [
+      0,
+      0,
+      0,
+      0
+    ],
+    "page_flips": 16,
+    "mdp_error_events": 1,
+    "preboot_reentry": true
+  }
+]

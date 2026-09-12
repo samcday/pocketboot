@@ -1,0 +1,122 @@
+{
+  "workload": {
+    "version": 2,
+    "binary": "smp-work-v2",
+    "install_scripts": "workload-v2-install/*.sh",
+    "snapshot": "snapshot-v2.sh",
+    "target_path": "/tmp/pb-smp-v2/work",
+    "compiler_flags": [
+      "-Os",
+      "-static",
+      "-s"
+    ],
+    "required_cpu_ids": [
+      0,
+      1,
+      2,
+      3
+    ],
+    "minimum_cpu_seconds_exclusive": 0.02,
+    "expected_hash": "292d74d0d0222325"
+  },
+  "inputs": {
+    "kernel": {
+      "path": "/var/home/sam/src/pocketboot/target/a5u-smp-lab/20260911/ramoops-iommu/kernel.Image",
+      "sha256": "25a9c9fc7666a5351261ec91f4344d0167259ab45959c5436d2758c185201ece"
+    },
+    "dtb": {
+      "path": "/var/home/sam/src/pocketboot/target/a5u-smp-lab/20260911/ramoops-iommu/fixture-input.dtb",
+      "sha256": "f4b85f9243478529f01a2a1d72fc8bfae974e94a139265fc06f77aaabfe12ada"
+    },
+    "cmdline": {
+      "path": "/var/home/sam/src/pocketboot/target/a5u-smp-lab/20260911/ramoops-iommu/cmdline.txt",
+      "sha256": "bc849bbd99764bac5a61097dcea2949ef991abadc730a0601bd60913aed0f273"
+    },
+    "workload_source": {
+      "path": "/var/home/sam/src/pocketboot/tools/smp-work.c",
+      "sha256": "9b382cb85e945f635f0f5f5247920cdcaebd9463f6849bbf303b3785db03110f"
+    }
+  },
+  "artifacts": {
+    "external-psci.dtb": {
+      "bytes": 60542,
+      "sha256": "2cab744ae8e8a512c03d244a7d558dcec015841de0d1a19e3a882dac833ce2d7"
+    },
+    "generation-1.img": {
+      "bytes": 11427840,
+      "sha256": "8e6baac085985441712f7744a4f1733bef802b07aa885364c59e132b41e435fb"
+    },
+    "generation-2.img": {
+      "bytes": 11427840,
+      "sha256": "dcb37e810b771ee1c6973216ff6b6d98c90c73657e9b6c8315c4b13ea798d6a8"
+    },
+    "negative-cpu3-disabled.dtb": {
+      "bytes": 60546,
+      "sha256": "39b76ace53c8eee65ffe11705ad07ff22af8207e433e64e6171b6097fea639b0"
+    },
+    "negative-cpu3-disabled.img": {
+      "bytes": 11427840,
+      "sha256": "b849607fdb149ba4d31532f4c12c8de70f6a1489a7f8ffdcc8ab59ffb8cc1436"
+    },
+    "negative-parking-overlap.dtb": {
+      "bytes": 60662,
+      "sha256": "2925d448d3159e8fa527ef8a11d748ab42fa3a9a72b2a0d5796f11c50307ade1"
+    },
+    "negative-parking-overlap.img": {
+      "bytes": 11427840,
+      "sha256": "0990db8d39ca1674f08195abd8912a1ee9aaa8485e683369df136e8474e02bf3"
+    },
+    "next.Image": {
+      "bytes": 11358216,
+      "sha256": "25a9c9fc7666a5351261ec91f4344d0167259ab45959c5436d2758c185201ece"
+    },
+    "smp-work-v2": {
+      "bytes": 67816,
+      "sha256": "3b1a25c21801708e04464954efb10b0723b92a07efc4f91cdd08b85316536ab5"
+    },
+    "snapshot-v2.sh": {
+      "bytes": 874,
+      "sha256": "2c877fb9c9cb6599da2adc64d93168e24350a62c020ec6bf3de05aaf455dd047"
+    },
+    "workload-v2-install/000.sh": {
+      "bytes": 41054,
+      "sha256": "59baf4e8d12d562651ba824f06dbc33f92bf22a90dd0fdb66f9ebc47e2d288e7"
+    },
+    "workload-v2-install/001.sh": {
+      "bytes": 41006,
+      "sha256": "45544b50cd8d1c8cfceaac3f499b6ef310b88aa4d14a07ed4b2743cb482cd9a5"
+    },
+    "workload-v2-install/002.sh": {
+      "bytes": 41006,
+      "sha256": "37bed25c07cc9e59157faa7a5ed77d58cf185680679d31af8622f63460f662e7"
+    },
+    "workload-v2-install/003.sh": {
+      "bytes": 41006,
+      "sha256": "7529da40518ff48acee411d5e9801d65bbd3e1c8ee176cde58a55e14416379b1"
+    },
+    "workload-v2-install/004.sh": {
+      "bytes": 41006,
+      "sha256": "c175258e079dc8ad1882502ca66c76bb5978a107bb7920c92ab69b774bf7b9ab"
+    },
+    "workload-v2-install/005.sh": {
+      "bytes": 41006,
+      "sha256": "4a37c1f367e635b0b96c61119ae64f7801a4a288de6f13629253efed316ebc4e"
+    },
+    "workload-v2-install/006.sh": {
+      "bytes": 41006,
+      "sha256": "274792dd0ae8964d597ab408bdcf3fa299f220737901802e998a8be1c5f7f936"
+    },
+    "workload-v2-install/007.sh": {
+      "bytes": 41006,
+      "sha256": "2605979dd4cfeb4cbc162a268fd63f2af956df076809a580a4c5f9c2343e3a2a"
+    },
+    "workload-v2-install/008.sh": {
+      "bytes": 11524,
+      "sha256": "39260687c016f87c3d3ca503992625f9cf2ea56b98082752c95cbfa655553e6d"
+    },
+    "generation-3-preboot-configured.img": {
+      "bytes": 13860864,
+      "sha256": "0151aadb35aba7b7299ea89cadb84b25626b18c495bd09a80a109923662fe42f"
+    }
+  }
+}

@@ -1,0 +1,51 @@
+PB_SMP_SNAPSHOT_V2
+Linux (none) 7.1.0-rc6+ #56 SMP PREEMPT Fri Sep 11 18:35:00 AEST 2026 aarch64
+boot_id=unavailable
+uptime=57.86 226.33
+cmdline=msm.skip_gpu=1 msm.separate_gpu_kms=1 panic=5 oops=panic printk.time=1 pocketboot.log=info pocketboot.drm_page_flips=16 drm.debug=0x6 pocketboot.lab=display-final
+online=0-3
+cpu_node=/sys/firmware/devicetree/base/cpus/cpu@0 reg=00000000
+method=spin-table 
+release=00000000854ff400
+cpu_node=/sys/firmware/devicetree/base/cpus/cpu@1 reg=00000001
+method=spin-table 
+release=00000000854ff480
+cpu_node=/sys/firmware/devicetree/base/cpus/cpu@2 reg=00000002
+method=spin-table 
+release=00000000854ff500
+cpu_node=/sys/firmware/devicetree/base/cpus/cpu@3 reg=00000003
+method=spin-table 
+release=00000000854ff580
+stat_before
+cpu  58 0 446 22636 6 0 0 0 0 0
+cpu0 4 0 154 5624 4 0 0 0 0 0
+cpu1 48 0 152 5586 0 0 0 0 0 0
+cpu2 2 0 63 5720 0 0 0 0 0 0
+cpu3 4 0 77 5704 1 0 0 0 0 0
+intr 64023 0 157 3331 0 0 0 39 0 0 0 0 0 57489 0 0 3 1 0 0 0 0 0 0 0 0 0 0 0 0 0 0 2 0 0 0 0 0 351 3 241 0 0 0 0 30 68 178 577 0 0 0 0 0 1533 16 2 2 0 0 0 0 0 0 0
+ctxt 17511
+btime 0
+processes 174
+procs_running 1
+procs_blocked 0
+softirq 32684 0 852 0 0 0 0 1 30418 0 1413
+SMP_WORK_V2 expected=292d74d0d0222325 bytes_per_cpu=67108864
+cpu=1 start_cpu=1 end_cpu=1 hash=292d74d0d0222325 cpu_seconds=0.503985 PASS
+cpu=3 start_cpu=3 end_cpu=3 hash=292d74d0d0222325 cpu_seconds=0.504120 PASS
+cpu=2 start_cpu=2 end_cpu=2 hash=292d74d0d0222325 cpu_seconds=0.504333 PASS
+cpu=0 start_cpu=0 end_cpu=0 hash=292d74d0d0222325 cpu_seconds=0.504403 PASS
+SMP_WORK_PASS all_four_cpus
+stat_after
+cpu  260 0 447 22637 6 0 0 0 0 0
+cpu0 54 0 154 5624 4 0 0 0 0 0
+cpu1 98 0 152 5586 0 0 0 0 0 0
+cpu2 52 0 63 5721 0 0 0 0 0 0
+cpu3 54 0 77 5704 1 0 0 0 0 0
+intr 64564 0 165 3347 0 0 0 39 0 0 0 0 0 57997 0 0 3 1 0 0 0 0 0 0 0 0 0 0 0 0 0 0 2 0 0 0 0 0 357 3 244 0 0 0 0 30 68 178 577 0 0 0 0 0 1533 16 2 2 0 0 0 0 0 0 0
+ctxt 17697
+btime 0
+processes 180
+procs_running 1
+procs_blocked 0
+softirq 32773 0 862 0 0 0 0 1 30443 0 1467
+PB_SMP_SNAPSHOT_PASS

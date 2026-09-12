@@ -1,0 +1,11 @@
+{
+  "pocketpreboot/src/msm8916.rs": "b7a3141a885eac35eef84d15c4e415b6499da391f874cf91f567acdce4402ff8",
+  "pocketpreboot/src/spin_table.S": "876d0bb726b25a8f666e68319d871b16471767932961007ab9d6dfbf38b2a541",
+  "pocketpreboot/src/start.S": "6723dde1878f6d9f17ff0ec185e3badcf3f7804f5c61ddd14cd315f67cc477b5",
+  "pocketpreboot/linker.ld": "48ab5d378ad35beb9a0d2e10cb453999d42b1196b2840e7047e04ac55b7da357",
+  "src/kexec.rs": "00440fda431e9d5af06994f5541ebbb287be175fbdb41224efd897c98ffaab4b",
+  "patches/kernel/msm8916/0001-arm64-pocketboot-spin-table-kexec.patch": "3714dff3fc40b3e09274c02d524fb64e2a75502a25c4a1aa07919684cc5cfeec",
+  "tools/smp-work.c": "9b382cb85e945f635f0f5f5247920cdcaebd9463f6849bbf303b3785db03110f",
+  "tools/smp-coherency.c": "e8ebc48fbdc9eeaf69df23c77c3286afac28befcff6c1409cb84afc8c46cd8d9",
+  "tools/db410c_check_phase.py": "5ce2226bcd81122ef358fb283fae9e829f6f31e706a2c66ac7cfe04a2f86fc46"
+}

@@ -1,0 +1,5 @@
+{
+  "event": "First sequence driver stopped after a 5-second global fastboot devices timeout following generation 1.",
+  "device_result": "A5 later responded directly as Pocketboot; no extra boot/reset was issued.",
+  "continuation": "Validate generation 1 before booting generations 2 and 3. Poll only the selected target and tolerate bounded reconnect delays."
+}

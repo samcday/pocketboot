@@ -1,0 +1,20 @@
+{
+  "configs/device/qcom/msm8916-samsung-a5u-eur.toml": "254fc1788a784bce09f4df78a6a70e2d2047dd60a41346d1ecb50d765f775000",
+  "configs/dt-overlays/qcom/msm8916-samsung-a5u-eur.dtso": "4f38bdef0588e360b5abaca118d7b104296cbd8d7bacd3b28861032a4378f9cb",
+  "configs/soc/qcom/msm8916.toml": "bb49187451ee97c3b8e7e16a1c5fe6d42cfacf92e3beb72124f8acc4d8517592",
+  "tools/db410c_kexec.py": "7bc2f79226a5d1be8161bb664b92c700a98ad263347e13346ae69ad63337cb6c",
+  "tools/db410c_check_phase.py": "d00ff9d3cb1f5e666e7dd4c4d5f82702746833285a03d18ecf7922a075beaed6",
+  "tools/ramoops_decode.py": "b7238f895a774520b78aaf60b05e03578eda3a89e13452f2e66090e761f66c0f",
+  "tools/ramoops_rs.c": "538fdaef146e2144ba5c2708c3e4ad13e06b493f1cb8b2062286af8a1ead3129",
+  "patches/kernel/msm8916/0001-arm64-pocketboot-spin-table-kexec.patch": "3714dff3fc40b3e09274c02d524fb64e2a75502a25c4a1aa07919684cc5cfeec",
+  "patches/kernel/msm8916/0004-iommu-qcom-ignore-disabled-secure-contexts.patch": "de99d74a0962b95d54659c28054cf0e1eb9de2e579fe8d5e47470734d3895e43",
+  "patches/kernel/msm8916/0003-usb-functionfs-initialize-reset-work.patch": "79ebc48cba045680449813692d4a43716563fa4dc17a5c6682b13f2cf57d3881",
+  "patches/kernel/msm8916/0002-usb-chipidea-msm-enable-sg-bounce.patch": "5ac6cda794df3d13ed8352b6bfc6fdb9ebb5b50c1b2e406650070cb4d1a0af87",
+  "patches/kernel/msm8916/0005-iommu-qcom-report-unhandled-faults.patch": "5c2cbaa465c81f575eaec511d98b57ab85258122842854d9bae0cb681e8a6af9",
+  "patches/kernel/msm8916/0006-iommu-qcom-invalidate-new-context.patch": "655472a04da4a70199d7e9bfe1448c105e0b2a7b22cb3cbdfafd92d76e0c6b35",
+  "pocketpreboot/src/spin_table.S": "876d0bb726b25a8f666e68319d871b16471767932961007ab9d6dfbf38b2a541",
+  "pocketpreboot/src/msm8916.rs": "e60890f41dc6f820fbafc347a73feeabbd05159a31a76e9e38562ff72bcf4099",
+  "pocketpreboot/src/fdt.rs": "1b1d484278af0f2a3a47acd382b2fc777f26d3db4bfa9383a9e9cff24e344291",
+  "src/kexec.rs": "00440fda431e9d5af06994f5541ebbb287be175fbdb41224efd897c98ffaab4b",
+  "xtask/src/commands/bootimg.rs": "b301fae77529f5acc7df3e5c04f655a5752c9e5ce538983035e8370c38ee7f57"
+}

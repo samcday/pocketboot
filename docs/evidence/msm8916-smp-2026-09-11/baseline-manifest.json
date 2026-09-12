@@ -1,0 +1,18 @@
+{
+  "baseline.its": {
+    "bytes": 762,
+    "sha256": "54db25a2dd1af17a576b5a0b3e82a3319d21e9993a442496bced96a8c53fcb80"
+  },
+  "baseline.Image": {
+    "bytes": 10553352,
+    "sha256": "aa2de4a3d8462439bc273d78adf5c1f1a82cf074ecb375ccd83abc1a039fad85"
+  },
+  "baseline.itb": {
+    "bytes": 10630144,
+    "sha256": "0859e72a76388d14d02217adfd66893c850c0ea2ecc7f8594dcf52b0c77e4411"
+  },
+  "baseline.dtb": {
+    "bytes": 75823,
+    "sha256": "501faf8fd555545308509ca1e1d24f98fe5a9817416892c01cb48168b74f260a"
+  }
+}

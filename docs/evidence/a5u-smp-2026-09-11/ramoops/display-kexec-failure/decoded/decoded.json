@@ -1,0 +1,307 @@
+{
+  "raw_sha256": "48262f9df18f70b9c2849adadcc717b227369aa9568e819fde029ada0e29508b",
+  "ecc_size": 64,
+  "regions": {
+    "dmesg-0": {
+      "size": 2468,
+      "start": 2468,
+      "capacity": 5364,
+      "corrected_symbols": 14,
+      "uncorrectable_blocks": [
+        0,
+        128,
+        256,
+        384,
+        512,
+        640,
+        768,
+        896,
+        1024,
+        1152,
+        1280,
+        1408,
+        1536,
+        1664,
+        1792,
+        1920,
+        2048,
+        2176,
+        2304,
+        2432
+      ]
+    },
+    "dmesg-1": {
+      "size": 2591,
+      "start": 2591,
+      "capacity": 5364,
+      "corrected_symbols": 44,
+      "uncorrectable_blocks": [
+        0,
+        128,
+        256,
+        384,
+        512,
+        640,
+        768,
+        896,
+        1024,
+        1152,
+        1280,
+        1408,
+        1536,
+        1664,
+        1792,
+        1920,
+        2048,
+        2176,
+        2304,
+        2432
+      ]
+    },
+    "dmesg-2": {
+      "size": 0,
+      "start": 0,
+      "capacity": 5364,
+      "corrected_symbols": 13,
+      "uncorrectable_blocks": []
+    },
+    "dmesg-3": {
+      "size": 0,
+      "start": 0,
+      "capacity": 5364,
+      "corrected_symbols": 13,
+      "uncorrectable_blocks": []
+    },
+    "dmesg-4": {
+      "size": 0,
+      "start": 0,
+      "capacity": 5364,
+      "corrected_symbols": 16,
+      "uncorrectable_blocks": []
+    },
+    "dmesg-5": {
+      "size": 0,
+      "start": 0,
+      "capacity": 5364,
+      "corrected_symbols": 17,
+      "uncorrectable_blocks": []
+    },
+    "dmesg-6": {
+      "size": 0,
+      "start": 0,
+      "capacity": 5364,
+      "corrected_symbols": 15,
+      "uncorrectable_blocks": []
+    },
+    "dmesg-7": {
+      "size": 0,
+      "start": 0,
+      "capacity": 5364,
+      "corrected_symbols": 18,
+      "uncorrectable_blocks": []
+    },
+    "dmesg-8": {
+      "size": 0,
+      "start": 0,
+      "capacity": 5364,
+      "corrected_symbols": 15,
+      "uncorrectable_blocks": []
+    },
+    "dmesg-9": {
+      "size": 0,
+      "start": 0,
+      "capacity": 5364,
+      "corrected_symbols": 23,
+      "uncorrectable_blocks": []
+    },
+    "dmesg-10": {
+      "size": 0,
+      "start": 0,
+      "capacity": 5364,
+      "corrected_symbols": 17,
+      "uncorrectable_blocks": []
+    },
+    "dmesg-11": {
+      "size": 0,
+      "start": 0,
+      "capacity": 5364,
+      "corrected_symbols": 12,
+      "uncorrectable_blocks": []
+    },
+    "dmesg-12": {
+      "size": 0,
+      "start": 0,
+      "capacity": 5364,
+      "corrected_symbols": 14,
+      "uncorrectable_blocks": []
+    },
+    "dmesg-13": {
+      "size": 0,
+      "start": 0,
+      "capacity": 5364,
+      "corrected_symbols": 12,
+      "uncorrectable_blocks": []
+    },
+    "dmesg-14": {
+      "size": 0,
+      "start": 0,
+      "capacity": 5364,
+      "corrected_symbols": 15,
+      "uncorrectable_blocks": []
+    },
+    "dmesg-15": {
+      "size": 0,
+      "start": 0,
+      "capacity": 5364,
+      "corrected_symbols": 13,
+      "uncorrectable_blocks": []
+    },
+    "dmesg-16": {
+      "size": 0,
+      "start": 0,
+      "capacity": 5364,
+      "corrected_symbols": 9,
+      "uncorrectable_blocks": []
+    },
+    "dmesg-17": {
+      "size": 0,
+      "start": 0,
+      "capacity": 5364,
+      "corrected_symbols": 12,
+      "uncorrectable_blocks": []
+    },
+    "dmesg-18": {
+      "size": 0,
+      "start": 0,
+      "capacity": 5364,
+      "corrected_symbols": 18,
+      "uncorrectable_blocks": []
+    },
+    "dmesg-19": {
+      "size": 0,
+      "start": 0,
+      "capacity": 5364,
+      "corrected_symbols": 17,
+      "uncorrectable_blocks": []
+    },
+    "dmesg-20": {
+      "size": 0,
+      "start": 0,
+      "capacity": 5364,
+      "corrected_symbols": 13,
+      "uncorrectable_blocks": []
+    },
+    "dmesg-21": {
+      "size": 0,
+      "start": 0,
+      "capacity": 5364,
+      "corrected_symbols": 7,
+      "uncorrectable_blocks": []
+    },
+    "dmesg-22": {
+      "size": 0,
+      "start": 0,
+      "capacity": 5364,
+      "corrected_symbols": 11,
+      "uncorrectable_blocks": []
+    },
+    "dmesg-23": {
+      "size": 0,
+      "start": 0,
+      "capacity": 5364,
+      "corrected_symbols": 4,
+      "uncorrectable_blocks": []
+    },
+    "dmesg-24": {
+      "size": 0,
+      "start": 0,
+      "capacity": 5364,
+      "corrected_symbols": 7,
+      "uncorrectable_blocks": []
+    },
+    "dmesg-25": {
+      "size": 0,
+      "start": 0,
+      "capacity": 5364,
+      "corrected_symbols": 13,
+      "uncorrectable_blocks": []
+    },
+    "dmesg-26": {
+      "size": 0,
+      "start": 0,
+      "capacity": 5364,
+      "corrected_symbols": 23,
+      "uncorrectable_blocks": []
+    },
+    "dmesg-27": {
+      "size": 0,
+      "start": 0,
+      "capacity": 5364,
+      "corrected_symbols": 6,
+      "uncorrectable_blocks": []
+    },
+    "dmesg-28": {
+      "size": 0,
+      "start": 0,
+      "capacity": 5364,
+      "corrected_symbols": 14,
+      "uncorrectable_blocks": []
+    },
+    "dmesg-29": {
+      "size": 0,
+      "start": 0,
+      "capacity": 5364,
+      "corrected_symbols": 13,
+      "uncorrectable_blocks": []
+    },
+    "dmesg-30": {
+      "size": 0,
+      "start": 0,
+      "capacity": 5364,
+      "corrected_symbols": 19,
+      "uncorrectable_blocks": []
+    },
+    "dmesg-31": {
+      "size": 0,
+      "start": 0,
+      "capacity": 5364,
+      "corrected_symbols": 10,
+      "uncorrectable_blocks": []
+    },
+    "console": {
+      "size": 48006,
+      "start": 48006,
+      "capacity": 174708,
+      "corrected_symbols": 7695,
+      "uncorrectable_blocks": [
+        3456,
+        3968,
+        8192,
+        10496,
+        10752,
+        11008,
+        13440,
+        20480,
+        21120,
+        21632,
+        23168,
+        24704,
+        24832,
+        24960,
+        25216,
+        25856,
+        26240,
+        26496,
+        27008,
+        27520,
+        27648,
+        27776,
+        27904,
+        28416,
+        28544,
+        31872,
+        32256
+      ]
+    }
+  }
+}

@@ -1,0 +1,8 @@
+{
+  "address": "0x854fff80",
+  "canary": "0x504243414e415259",
+  "method": "One word in unused resident-page tail, initially zero; read back before reset; restore zero if retained.",
+  "exact_canary_match": false,
+  "observed_after": "0x5042434146415259",
+  "interpretation": "Most bits retained, but the value changed; this is not a blank-memory result."
+}

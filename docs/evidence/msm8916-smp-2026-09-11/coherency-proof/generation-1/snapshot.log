@@ -1,0 +1,51 @@
+PB_SMP_SNAPSHOT_V2
+Linux (none) 7.1.0-rc6+ #2 SMP PREEMPT Fri Sep 11 09:57:12 AEST 2026 aarch64
+boot_id=unavailable
+uptime=23.00 90.06
+cmdline=console=ttyMSM0,115200n8 earlycon loglevel=7 panic=0 androidboot.serialno=bc72e60 pocketboot.lab=kexec-generation-1
+online=0-3
+cpu_node=/sys/firmware/devicetree/base/cpus/cpu@0 reg=00000000
+method=spin-table 
+release=00000000854ff400
+cpu_node=/sys/firmware/devicetree/base/cpus/cpu@1 reg=00000001
+method=spin-table 
+release=00000000854ff480
+cpu_node=/sys/firmware/devicetree/base/cpus/cpu@2 reg=00000002
+method=spin-table 
+release=00000000854ff500
+cpu_node=/sys/firmware/devicetree/base/cpus/cpu@3 reg=00000003
+method=spin-table 
+release=00000000854ff580
+stat_before
+cpu  47 0 134 9009 0 0 0 0 0 0
+cpu0 0 0 86 2214 0 0 0 0 0 0
+cpu1 1 0 11 2284 0 0 0 0 0 0
+cpu2 28 0 21 2247 0 0 0 0 0 0
+cpu3 18 0 14 2263 0 0 0 0 0 0
+intr 26102 0 121 1738 0 0 0 29 0 0 0 0 0 22945 0 0 0 0 8 0 0 0 0 0 0 0 0 71 111 0 2 2 1075 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0
+ctxt 7761
+btime 0
+processes 141
+procs_running 1
+procs_blocked 0
+softirq 14139 0 998 0 0 0 0 547 11389 0 1205
+SMP_WORK_V2 expected=292d74d0d0222325 bytes_per_cpu=67108864
+cpu=3 start_cpu=3 end_cpu=3 hash=292d74d0d0222325 cpu_seconds=0.503996 PASS
+cpu=2 start_cpu=2 end_cpu=2 hash=292d74d0d0222325 cpu_seconds=0.504024 PASS
+cpu=1 start_cpu=1 end_cpu=1 hash=292d74d0d0222325 cpu_seconds=0.504208 PASS
+cpu=0 start_cpu=0 end_cpu=0 hash=292d74d0d0222325 cpu_seconds=0.504510 PASS
+SMP_WORK_PASS all_four_cpus
+stat_after
+cpu  249 0 134 9010 0 0 0 0 0 0
+cpu0 50 0 86 2214 0 0 0 0 0 0
+cpu1 52 0 11 2284 0 0 0 0 0 0
+cpu2 78 0 21 2247 0 0 0 0 0 0
+cpu3 68 0 14 2264 0 0 0 0 0 0
+intr 26635 0 130 1752 0 0 0 31 0 0 0 0 0 23453 0 0 0 0 8 0 0 0 0 0 0 0 0 71 111 0 2 2 1075 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0
+ctxt 7919
+btime 0
+processes 147
+procs_running 1
+procs_blocked 0
+softirq 14254 0 1023 0 0 0 0 560 11412 0 1259
+PB_SMP_SNAPSHOT_PASS

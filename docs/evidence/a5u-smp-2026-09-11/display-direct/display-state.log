@@ -1,0 +1,247 @@
+POCKETBOOT_A5U_DRM_INVENTORY_V1
+cmdline	/proc/cmdline	msm.skip_gpu=1 msm.separate_gpu_kms=1 panic=5 oops=panic printk.time=1 pocketboot.log=info pocketboot.drm_page_flips=16 drm.debug=0x6 pocketboot.lab=a5-display-direct
+dri-name	/sys/kernel/debug/dri/0/name	msm-kms dev=1a01000.display-controller unique=1a01000.display-controller
+card-driver	/sys/class/drm/card0	msm_mdp
+connector-status	/sys/class/drm/card0-DSI-1	connected
+connector-enabled	/sys/class/drm/card0-DSI-1	enabled
+connector-mode	/sys/class/drm/card0-DSI-1	720x1280
+state=/sys/kernel/debug/dri/0/state
+plane[37]: plane-0
+	crtc=crtc-0
+	fb=62
+		allocated by = pocketboot-ui
+		refcount=2
+		format=XR24 little-endian (0x34325258)
+		modifier=0x0
+		size=720x1280
+		layers:
+			size[0]=720x1280
+			pitch[0]=2944
+			offset[0]=0
+			obj[0]:
+				name=0
+				refcount=3
+				start=00100001
+				size=3768320
+				imported=no
+	crtc-pos=720x1280+0+0
+	src-pos=720.000000x1280.000000+0.000000+0.000000
+	rotation=1
+	normalized-zpos=0
+	color-encoding=ITU-R BT.601 YCbCr
+	color-range=YCbCr limited range
+	color_mgmt_changed=0
+	color-pipeline=0
+	hwpipe=DMA0
+	blend_mode=0
+	zpos=1
+	normalized_zpos=0
+	alpha=65535
+	stage=STAGE_BASE
+plane[43]: plane-1
+	crtc=(null)
+	fb=0
+	crtc-pos=0x0+0+0
+	src-pos=0.000000x0.000000+0.000000+0.000000
+	rotation=1
+	normalized-zpos=3
+	color-encoding=ITU-R BT.601 YCbCr
+	color-range=YCbCr limited range
+	color_mgmt_changed=0
+	color-pipeline=0
+	hwpipe=(null)
+	blend_mode=0
+	zpos=3
+	normalized_zpos=3
+	alpha=65535
+	stage=STAGE_UNUSED
+plane[49]: plane-2
+	crtc=(null)
+	fb=0
+	crtc-pos=0x0+0+0
+	src-pos=0.000000x0.000000+0.000000+0.000000
+	rotation=1
+	normalized-zpos=4
+	color-encoding=ITU-R BT.601 YCbCr
+	color-range=YCbCr limited range
+	color_mgmt_changed=0
+	color-pipeline=0
+	hwpipe=(null)
+	blend_mode=0
+	zpos=4
+	normalized_zpos=4
+	alpha=65535
+	stage=STAGE_UNUSED
+plane[55]: plane-3
+	crtc=(null)
+	fb=0
+	crtc-pos=0x0+0+0
+	src-pos=0.000000x0.000000+0.000000+0.000000
+	rotation=1
+	normalized-zpos=5
+	color-encoding=ITU-R BT.601 YCbCr
+	color-range=YCbCr limited range
+	color_mgmt_changed=0
+	color-pipeline=0
+	hwpipe=(null)
+	blend_mode=0
+	zpos=5
+	normalized_zpos=5
+	alpha=65535
+	stage=STAGE_UNUSED
+crtc[61]: crtc-0
+	enable=1
+	active=1
+	self_refresh_active=0
+	planes_changed=1
+	mode_changed=0
+	active_changed=0
+	connectors_changed=0
+	color_mgmt_changed=0
+	plane_mask=1
+	connector_mask=1
+	encoder_mask=1
+	mode: "720x1280": 60 80117 720 800 896 1024 1280 1294 1296 1304 0x48 0x0
+	background_color=ffff000000000000
+	ctl=0
+	hwmixer=LM0
+	cmd_mode=0
+connector[36]: DSI-1
+	crtc=crtc-0
+	self_refresh_aware=0
+	interlace_allowed=0
+	ycbcr_420_allowed=0
+	max_requested_bpc=0
+	colorspace=Default
+name	inuse	plane
+----	-----	-----
+RGB0:0	0	(null)
+RGB1:0	0	(null)
+VIG0:0	0	(null)
+VIG0:1	0	(null)
+VIG0:2	0	(null)
+DMA0:0	1	plane-0
+DMA0:1	0	plane-0
+DMA0:2	0	plane-0
+TOTAL:	1	(of 8)
+AVAIL:	7
+state=/sys/kernel/debug/dri/1a01000.display-controller/state
+plane[37]: plane-0
+	crtc=crtc-0
+	fb=62
+		allocated by = pocketboot-ui
+		refcount=2
+		format=XR24 little-endian (0x34325258)
+		modifier=0x0
+		size=720x1280
+		layers:
+			size[0]=720x1280
+			pitch[0]=2944
+			offset[0]=0
+			obj[0]:
+				name=0
+				refcount=3
+				start=00100001
+				size=3768320
+				imported=no
+	crtc-pos=720x1280+0+0
+	src-pos=720.000000x1280.000000+0.000000+0.000000
+	rotation=1
+	normalized-zpos=0
+	color-encoding=ITU-R BT.601 YCbCr
+	color-range=YCbCr limited range
+	color_mgmt_changed=0
+	color-pipeline=0
+	hwpipe=DMA0
+	blend_mode=0
+	zpos=1
+	normalized_zpos=0
+	alpha=65535
+	stage=STAGE_BASE
+plane[43]: plane-1
+	crtc=(null)
+	fb=0
+	crtc-pos=0x0+0+0
+	src-pos=0.000000x0.000000+0.000000+0.000000
+	rotation=1
+	normalized-zpos=3
+	color-encoding=ITU-R BT.601 YCbCr
+	color-range=YCbCr limited range
+	color_mgmt_changed=0
+	color-pipeline=0
+	hwpipe=(null)
+	blend_mode=0
+	zpos=3
+	normalized_zpos=3
+	alpha=65535
+	stage=STAGE_UNUSED
+plane[49]: plane-2
+	crtc=(null)
+	fb=0
+	crtc-pos=0x0+0+0
+	src-pos=0.000000x0.000000+0.000000+0.000000
+	rotation=1
+	normalized-zpos=4
+	color-encoding=ITU-R BT.601 YCbCr
+	color-range=YCbCr limited range
+	color_mgmt_changed=0
+	color-pipeline=0
+	hwpipe=(null)
+	blend_mode=0
+	zpos=4
+	normalized_zpos=4
+	alpha=65535
+	stage=STAGE_UNUSED
+plane[55]: plane-3
+	crtc=(null)
+	fb=0
+	crtc-pos=0x0+0+0
+	src-pos=0.000000x0.000000+0.000000+0.000000
+	rotation=1
+	normalized-zpos=5
+	color-encoding=ITU-R BT.601 YCbCr
+	color-range=YCbCr limited range
+	color_mgmt_changed=0
+	color-pipeline=0
+	hwpipe=(null)
+	blend_mode=0
+	zpos=5
+	normalized_zpos=5
+	alpha=65535
+	stage=STAGE_UNUSED
+crtc[61]: crtc-0
+	enable=1
+	active=1
+	self_refresh_active=0
+	planes_changed=1
+	mode_changed=0
+	active_changed=0
+	connectors_changed=0
+	color_mgmt_changed=0
+	plane_mask=1
+	connector_mask=1
+	encoder_mask=1
+	mode: "720x1280": 60 80117 720 800 896 1024 1280 1294 1296 1304 0x48 0x0
+	background_color=ffff000000000000
+	ctl=0
+	hwmixer=LM0
+	cmd_mode=0
+connector[36]: DSI-1
+	crtc=crtc-0
+	self_refresh_aware=0
+	interlace_allowed=0
+	ycbcr_420_allowed=0
+	max_requested_bpc=0
+	colorspace=Default
+name	inuse	plane
+----	-----	-----
+RGB0:0	0	(null)
+RGB1:0	0	(null)
+VIG0:0	0	(null)
+VIG0:1	0	(null)
+VIG0:2	0	(null)
+DMA0:0	1	plane-0
+DMA0:1	0	plane-0
+DMA0:2	0	plane-0
+TOTAL:	1	(of 8)
+AVAIL:	7

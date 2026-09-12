@@ -1,0 +1,8 @@
+['fastboot', '-s', 'cd0ee037', 'oem', 'cat:/dev/mmcblk0p16']
+(bootloader) /dev/mmcblk0p16 staged (13631488 bytes)
+(bootloader) run fastboot get_staged /dev/stdout to view
+OKAY [  0.104s]
+Finished. Total time: 0.104s
+['fastboot', '-s', 'cd0ee037', 'get_staged', 'target/a5u-smp-lab/20260911/boot-before-lk2nd.img']
+Uploading 'target/a5u-smp-lab/20260911/boot-before-lk2nd.img' OKAY [  0.415s]
+Finished. Total time: 0.415s

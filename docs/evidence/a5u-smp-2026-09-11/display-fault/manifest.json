@@ -1,0 +1,34 @@
+{
+  "kernel.config": {
+    "bytes": 101059,
+    "sha256": "c6057ae2103e2ff9b6dde7020e7d4b45b1a5dd967bcc965b9698c17a086e2bb0"
+  },
+  "kernel.Image": {
+    "bytes": 11368456,
+    "sha256": "2523f3fd5d1659f35c3012db5431821a99e4da214c35a9ad456d6185f518b783"
+  },
+  "cold.img": {
+    "bytes": 13862928,
+    "sha256": "52b7a4dd7d43273cc76a0c89944fa323363cb33a7885c203cadcbd88ac618085"
+  },
+  "external.dtb": {
+    "bytes": 60154,
+    "sha256": "6570c1538a0d47ed14d1e0bfcd758eaa1bb9aa9d609357331c90ba721ad56e34"
+  },
+  "input.dtb": {
+    "bytes": 60246,
+    "sha256": "0fa59f67e1814a1de4082ddd644c51a335ed152903d50fd30d0d6a17fd8e8e47"
+  },
+  "wrapped.Image": {
+    "bytes": 13795328,
+    "sha256": "62c37af22b1a07a67860a1cb07f831cc44b132810c424c1a0a179e4cd21f6d18"
+  },
+  "boot.img": {
+    "bytes": 11436032,
+    "sha256": "10e4eb623efa9376f67765c91be5c6d97bbc0ac6bdd8985b2ab188d4aa2762e1"
+  },
+  "cmdline.txt": {
+    "bytes": 163,
+    "sha256": "5beb03f7cabb17940320cfbf5d6ce236ec8130752cbec0f4405b88b25cd9f608"
+  }
+}

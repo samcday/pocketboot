@@ -1,0 +1,18 @@
+{
+  "kernel": {
+    "path": "/var/home/sam/src/pocketboot/target/db410c-lab/20260911/parking.Image",
+    "bytes": 10553352,
+    "sha256": "ae4c0fe45fd83dfbe005ebc8f2e31bf32f126566d036d7feb136e1e70147dd51"
+  },
+  "dtb": {
+    "path": "/var/home/sam/src/pocketboot/target/db410c-lab/20260911/nonpsci-input.dtb",
+    "bytes": 75999,
+    "sha256": "cbc3a4a9120efe1c25d525e50f7796f0d882e56c812fff7650b9b08672ba55f7"
+  },
+  "preboot": {
+    "path": "/tmp/pocketpreboot-db410c-v1-pie.bin",
+    "bytes": 26280,
+    "sha256": "975d567ee0f322bf68beec44ae9a89136ce1a9e7168edde03b5b68083b12fa52"
+  },
+  "fit_sha256": "89e546387161553dac261437c0cf3d6685a5c3338abba796c8fb21023b1a4dc0"
+}

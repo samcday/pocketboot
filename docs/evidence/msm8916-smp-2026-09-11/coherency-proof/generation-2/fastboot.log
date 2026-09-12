@@ -1,0 +1,232 @@
+['fastboot', '-s', 'bc72e60', 'getvar', 'product']
+product: pocketboot
+Finished. Total time: 0.000s
+exit=0
+['fastboot', '-s', 'bc72e60', 'stage', 'target/db410c-lab/20260911/kexec-coherency/workload-v2-install/000.sh']
+Sending 'target/db410c-lab/20260911/kexec-coherency/workload-v2-install/000.sh' (40 KB) OKAY [  0.002s]
+Finished. Total time: 0.002s
+exit=0
+['fastboot', '-s', 'bc72e60', 'oem', 'shell-staged']
+(bootloader) shell exited 0; 0 bytes staged
+(bootloader) run fastboot get_staged /dev/stdout to view
+OKAY [  0.056s]
+Finished. Total time: 0.056s
+exit=0
+['fastboot', '-s', 'bc72e60', 'stage', 'target/db410c-lab/20260911/kexec-coherency/workload-v2-install/001.sh']
+Sending 'target/db410c-lab/20260911/kexec-coherency/workload-v2-install/001.sh' (40 KB) OKAY [  0.002s]
+Finished. Total time: 0.002s
+exit=0
+['fastboot', '-s', 'bc72e60', 'oem', 'shell-staged']
+(bootloader) shell exited 0; 0 bytes staged
+(bootloader) run fastboot get_staged /dev/stdout to view
+OKAY [  0.030s]
+Finished. Total time: 0.030s
+exit=0
+['fastboot', '-s', 'bc72e60', 'stage', 'target/db410c-lab/20260911/kexec-coherency/workload-v2-install/002.sh']
+Sending 'target/db410c-lab/20260911/kexec-coherency/workload-v2-install/002.sh' (40 KB) OKAY [  0.002s]
+Finished. Total time: 0.002s
+exit=0
+['fastboot', '-s', 'bc72e60', 'oem', 'shell-staged']
+(bootloader) shell exited 0; 0 bytes staged
+(bootloader) run fastboot get_staged /dev/stdout to view
+OKAY [  0.030s]
+Finished. Total time: 0.030s
+exit=0
+['fastboot', '-s', 'bc72e60', 'stage', 'target/db410c-lab/20260911/kexec-coherency/workload-v2-install/003.sh']
+Sending 'target/db410c-lab/20260911/kexec-coherency/workload-v2-install/003.sh' (40 KB) OKAY [  0.002s]
+Finished. Total time: 0.002s
+exit=0
+['fastboot', '-s', 'bc72e60', 'oem', 'shell-staged']
+(bootloader) shell exited 0; 0 bytes staged
+(bootloader) run fastboot get_staged /dev/stdout to view
+OKAY [  0.030s]
+Finished. Total time: 0.030s
+exit=0
+['fastboot', '-s', 'bc72e60', 'stage', 'target/db410c-lab/20260911/kexec-coherency/workload-v2-install/004.sh']
+Sending 'target/db410c-lab/20260911/kexec-coherency/workload-v2-install/004.sh' (40 KB) OKAY [  0.002s]
+Finished. Total time: 0.002s
+exit=0
+['fastboot', '-s', 'bc72e60', 'oem', 'shell-staged']
+(bootloader) shell exited 0; 0 bytes staged
+(bootloader) run fastboot get_staged /dev/stdout to view
+OKAY [  0.029s]
+Finished. Total time: 0.029s
+exit=0
+['fastboot', '-s', 'bc72e60', 'stage', 'target/db410c-lab/20260911/kexec-coherency/workload-v2-install/005.sh']
+Sending 'target/db410c-lab/20260911/kexec-coherency/workload-v2-install/005.sh' (40 KB) OKAY [  0.002s]
+Finished. Total time: 0.002s
+exit=0
+['fastboot', '-s', 'bc72e60', 'oem', 'shell-staged']
+(bootloader) shell exited 0; 0 bytes staged
+(bootloader) run fastboot get_staged /dev/stdout to view
+OKAY [  0.030s]
+Finished. Total time: 0.030s
+exit=0
+['fastboot', '-s', 'bc72e60', 'stage', 'target/db410c-lab/20260911/kexec-coherency/workload-v2-install/006.sh']
+Sending 'target/db410c-lab/20260911/kexec-coherency/workload-v2-install/006.sh' (40 KB) OKAY [  0.002s]
+Finished. Total time: 0.002s
+exit=0
+['fastboot', '-s', 'bc72e60', 'oem', 'shell-staged']
+(bootloader) shell exited 0; 0 bytes staged
+(bootloader) run fastboot get_staged /dev/stdout to view
+OKAY [  0.030s]
+Finished. Total time: 0.030s
+exit=0
+['fastboot', '-s', 'bc72e60', 'stage', 'target/db410c-lab/20260911/kexec-coherency/workload-v2-install/007.sh']
+Sending 'target/db410c-lab/20260911/kexec-coherency/workload-v2-install/007.sh' (40 KB) OKAY [  0.002s]
+Finished. Total time: 0.002s
+exit=0
+['fastboot', '-s', 'bc72e60', 'oem', 'shell-staged']
+(bootloader) shell exited 0; 0 bytes staged
+(bootloader) run fastboot get_staged /dev/stdout to view
+OKAY [  0.030s]
+Finished. Total time: 0.030s
+exit=0
+['fastboot', '-s', 'bc72e60', 'stage', 'target/db410c-lab/20260911/kexec-coherency/workload-v2-install/008.sh']
+Sending 'target/db410c-lab/20260911/kexec-coherency/workload-v2-install/008.sh' (11 KB) OKAY [  0.001s]
+Finished. Total time: 0.001s
+exit=0
+['fastboot', '-s', 'bc72e60', 'oem', 'shell-staged']
+(bootloader) shell exited 0; 0 bytes staged
+(bootloader) run fastboot get_staged /dev/stdout to view
+OKAY [  0.027s]
+Finished. Total time: 0.027s
+exit=0
+['fastboot', '-s', 'bc72e60', 'stage', 'target/db410c-lab/20260911/kexec-coherency/coherency-install/000.sh']
+Sending 'target/db410c-lab/20260911/kexec-coherency/coherency-install/000.sh' (40 KB) OKAY [  0.002s]
+Finished. Total time: 0.002s
+exit=0
+['fastboot', '-s', 'bc72e60', 'oem', 'shell-staged']
+(bootloader) shell exited 0; 0 bytes staged
+(bootloader) run fastboot get_staged /dev/stdout to view
+OKAY [  0.030s]
+Finished. Total time: 0.030s
+exit=0
+['fastboot', '-s', 'bc72e60', 'stage', 'target/db410c-lab/20260911/kexec-coherency/coherency-install/001.sh']
+Sending 'target/db410c-lab/20260911/kexec-coherency/coherency-install/001.sh' (40 KB) OKAY [  0.002s]
+Finished. Total time: 0.002s
+exit=0
+['fastboot', '-s', 'bc72e60', 'oem', 'shell-staged']
+(bootloader) shell exited 0; 0 bytes staged
+(bootloader) run fastboot get_staged /dev/stdout to view
+OKAY [  0.030s]
+Finished. Total time: 0.030s
+exit=0
+['fastboot', '-s', 'bc72e60', 'stage', 'target/db410c-lab/20260911/kexec-coherency/coherency-install/002.sh']
+Sending 'target/db410c-lab/20260911/kexec-coherency/coherency-install/002.sh' (40 KB) OKAY [  0.002s]
+Finished. Total time: 0.002s
+exit=0
+['fastboot', '-s', 'bc72e60', 'oem', 'shell-staged']
+(bootloader) shell exited 0; 0 bytes staged
+(bootloader) run fastboot get_staged /dev/stdout to view
+OKAY [  0.030s]
+Finished. Total time: 0.030s
+exit=0
+['fastboot', '-s', 'bc72e60', 'stage', 'target/db410c-lab/20260911/kexec-coherency/coherency-install/003.sh']
+Sending 'target/db410c-lab/20260911/kexec-coherency/coherency-install/003.sh' (40 KB) OKAY [  0.002s]
+Finished. Total time: 0.002s
+exit=0
+['fastboot', '-s', 'bc72e60', 'oem', 'shell-staged']
+(bootloader) shell exited 0; 0 bytes staged
+(bootloader) run fastboot get_staged /dev/stdout to view
+OKAY [  0.030s]
+Finished. Total time: 0.030s
+exit=0
+['fastboot', '-s', 'bc72e60', 'stage', 'target/db410c-lab/20260911/kexec-coherency/coherency-install/004.sh']
+Sending 'target/db410c-lab/20260911/kexec-coherency/coherency-install/004.sh' (40 KB) OKAY [  0.002s]
+Finished. Total time: 0.002s
+exit=0
+['fastboot', '-s', 'bc72e60', 'oem', 'shell-staged']
+(bootloader) shell exited 0; 0 bytes staged
+(bootloader) run fastboot get_staged /dev/stdout to view
+OKAY [  0.030s]
+Finished. Total time: 0.030s
+exit=0
+['fastboot', '-s', 'bc72e60', 'stage', 'target/db410c-lab/20260911/kexec-coherency/coherency-install/005.sh']
+Sending 'target/db410c-lab/20260911/kexec-coherency/coherency-install/005.sh' (40 KB) OKAY [  0.002s]
+Finished. Total time: 0.002s
+exit=0
+['fastboot', '-s', 'bc72e60', 'oem', 'shell-staged']
+(bootloader) shell exited 0; 0 bytes staged
+(bootloader) run fastboot get_staged /dev/stdout to view
+OKAY [  0.030s]
+Finished. Total time: 0.030s
+exit=0
+['fastboot', '-s', 'bc72e60', 'stage', 'target/db410c-lab/20260911/kexec-coherency/coherency-install/006.sh']
+Sending 'target/db410c-lab/20260911/kexec-coherency/coherency-install/006.sh' (40 KB) OKAY [  0.002s]
+Finished. Total time: 0.002s
+exit=0
+['fastboot', '-s', 'bc72e60', 'oem', 'shell-staged']
+(bootloader) shell exited 0; 0 bytes staged
+(bootloader) run fastboot get_staged /dev/stdout to view
+OKAY [  0.030s]
+Finished. Total time: 0.030s
+exit=0
+['fastboot', '-s', 'bc72e60', 'stage', 'target/db410c-lab/20260911/kexec-coherency/coherency-install/007.sh']
+Sending 'target/db410c-lab/20260911/kexec-coherency/coherency-install/007.sh' (40 KB) OKAY [  0.002s]
+Finished. Total time: 0.002s
+exit=0
+['fastboot', '-s', 'bc72e60', 'oem', 'shell-staged']
+(bootloader) shell exited 0; 0 bytes staged
+(bootloader) run fastboot get_staged /dev/stdout to view
+OKAY [  0.030s]
+Finished. Total time: 0.030s
+exit=0
+['fastboot', '-s', 'bc72e60', 'stage', 'target/db410c-lab/20260911/kexec-coherency/coherency-install/008.sh']
+Sending 'target/db410c-lab/20260911/kexec-coherency/coherency-install/008.sh' (9 KB) OKAY [  0.001s]
+Finished. Total time: 0.001s
+exit=0
+['fastboot', '-s', 'bc72e60', 'oem', 'shell-staged']
+(bootloader) shell exited 0; 0 bytes staged
+(bootloader) run fastboot get_staged /dev/stdout to view
+OKAY [  0.028s]
+Finished. Total time: 0.028s
+exit=0
+['fastboot', '-s', 'bc72e60', 'stage', 'target/db410c-lab/20260911/kexec-coherency/snapshot-v2.sh']
+Sending 'target/db410c-lab/20260911/kexec-coherency/snapshot-v2.sh' (0 KB) OKAY [  0.000s]
+Finished. Total time: 0.000s
+exit=0
+['fastboot', '-s', 'bc72e60', 'oem', 'shell-staged']
+(bootloader) shell exited 0; 1943 bytes staged
+(bootloader) run fastboot get_staged /dev/stdout to view
+OKAY [  0.531s]
+Finished. Total time: 0.531s
+exit=0
+['fastboot', '-s', 'bc72e60', 'get_staged', 'target/db410c-lab/20260911/coherency-proof/generation-2/snapshot.log']
+Uploading 'target/db410c-lab/20260911/coherency-proof/generation-2/snapshot.log' OKAY [  0.006s]
+Finished. Total time: 0.006s
+exit=0
+['fastboot', '-s', 'bc72e60', 'stage', 'target/db410c-lab/20260911/kexec-coherency/coherency-run.sh']
+Sending 'target/db410c-lab/20260911/kexec-coherency/coherency-run.sh' (0 KB) OKAY [  0.000s]
+Finished. Total time: 0.001s
+exit=0
+['fastboot', '-s', 'bc72e60', 'oem', 'shell-staged']
+(bootloader) shell exited 0; 748 bytes staged
+(bootloader) run fastboot get_staged /dev/stdout to view
+OKAY [  0.251s]
+Finished. Total time: 0.251s
+exit=0
+['fastboot', '-s', 'bc72e60', 'get_staged', 'target/db410c-lab/20260911/coherency-proof/generation-2/coherency.log']
+Uploading 'target/db410c-lab/20260911/coherency-proof/generation-2/coherency.log' OKAY [  0.006s]
+Finished. Total time: 0.006s
+exit=0
+['fastboot', '-s', 'bc72e60', 'oem', 'cat:/sys/firmware/fdt']
+(bootloader) /sys/firmware/fdt staged (75495 bytes)
+(bootloader) run fastboot get_staged /dev/stdout to view
+OKAY [  0.001s]
+Finished. Total time: 0.001s
+exit=0
+['fastboot', '-s', 'bc72e60', 'get_staged', 'target/db410c-lab/20260911/coherency-proof/generation-2/live.dtb']
+Uploading 'target/db410c-lab/20260911/coherency-proof/generation-2/live.dtb' OKAY [  0.008s]
+Finished. Total time: 0.008s
+exit=0
+['fastboot', '-s', 'bc72e60', 'oem', 'dmesg']
+(bootloader) 256 dmesg records staged (20118 bytes)
+(bootloader) run fastboot get_staged /dev/stdout to view
+OKAY [  0.007s]
+Finished. Total time: 0.007s
+exit=0
+['fastboot', '-s', 'bc72e60', 'get_staged', 'target/db410c-lab/20260911/coherency-proof/generation-2/dmesg.log']
+Uploading 'target/db410c-lab/20260911/coherency-proof/generation-2/dmesg.log' OKAY [  0.001s]
+Finished. Total time: 0.001s
+exit=0

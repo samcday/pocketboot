@@ -1,0 +1,1 @@
+msm.skip_gpu=1 msm.separate_gpu_kms=1 pocketboot.lab=a5-header-fix-ram

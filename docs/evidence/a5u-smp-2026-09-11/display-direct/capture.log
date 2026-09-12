@@ -1,0 +1,22 @@
+['getvar', 'product']
+product: pocketboot
+Finished. Total time: 0.001s
+['oem', 'dmesg']
+(bootloader) 962 dmesg records staged (71762 bytes)
+(bootloader) run fastboot get_staged /dev/stdout to view
+OKAY [  0.028s]
+Finished. Total time: 0.028s
+['get_staged', 'target/a5u-smp-lab/20260911/ramoops-iommu/display-direct/dmesg.log']
+Uploading 'target/a5u-smp-lab/20260911/ramoops-iommu/display-direct/dmesg.log' OKAY [  0.009s]
+Finished. Total time: 0.009s
+['stage', 'target/a5u-smp-lab/20260911/ramoops-iommu/display-inventory.sh']
+Sending 'target/a5u-smp-lab/20260911/ramoops-iommu/display-inventory.sh' (1 KB) OKAY [  0.022s]
+Finished. Total time: 0.022s
+['oem', 'shell-staged']
+(bootloader) shell exited 0; 5156 bytes staged
+(bootloader) run fastboot get_staged /dev/stdout to view
+OKAY [  0.031s]
+Finished. Total time: 0.031s
+['get_staged', 'target/a5u-smp-lab/20260911/ramoops-iommu/display-direct/display-state.log']
+Uploading 'target/a5u-smp-lab/20260911/ramoops-iommu/display-direct/display-state.log' OKAY [  0.013s]
+Finished. Total time: 0.013s

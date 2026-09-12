@@ -1,0 +1,238 @@
+{
+  "raw_sha256": "650623fddb12e21d93216a37385c0f287b4fbf548687806a8e046c8ef00ac14b",
+  "ecc_size": 64,
+  "regions": {
+    "dmesg-0": {
+      "size": 3184,
+      "start": 3184,
+      "capacity": 5364,
+      "corrected_symbols": 0,
+      "uncorrectable_blocks": [],
+      "ramoops_header": "====172.057118-C"
+    },
+    "dmesg-1": {
+      "size": 0,
+      "start": 0,
+      "capacity": 5364,
+      "corrected_symbols": 0,
+      "uncorrectable_blocks": []
+    },
+    "dmesg-2": {
+      "size": 0,
+      "start": 0,
+      "capacity": 5364,
+      "corrected_symbols": 0,
+      "uncorrectable_blocks": []
+    },
+    "dmesg-3": {
+      "size": 0,
+      "start": 0,
+      "capacity": 5364,
+      "corrected_symbols": 0,
+      "uncorrectable_blocks": []
+    },
+    "dmesg-4": {
+      "size": 0,
+      "start": 0,
+      "capacity": 5364,
+      "corrected_symbols": 0,
+      "uncorrectable_blocks": []
+    },
+    "dmesg-5": {
+      "size": 0,
+      "start": 0,
+      "capacity": 5364,
+      "corrected_symbols": 0,
+      "uncorrectable_blocks": []
+    },
+    "dmesg-6": {
+      "size": 0,
+      "start": 0,
+      "capacity": 5364,
+      "corrected_symbols": 0,
+      "uncorrectable_blocks": []
+    },
+    "dmesg-7": {
+      "size": 0,
+      "start": 0,
+      "capacity": 5364,
+      "corrected_symbols": 0,
+      "uncorrectable_blocks": []
+    },
+    "dmesg-8": {
+      "size": 0,
+      "start": 0,
+      "capacity": 5364,
+      "corrected_symbols": 0,
+      "uncorrectable_blocks": []
+    },
+    "dmesg-9": {
+      "size": 0,
+      "start": 0,
+      "capacity": 5364,
+      "corrected_symbols": 0,
+      "uncorrectable_blocks": []
+    },
+    "dmesg-10": {
+      "size": 0,
+      "start": 0,
+      "capacity": 5364,
+      "corrected_symbols": 0,
+      "uncorrectable_blocks": []
+    },
+    "dmesg-11": {
+      "size": 0,
+      "start": 0,
+      "capacity": 5364,
+      "corrected_symbols": 0,
+      "uncorrectable_blocks": []
+    },
+    "dmesg-12": {
+      "size": 0,
+      "start": 0,
+      "capacity": 5364,
+      "corrected_symbols": 0,
+      "uncorrectable_blocks": []
+    },
+    "dmesg-13": {
+      "size": 0,
+      "start": 0,
+      "capacity": 5364,
+      "corrected_symbols": 0,
+      "uncorrectable_blocks": []
+    },
+    "dmesg-14": {
+      "size": 0,
+      "start": 0,
+      "capacity": 5364,
+      "corrected_symbols": 0,
+      "uncorrectable_blocks": []
+    },
+    "dmesg-15": {
+      "size": 0,
+      "start": 0,
+      "capacity": 5364,
+      "corrected_symbols": 0,
+      "uncorrectable_blocks": []
+    },
+    "dmesg-16": {
+      "size": 0,
+      "start": 0,
+      "capacity": 5364,
+      "corrected_symbols": 0,
+      "uncorrectable_blocks": []
+    },
+    "dmesg-17": {
+      "size": 0,
+      "start": 0,
+      "capacity": 5364,
+      "corrected_symbols": 0,
+      "uncorrectable_blocks": []
+    },
+    "dmesg-18": {
+      "size": 0,
+      "start": 0,
+      "capacity": 5364,
+      "corrected_symbols": 0,
+      "uncorrectable_blocks": []
+    },
+    "dmesg-19": {
+      "size": 0,
+      "start": 0,
+      "capacity": 5364,
+      "corrected_symbols": 0,
+      "uncorrectable_blocks": []
+    },
+    "dmesg-20": {
+      "size": 0,
+      "start": 0,
+      "capacity": 5364,
+      "corrected_symbols": 0,
+      "uncorrectable_blocks": []
+    },
+    "dmesg-21": {
+      "size": 0,
+      "start": 0,
+      "capacity": 5364,
+      "corrected_symbols": 0,
+      "uncorrectable_blocks": []
+    },
+    "dmesg-22": {
+      "size": 0,
+      "start": 0,
+      "capacity": 5364,
+      "corrected_symbols": 0,
+      "uncorrectable_blocks": []
+    },
+    "dmesg-23": {
+      "size": 0,
+      "start": 0,
+      "capacity": 5364,
+      "corrected_symbols": 0,
+      "uncorrectable_blocks": []
+    },
+    "dmesg-24": {
+      "size": 0,
+      "start": 0,
+      "capacity": 5364,
+      "corrected_symbols": 0,
+      "uncorrectable_blocks": []
+    },
+    "dmesg-25": {
+      "size": 0,
+      "start": 0,
+      "capacity": 5364,
+      "corrected_symbols": 0,
+      "uncorrectable_blocks": []
+    },
+    "dmesg-26": {
+      "size": 0,
+      "start": 0,
+      "capacity": 5364,
+      "corrected_symbols": 0,
+      "uncorrectable_blocks": []
+    },
+    "dmesg-27": {
+      "size": 0,
+      "start": 0,
+      "capacity": 5364,
+      "corrected_symbols": 0,
+      "uncorrectable_blocks": []
+    },
+    "dmesg-28": {
+      "size": 0,
+      "start": 0,
+      "capacity": 5364,
+      "corrected_symbols": 0,
+      "uncorrectable_blocks": []
+    },
+    "dmesg-29": {
+      "size": 0,
+      "start": 0,
+      "capacity": 5364,
+      "corrected_symbols": 0,
+      "uncorrectable_blocks": []
+    },
+    "dmesg-30": {
+      "size": 0,
+      "start": 0,
+      "capacity": 5364,
+      "corrected_symbols": 0,
+      "uncorrectable_blocks": []
+    },
+    "dmesg-31": {
+      "size": 0,
+      "start": 0,
+      "capacity": 5364,
+      "corrected_symbols": 0,
+      "uncorrectable_blocks": []
+    },
+    "console": {
+      "size": 18811,
+      "start": 18811,
+      "capacity": 174708,
+      "corrected_symbols": 0,
+      "uncorrectable_blocks": []
+    }
+  }
+}

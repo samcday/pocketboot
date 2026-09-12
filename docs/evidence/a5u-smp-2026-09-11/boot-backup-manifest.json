@@ -1,0 +1,22 @@
+{
+  "serial": "cd0ee037",
+  "compatible": "samsung,a5u-eur",
+  "partition": "boot",
+  "device": "/dev/mmcblk0p16",
+  "backup": {
+    "path": "/var/home/sam/src/pocketboot/target/a5u-smp-lab/20260911/boot-before-lk2nd.img",
+    "bytes": 13631488,
+    "sha256": "3b8f02233a869d2722270ca8882cef01455364280e85570bbe5f2dcbad571125"
+  },
+  "lk2nd": {
+    "path": "/var/home/sam/src/pocketboot/target/a5u-smp-lab/20260911/lk2nd-msm8916.img",
+    "source": "/var/home/sam/src/lk2nd/build-lk2nd-msm8916/lk2nd.img",
+    "bytes": 421904,
+    "sha256": "a138dda3dbfbc5614bc4f2fa0302c9e22dc819daf4cb448856b03268c166e8f8"
+  },
+  "backup_header": {
+    "cmdline": "msm.skip_gpu=1 msm.separate_gpu_kms=1",
+    "kernel_bytes": 11358216,
+    "magic_at_lk2nd_os_offset": "c13500f021c00291"
+  }
+}

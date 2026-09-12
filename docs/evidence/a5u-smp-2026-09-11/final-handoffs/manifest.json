@@ -1,0 +1,26 @@
+{
+  "fixture-input.dtb": {
+    "bytes": 60666,
+    "sha256": "f4b85f9243478529f01a2a1d72fc8bfae974e94a139265fc06f77aaabfe12ada"
+  },
+  "kernel.Image": {
+    "bytes": 11358216,
+    "sha256": "25a9c9fc7666a5351261ec91f4344d0167259ab45959c5436d2758c185201ece"
+  },
+  "cold.dtb": {
+    "bytes": 60075,
+    "sha256": "7debc10e515f0082b33e1cf28bd8c7730c9998955e6173af10913046e64ac1c6"
+  },
+  "cold.img": {
+    "bytes": 13862928,
+    "sha256": "36b7241d7970cd44f04d6950f048ccc77771f8d71eee41115d595ca26213933b"
+  },
+  "wrapped.Image": {
+    "bytes": 13795328,
+    "sha256": "f5995b46f11e975e810ae4df9eee2245e0b77ca624d89471c3f14f396b671bfb"
+  },
+  "cmdline.txt": {
+    "bytes": 108,
+    "sha256": "bc849bbd99764bac5a61097dcea2949ef991abadc730a0601bd60913aed0f273"
+  }
+}

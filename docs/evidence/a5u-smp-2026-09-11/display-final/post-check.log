@@ -1,0 +1,71 @@
+msm.skip_gpu=1 msm.separate_gpu_kms=1 panic=5 oops=panic printk.time=1 pocketboot.log=info pocketboot.drm_page_flips=16 drm.debug=0x6 pocketboot.lab=display-final-3
+67.39 261.72
+0-3
+SMP_WORK_V2 expected=292d74d0d0222325 bytes_per_cpu=67108864
+cpu=1 start_cpu=1 end_cpu=1 hash=292d74d0d0222325 cpu_seconds=0.504245 PASS
+cpu=2 start_cpu=2 end_cpu=2 hash=292d74d0d0222325 cpu_seconds=0.504081 PASS
+cpu=0 start_cpu=0 end_cpu=0 hash=292d74d0d0222325 cpu_seconds=0.504546 PASS
+cpu=3 start_cpu=3 end_cpu=3 hash=292d74d0d0222325 cpu_seconds=0.504328 PASS
+SMP_WORK_PASS all_four_cpus
+SMP_COHERENCY_V1 cpus=0,1,2,3 ring_rounds_per_cpu=10000 migration_rounds=1000 payload_bytes=2048 phase_timeout_seconds=12
+phase=ring cpu=0 completed=10000 before=0 after=0 result=PASS
+phase=ring cpu=1 completed=10000 before=1 after=1 result=PASS
+phase=ring cpu=2 completed=10000 before=2 after=2 result=PASS
+phase=ring cpu=3 completed=10000 before=3 after=3 result=PASS
+phase=ring handoffs=40000 payload_bytes=2048 elapsed_ms=131 PASS
+phase=migration cpu=3 completed=4000 before=2 after=3 result=PASS
+phase=migration transitions=4000 payload_bytes=2048 elapsed_ms=87
+SMP_COHERENCY_PASS all_four_cpus_shared_memory_and_migration
+           CPU0       CPU1       CPU2       CPU3       
+ 12:      17005      17027      16813      16895 GIC-0  20 Level     arch_timer
+ 15:          3          0          0          0  msmgpio  12 Edge      sm5502
+ 16:          0          0          0          1   sm5502   0 Edge      muic-attach
+ 17:          0          0          0          0   sm5502   1 Edge      muic-detach
+ 18:          0          0          0          0   sm5502   2 Edge      muic-kp
+ 19:          0          0          0          0   sm5502   3 Edge      muic-lkp
+ 20:          0          0          0          0   sm5502   4 Edge      muic-lkr
+ 21:          0          0          0          0   sm5502   5 Edge      muic-ovp-event
+ 22:          0          0          0          0   sm5502   6 Edge      muic-ocp-event
+ 23:          0          0          0          0   sm5502   7 Edge      muic-ovp-ocp-dis
+ 24:          0          0          0          0   sm5502   8 Edge      muic-vbus-det
+ 25:          0          0          0          0   sm5502   9 Edge      muic-rev-acce
+ 26:          0          0          0          0   sm5502  10 Edge      muic-adc-chg
+ 27:          0          0          0          0   sm5502  11 Edge      muic-stuck-key
+ 28:          0          0          0          0   sm5502  12 Edge      muic-stuck-key-rcv
+ 29:          0          0          0          0   sm5502  13 Edge      muic-mhl
+ 30:          0          0          0          0 GIC-0 270 Level     bam_dma
+ 31:          8          0          0          0 GIC-0 140 Level     msm_serial0
+ 32:          0          0          0          0 GIC-0 102 Level     qcom-iommu-fault
+ 35:          0          0          0          0 GIC-0 127 Level     i2c_qup
+ 36:          0          0          0          0 GIC-0 128 Level     i2c_qup
+ 37:        413          0          0          0 GIC-0 130 Level     i2c_qup
+ 38:          3          0          0          0 GIC-0 131 Level     i2c_qup
+ 39:        271          0          0          0 GIC-0 132 Level     i2c_qup
+ 40:          0          0          0          0 pmic_arb 524289 Edge      pm8941_pwrkey
+ 41:          0          0          0          0 pmic_arb 532481 Edge      pm8941_resin
+ 43:          0          0          0          0 GIC-0  39 Level     arch_mem_timer
+ 44:         21          0          0          0 msm_mdss   0 Edge      msm-kms
+ 45:         68          0          0          0 GIC-0 200 Edge      smd-edge
+ 46:        174          0          0          0 GIC-0 155 Level     mmc0
+ 47:        415          0          0          0 GIC-0 157 Level     mmc1
+ 48:          0          0          0          0  msmgpio  98 Edge      tm2-touchkey
+ 49:          0          0          0          0  msmgpio  13 Edge      6-0048
+ 50:       1730          0          0          0 GIC-0 166 Level     ci_hdrc_msm
+ 51:         16          0          0          0 msm_mdss   4 Edge      dsi_isr
+ 52:          2          0          0          0 GIC-0 170 Level     7824900.mmc
+ 53:          0          0          0          0  msmgpio 107 Edge      Volume Up
+ 54:          0          0          0          0  msmgpio 109 Edge      Home
+ 55:          0          0          0          0  msmgpio  52 Edge      Hall Effect Sensor
+ 56:          2          0          0          0 GIC-0 253 Level     7864900.mmc
+ 58:          0          0          0          0  msmgpio  38 Edge      7864900.mmc cd
+ 62:          0          0          0          0  msmgpio  62 Edge      rt5033
+IPI0:      2050       2038       2071       2026       Rescheduling interrupts
+IPI1:       341        405        608       2129       Function call interrupts
+IPI2:         0          0          0          0       CPU stop interrupts
+IPI3:         0          0          0          0       CPU stop NMIs
+IPI4:         0          0          0          0       Timer broadcast interrupts
+IPI5:         7          6         16          4       IRQ work interrupts
+IPI6:         0          0          0          0       CPU backtrace interrupts
+IPI7:         0          0          0          0       KGDB roundup interrupts
+Err:          0
+-r--r--r--    1     43444 console-ramoops-0
