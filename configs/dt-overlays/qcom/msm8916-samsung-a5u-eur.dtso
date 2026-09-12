@@ -1,6 +1,33 @@
 /dts-v1/;
 /plugin/;
 
+/* lk2nd only starts CPUs labelled psci/spin-table. Let preboot own ACC+SCM. */
+&{/cpus/cpu@0} { enable-method = "pocketboot,msm8916-acc"; };
+&{/cpus/cpu@1} { enable-method = "pocketboot,msm8916-acc"; };
+&{/cpus/cpu@2} { enable-method = "pocketboot,msm8916-acc"; };
+&{/cpus/cpu@3} { enable-method = "pocketboot,msm8916-acc"; };
+
+/* Resident secondary entry and parking slots, preserved across kexec. */
+&{/reserved-memory} {
+	#address-cells = <2>;
+	#size-cells = <2>;
+	/* lk2nd's 512 KiB raw ramoops download window on this board. */
+	ramoops@9ff80000 {
+		compatible = "ramoops";
+		reg = <0 0x9ff80000 0 0x80000>;
+		record-size = <0x2000>;
+		console-size = <0x40000>;
+		/* Reset retention is imperfect; protect each 128-byte block. */
+		ecc-size = <64>;
+	};
+
+	spin-table@854ff000 {
+		compatible = "pocketboot,spin-table-v1";
+		reg = <0 0x854ff000 0 0x1000>;
+		no-map;
+	};
+};
+
 &{/reserved-memory/mpss@86800000} {
 	status = "disabled";
 };
@@ -28,6 +55,13 @@
 &{/soc@0/iommu@1f08000} {
 	status = "disabled";
 };
+
+/* Camera/video secure contexts are unused. Avoid giving firmware a dynamic
+ * secure page table whose ownership cannot yet be carried through kexec.
+ * The display's non-secure context at 0x4000 stays available.
+ */
+&{/soc@0/iommu@1ef0000/iommu-ctx@3000} { status = "disabled"; };
+&{/soc@0/iommu@1ef0000/iommu-ctx@5000} { status = "disabled"; };
 
 &{/soc@0/remoteproc@4080000} {
 	status = "disabled";

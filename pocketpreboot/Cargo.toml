@@ -7,5 +7,12 @@ build = "build.rs"
 
 [features]
 default = []
+# Lab-only breadcrumbs in the shim's own RAM footprint; no persistent writes.
+debug-ram-trace = []
 soc-exynos7870 = []
+soc-msm8916 = []
+soc-apq8016 = ["soc-msm8916"]
 device-exynos7870-j7xelte = ["soc-exynos7870"]
+device-msm8916-samsung-a5u-eur = ["soc-msm8916"]
+device-msm8916-samsung-gt510 = ["soc-msm8916"]
+device-apq8016-sbc = ["soc-msm8916"]

@@ -4,11 +4,20 @@ name = "Qualcomm MSM8916/APQ8016"
 remote = "https://github.com/samcday/linux.git"
 # https://github.com/samcday/linux/tree/pocketboot/msm8916
 sha = "d87323486b79a31b9b25eb6fe30f1b503f142ff2"
+patches = [
+    "patches/kernel/msm8916/0001-arm64-pocketboot-spin-table-kexec.patch",
+    "patches/kernel/msm8916/0002-usb-chipidea-msm-enable-sg-bounce.patch",
+    "patches/kernel/msm8916/0003-usb-functionfs-initialize-reset-work.patch",
+    "patches/kernel/msm8916/0004-iommu-qcom-ignore-disabled-secure-contexts.patch",
+    "patches/kernel/msm8916/0005-iommu-qcom-report-unhandled-faults.patch",
+    "patches/kernel/msm8916/0006-iommu-qcom-invalidate-new-context.patch",
+]
 
 [kconfig]
 # Platform sizing
 ARCH_QCOM = true
 NR_CPUS = 4
+ARM64_SPIN_TABLE_KEXEC = true
 
 # Core Qualcomm firmware/resource plumbing
 QCOM_SCM = true

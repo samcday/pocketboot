@@ -16,9 +16,22 @@ SECTIONS
 
     .data ALIGN(8) : {
         *(.data .data.*)
+        *(.got .got.*)
     }
 
-    .bss ALIGN(16) (NOLOAD) : {
+    .rela.dyn ALIGN(8) : {
+        __rela_start = .;
+        *(.rela.dyn)
+        __rela_end = .;
+    }
+
+    .dynsym ALIGN(8) : { *(.dynsym) }
+    .dynstr ALIGN(8) : { *(.dynstr) }
+    .hash ALIGN(8) : { *(.hash) }
+    .gnu.hash ALIGN(8) : { *(.gnu.hash) }
+    .dynamic ALIGN(8) : { *(.dynamic) }
+
+    .bss ALIGN(64) (NOLOAD) : {
         __bss_start = .;
         *(.bss .bss.*)
         *(COMMON)
@@ -29,6 +42,9 @@ SECTIONS
     .stack ALIGN(16) (NOLOAD) : {
         . = . + 0x4000;
         __stack_top = .;
+        . = . + 0x1000;
+        __exception_stack_top = .;
+        KEEP(*(.pb_ram_trace))
     }
 
     __image_end = .;
