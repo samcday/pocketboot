@@ -1,0 +1,11 @@
+msm.skip_gpu=1 msm.separate_gpu_kms=1 panic=5 oops=panic printk.time=1 pocketboot.log=info pocketboot.drm_page_flips=16 drm.debug=0x6 pocketboot.lab=display-final
+0-3
+SMP_COHERENCY_V1 cpus=0,1,2,3 ring_rounds_per_cpu=10000 migration_rounds=1000 payload_bytes=2048 phase_timeout_seconds=12
+phase=ring cpu=0 completed=10000 before=0 after=0 result=PASS
+phase=ring cpu=1 completed=10000 before=1 after=1 result=PASS
+phase=ring cpu=2 completed=10000 before=2 after=2 result=PASS
+phase=ring cpu=3 completed=10000 before=3 after=3 result=PASS
+phase=ring handoffs=40000 payload_bytes=2048 elapsed_ms=131 PASS
+phase=migration cpu=3 completed=4000 before=2 after=3 result=PASS
+phase=migration transitions=4000 payload_bytes=2048 elapsed_ms=86
+SMP_COHERENCY_PASS all_four_cpus_shared_memory_and_migration

@@ -1,0 +1,5 @@
+for pb_udc_path in /sys/kernel/config/usb_gadget/*/UDC; do pb_udc_name=$(cat
+ "$pb_udc_path"); echo "" > "$pb_udc_path"; sleep 1; echo "$pb_udc_name" > "$pb_
+udc_path"; done
+[  225.412192] l13: voltage operation not allowed
+~ # 

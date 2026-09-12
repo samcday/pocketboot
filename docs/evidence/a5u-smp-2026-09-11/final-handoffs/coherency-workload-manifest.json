@@ -1,0 +1,46 @@
+{
+  "smp-coherency-v1": {
+    "bytes": 67448,
+    "sha256": "c9f5b66ae145b757ae277a80e9fc746b582badb40b9af8cf2cf5cc2fce02a9f0"
+  },
+  "coherency-run.sh": {
+    "bytes": 87,
+    "sha256": "d95a3316d52ca782d6ca0c2540ee0a2b39f25d6ba2bc57354a524fe3d9d0fad0"
+  },
+  "coherency-install/000.sh": {
+    "bytes": 41072,
+    "sha256": "43458a51249ac3e84f1bc20c0f67aa724fcc3117bd2a0a6a3e98048d14e82b62"
+  },
+  "coherency-install/001.sh": {
+    "bytes": 41012,
+    "sha256": "567f7a99396119a36cb7d6704346234b55ec16e3db2bad9b359497542412ad94"
+  },
+  "coherency-install/002.sh": {
+    "bytes": 41012,
+    "sha256": "368a261016e7b1973900fc661c015c29d5f6d558daf13703fc5ac78e8abe87fc"
+  },
+  "coherency-install/003.sh": {
+    "bytes": 41012,
+    "sha256": "ba64c9b056a7bc0fc39d33233b69fddf239d8ac47b3a87830c58bafda14f1cb0"
+  },
+  "coherency-install/004.sh": {
+    "bytes": 41012,
+    "sha256": "07a89fc61f822c83713c854b948013caecf6b0894819f12e2c8a69f61ecfa279"
+  },
+  "coherency-install/005.sh": {
+    "bytes": 41012,
+    "sha256": "cfe2cb13694f0327d5920b5a8cad4d9c4eab4bde6bef42db5a31c3d18c09e449"
+  },
+  "coherency-install/006.sh": {
+    "bytes": 41012,
+    "sha256": "85cee530fd3f113ec760cdfdfb1ccff83e3a0f448919dd2f6dcdaac73ec547a6"
+  },
+  "coherency-install/007.sh": {
+    "bytes": 41012,
+    "sha256": "f6d412ecd67fd7df7d3ce1012e950285bdd3c89858519fc4edea7bc38a146551"
+  },
+  "coherency-install/008.sh": {
+    "bytes": 9702,
+    "sha256": "e976dc9c365a973ff3cb76c8dbfb4300a01078b70887f0237ad95a624067db4f"
+  }
+}

@@ -1,0 +1,25 @@
+Subject: [PATCH] iommu/qcom: invalidate a newly programmed context
+
+The context bank uses its fixed ASID again after a kexec boot. Programming a
+new TTBR does not itself discard cached translations or intermediate table
+walks from the previous kernel. Invalidate the context and wait for completion
+before publishing the new domain's page-table operations.
+
+On Samsung A5U, successive kexec boots otherwise fault when scanning the third
+framebuffer (IOVA 0x732000), despite a valid software page-table walk. Explicit
+context invalidation removes these faults and the associated MDP5 underruns.
+The existing helper invalidates every context in the domain and synchronizes
+completion while the IOMMU clocks are still enabled by attach_dev().
+
+--- a/drivers/iommu/arm/arm-smmu/qcom_iommu.c
++++ b/drivers/iommu/arm/arm-smmu/qcom_iommu.c
+@@ -311,6 +311,9 @@
+ 		ctx->domain = domain;
+ 	}
+ 
++	/* Discard cached walks/translations belonging to the previous kernel. */
++	qcom_iommu_tlb_inv_context(qcom_domain);
++
+ 	mutex_unlock(&qcom_domain->init_mutex);
+ 
+ 	/* Publish page table ops for map/unmap */

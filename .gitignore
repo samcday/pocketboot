@@ -3,3 +3,6 @@
 /target
 __pycache__/
 *.py[cod]
+
+# Recorded hardware diagnostics are part of the validation fixtures.
+!docs/evidence/**/*.log

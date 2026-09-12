@@ -1,0 +1,90 @@
+{
+  "cold": {
+    "cpus": [
+      {
+        "cpu": 0,
+        "release": "0 854ff400"
+      },
+      {
+        "cpu": 1,
+        "release": "0 854ff480"
+      },
+      {
+        "cpu": 2,
+        "release": "0 854ff500"
+      },
+      {
+        "cpu": 3,
+        "release": "0 854ff580"
+      }
+    ],
+    "psci": "disabled",
+    "reservation": "0x854ff000+0x1000"
+  },
+  "generation-1": {
+    "cpus": [
+      {
+        "cpu": 0,
+        "release": "0 854ff400"
+      },
+      {
+        "cpu": 1,
+        "release": "0 854ff480"
+      },
+      {
+        "cpu": 2,
+        "release": "0 854ff500"
+      },
+      {
+        "cpu": 3,
+        "release": "0 854ff580"
+      }
+    ],
+    "psci": "disabled",
+    "reservation": "0x854ff000+0x1000"
+  },
+  "generation-2": {
+    "cpus": [
+      {
+        "cpu": 0,
+        "release": "0 854ff400"
+      },
+      {
+        "cpu": 1,
+        "release": "0 854ff480"
+      },
+      {
+        "cpu": 2,
+        "release": "0 854ff500"
+      },
+      {
+        "cpu": 3,
+        "release": "0 854ff580"
+      }
+    ],
+    "psci": "disabled",
+    "reservation": "0x854ff000+0x1000"
+  },
+  "generation-3": {
+    "cpus": [
+      {
+        "cpu": 0,
+        "release": "0 854ff400"
+      },
+      {
+        "cpu": 1,
+        "release": "0 854ff480"
+      },
+      {
+        "cpu": 2,
+        "release": "0 854ff500"
+      },
+      {
+        "cpu": 3,
+        "release": "0 854ff580"
+      }
+    ],
+    "psci": "disabled",
+    "reservation": "0x854ff000+0x1000"
+  }
+}

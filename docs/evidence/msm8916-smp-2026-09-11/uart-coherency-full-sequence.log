@@ -1,0 +1,1336 @@
+bootm 93400000
+## Loading kernel (any) from FIT Image at 93400000 ...
+   Using 'db410c' configuration
+   Trying 'kernel' kernel subimage
+     Description:  unavailable
+     Type:         Kernel Image
+     Compression:  uncompressed
+     Data Start:   0x934000a8
+     Data Size:    12976128 Bytes = 12.4 MiB
+     Architecture: AArch64
+     OS:           Linux
+     Load Address: 0x80000000
+     Entry Point:  0x80000000
+     Hash algo:    sha256
+     Hash value:   dfbb68988ef598c2d0489ceb1fa433d43a9d4cff08ad51e5a10e5321008e9d0b
+   Verifying Hash Integrity ... sha256+ OK
+## Loading fdt (any) from FIT Image at 93400000 ...
+   Using 'db410c' configuration
+   Trying 'fdt' fdt subimage
+     Description:  unavailable
+     Type:         Flat Device Tree
+     Compression:  uncompressed
+     Data Start:   0x94060180
+     Data Size:    75999 Bytes = 74.2 KiB
+     Architecture: AArch64
+     Load Address: 0x85000000
+     Hash algo:    sha256
+     Hash value:   cbc3a4a9120efe1c25d525e50f7796f0d882e56c812fff7650b9b08672ba55f7
+   Verifying Hash Integrity ... sha256+ OK
+   Loading fdt from 0x94060180 to 0x85000000
+   Booting using the fdt blob at 0x85000000
+Working FDT set to 85000000
+   Loading Kernel Image to 80000000
+   Loading Device Tree to 00000000aede3000, end 00000000aedf88de ... OK
+Working FDT set to aede3000
+
+Starting kernel ...
+
+msm8916 preboot
+pocketpreboot
+msm8916: primary CurrentEL=0x4
+msm8916: primary CPUECTLR=0x40
+msm8916: find reservation
+msm8916: validate memory
+msm8916: collect CPUs
+msm8916: patch FDT
+msm8916: clean FDT
+msm8916: install resident code
+msm8916: configure SCM entry
+msm8916: SMC enter function=0xc2000601
+msm8916: SMC returned status=0xffffffff
+msm8916: SCM function=0xc2000601 status=0xffffffff
+msm8916: SMC enter function=0x82000601
+msm8916: SMC returned status=0x0
+msm8916: SCM SMC32
+msm8916: SMC enter function=0x2000601
+msm8916: SMC returned status=0x0
+msm8916: SMC enter function=0x2000111
+msm8916: SMC returned status=0x0
+msm8916: boot cpu0x1 acc=0xb098000
+msm8916: secondary CurrentEL=0x4
+msm8916: cpu0x1 CPUECTLR=0x40
+msm8916: secondary parked
+msm8916: boot cpu0x2 acc=0xb0a8000
+msm8916: secondary CurrentEL=0x4
+msm8916: cpu0x2 CPUECTLR=0x40
+msm8916: secondary parked
+msm8916: boot cpu0x3 acc=0xb0b8000
+msm8916: secondary CurrentEL=0x4
+msm8916: cpu0x3 CPUECTLR=0x40
+msm8916: secondary parked
+msm8916: patched fdt 0x80006e00 size=0x12a2e
+[    0.000000] Booting Linux on physical CPU 0x0000000000 [0x410fd030]
+[    0.000000] Linux version 7.1.0-rc6+ (sam@sam-desktop) (aarch64-linux-gnu-gcc (GCC) 16.1.1 20260501 (Red Hat Cross 16.1.1-1), GNU ld version 2.46-1.fc44) #2 SMP PREEMPT Fri Sep 11 09:57:12 AEST 2026
+[    0.000000] Machine model: Qualcomm Technologies, Inc. APQ 8016 SBC
+[    0.000000] earlycon: msm_serial_dm0 at MMIO 0x00000000078b0000 (options '')
+[    0.000000] printk: legacy bootconsole [msm_serial_dm0] enabled
+[    0.000000] OF: reserved mem: 0x000000008e200000..0x000000008e7fffff (6144 KiB) nomap non-reusable wcnss
+[    0.000000] OF: reserved mem: 0x000000008dd00000..0x000000008e1fffff (5120 KiB) nomap non-reusable venus
+[    0.000000] OF: reserved mem: 0x000000008dc00000..0x000000008dcfffff (1024 KiB) nomap non-reusable mba
+[    0.000000] OF: reserved mem: 0x00000000854ff000..0x00000000854fffff (4 KiB) nomap non-reusable spin-table@854ff000
+[    0.000000] OF: reserved mem: 0x0000000086000000..0x00000000862fffff (3072 KiB) nomap non-reusable tz-apps@86000000
+[    0.000000] OF: reserved mem: 0x0000000086300000..0x00000000863fffff (1024 KiB) nomap non-reusable smem@86300000
+[    0.000000] OF: reserved mem: 0x0000000086400000..0x00000000864fffff (1024 KiB) nomap non-reusable hypervisor@86400000
+[    0.000000] OF: reserved mem: 0x0000000086500000..0x000000008667ffff (1536 KiB) nomap non-reusable tz@86500000
+[    0.000000] OF: reserved mem: 0x0000000086680000..0x00000000866fffff (512 KiB) nomap non-reusable reserved@86680000
+[    0.000000] OF: reserved mem: 0x0000000086700000..0x00000000867dffff (896 KiB) nomap non-reusable rmtfs@86700000
+[    0.000000] OF: reserved mem: 0x00000000867e0000..0x00000000867fffff (128 KiB) nomap non-reusable rfsa@867e0000
+[    0.000000] OF: reserved mem: 0x0000000086800000..0x00000000892fffff (44032 KiB) nomap non-reusable mpss@86800000
+[    0.000000] OF: reserved mem: 0x00000000bff00000..0x00000000bfffffff (1024 KiB) map non-reusable ramoops@bff00000
+[    0.000000] Zone ranges:
+[    0.000000]   Normal   [mem 0x0000000080000000-0x00000000bfffffff]
+[    0.000000] Movable zone start for each node
+[    0.000000] Early memory node ranges
+[    0.000000]   node   0: [mem 0x0000000080000000-0x00000000854fefff]
+[    0.000000]   node   0: [mem 0x00000000854ff000-0x00000000854fffff]
+[    0.000000]   node   0: [mem 0x0000000085500000-0x0000000085ffffff]
+[    0.000000]   node   0: [mem 0x0000000086000000-0x00000000892fffff]
+[    0.000000]   node   0: [mem 0x0000000089300000-0x000000008dbfffff]
+[    0.000000]   node   0: [mem 0x000000008dc00000-0x000000008e7fffff]
+[    0.000000]   node   0: [mem 0x000000008e800000-0x00000000bfffffff]
+[    0.000000] Initmem setup node 0 [mem 0x0000000080000000-0x00000000bfffffff]
+[    0.000000] percpu: Embedded 14 pages/cpu s28544 r0 d28800 u57344
+[    0.000000] Detected VIPT I-cache on CPU0
+[    0.000000] CPU features: kernel page table isolation disabled by kernel configuration
+[    0.000000] alternatives: applying boot alternatives
+[    0.000000] Kernel command line: console=ttyMSM0,115200n8 earlycon loglevel=7 panic=0 androidboot.serialno=bc72e60 pocketboot.lab=nonpsci-spin-v1-20260911
+[    0.000000] printk: log buffer data + meta data: 131072 + 458752 = 589824 bytes
+[    0.000000] Dentry cache hash table entries: 131072 (order: 8, 1048576 bytes, linear)
+[    0.000000] Inode-cache hash table entries: 65536 (order: 7, 524288 bytes, linear)
+[    0.000000] software IO TLB: SWIOTLB bounce buffer size adjusted to 1MB
+[    0.000000] software IO TLB: area num 4.
+[    0.000000] software IO TLB: mapped [mem 0x00000000be980000-0x00000000bea80000] (1MB)
+[    0.000000] Built 1 zonelists, mobility grouping on.  Total pages: 262144
+[    0.000000] mem auto-init: stack:all(zero), heap alloc:off, heap free:off
+[    0.000000] SLUB: HWalign=64, Order=0-3, MinObjects=0, CPUs=4, Nodes=1
+[    0.000000] rcu: Hierarchical RCU implementation.
+[    0.000000] rcu: RCU calculated value of scheduler-enlistment delay is 25 jiffies.
+[    0.000000] NR_IRQS: 64, nr_irqs: 64, preallocated irqs: 0
+[    0.000000] Root IRQ handler: gic_handle_irq
+[    0.000000] rcu: srcu_init: Setting srcu_struct sizes based on contention.
+[    0.000000] arch_timer: cp15 timer running at 19.20MHz (virt).
+[    0.000000] clocksource: arch_sys_counter: mask: 0xffffffffffffff max_cycles: 0x46d987e47, max_idle_ns: 440795202767 ns
+[    0.000000] sched_clock: 56 bits at 19MHz, resolution 52ns, wraps every 4398046511078ns
+[    0.010802] Console: colour dummy device 80x25
+[    0.018688] Calibrating delay loop (skipped), value calculated using timer frequency.. 38.40 BogoMIPS (lpj=76800)
+[    0.023183] pid_max: default: 32768 minimum: 301
+[    0.033709] Mount-cache hash table entries: 2048 (order: 2, 16384 bytes, linear)
+[    0.038205] Mountpoint-cache hash table entries: 2048 (order: 2, 16384 bytes, linear)
+[    0.045930] VFS: Finished mounting rootfs on nullfs
+[    0.053924] Pocketboot spin-table v1: persistent page at 0x00000000854ff000
+[    0.058927] rcu: Hierarchical SRCU implementation.
+[    0.064938] rcu: 	Max phase no-delay instances is 1000.
+[    0.070261] smp: Bringing up secondary CPUs ...
+[    0.075340] Detected VIPT I-cache on CPU1
+[    0.075493] CPU1: Booted secondary processor 0x0000000001 [0x410fd030]
+[    0.075990] Detected VIPT I-cache on CPU2
+[    0.076124] CPU2: Booted secondary processor 0x0000000002 [0x410fd030]
+[    0.076602] Detected VIPT I-cache on CPU3
+[    0.076728] CPU3: Booted secondary processor 0x0000000003 [0x410fd030]
+[    0.076822] smp: Brought up 1 node, 4 CPUs
+[    0.111032] SMP: Total of 4 processors activated.
+[    0.115098] CPU: All CPU(s) started at EL1
+[    0.119879] CPU features: detected: 32-bit EL0 Support
+[    0.123862] CPU features: detected: CRC32 instructions
+[    0.129035] alternatives: applying system-wide alternatives
+[    0.134964] Memory: 947488K/1048576K available (5312K kernel code, 834K rwdata, 1476K rodata, 2560K init, 239K bss, 97824K reserved, 0K cma-reserved)
+[    0.140181] devtmpfs: initialized
+[    0.167827] clocksource: jiffies: mask: 0xffffffff max_cycles: 0xffffffff, max_idle_ns: 7645041785100000 ns
+[    0.167905] posixtimers hash table entries: 2048 (order: 3, 32768 bytes, linear)
+[    0.176483] futex hash table entries: 1024 (65536 bytes on 1 NUMA nodes, total 64 KiB, linear).
+[    0.185091] NET: Registered PF_NETLINK/PF_ROUTE protocol family
+[    0.193023] DMA: preallocated 128 KiB GFP_KERNEL pool for atomic allocations
+[    0.200163] ASID allocator initialised with 65536 entries
+[    0.206826] pstore: Using crash dump compression: deflate
+[    0.210939] pstore: Registered ramoops as persistent store backend
+[    0.216315] ramoops: using 0x100000@0xbff00000, ecc: 0
+[    0.233150] /soc@0/stm@802000: Fixed dependency cycle(s) with /soc@0/funnel@821000
+[    0.233237] /soc@0/tpiu@820000: Fixed dependency cycle(s) with /soc@0/replicator@824000
+[    0.239653] /soc@0/funnel@821000: Fixed dependency cycle(s) with /soc@0/etf@825000
+[    0.247541] /soc@0/funnel@821000: Fixed dependency cycle(s) with /soc@0/stm@802000
+[    0.255181] /soc@0/funnel@821000: Fixed dependency cycle(s) with /soc@0/funnel@841000
+[    0.262751] /soc@0/replicator@824000: Fixed dependency cycle(s) with /soc@0/etf@825000
+[    0.270623] /soc@0/replicator@824000: Fixed dependency cycle(s) with /soc@0/tpiu@820000
+[    0.278433] /soc@0/replicator@824000: Fixed dependency cycle(s) with /soc@0/etr@826000
+[    0.286350] /soc@0/etf@825000: Fixed dependency cycle(s) with /soc@0/replicator@824000
+[    0.294334] /soc@0/etf@825000: Fixed dependency cycle(s) with /soc@0/funnel@821000
+[    0.302249] /soc@0/etr@826000: Fixed dependency cycle(s) with /soc@0/replicator@824000
+[    0.309790] /soc@0/funnel@841000: Fixed dependency cycle(s) with /soc@0/funnel@821000
+[    0.317670] /soc@0/funnel@841000: Fixed dependency cycle(s) with /soc@0/etm@85f000
+[    0.325569] /soc@0/funnel@841000: Fixed dependency cycle(s) with /soc@0/etm@85e000
+[    0.333035] /soc@0/funnel@841000: Fixed dependency cycle(s) with /soc@0/etm@85d000
+[    0.340586] /soc@0/funnel@841000: Fixed dependency cycle(s) with /soc@0/etm@85c000
+[    0.348213] /soc@0/etm@85c000: Fixed dependency cycle(s) with /soc@0/funnel@841000
+[    0.355721] /soc@0/etm@85d000: Fixed dependency cycle(s) with /soc@0/funnel@841000
+[    0.363270] /soc@0/etm@85e000: Fixed dependency cycle(s) with /soc@0/funnel@841000
+[    0.370822] /soc@0/etm@85f000: Fixed dependency cycle(s) with /soc@0/funnel@841000
+[    0.378466] /soc@0/clock-controller@1800000: Fixed dependency cycle(s) with /soc@0/display-subsystem@1a00000/phy@1a98300
+[    0.385945] /soc@0/display-subsystem@1a00000/display-controller@1a01000: Fixed dependency cycle(s) with /soc@0/display-subsystem@1a00000/dsi@1a98000
+[    0.396956] /soc@0/display-subsystem@1a00000/dsi@1a98000: Fixed dependency cycle(s) with /soc@0/i2c@78b8000/bridge@39
+[    0.410221] /soc@0/display-subsystem@1a00000/dsi@1a98000: Fixed dependency cycle(s) with /soc@0/display-subsystem@1a00000/display-controller@1a01000
+[    0.420748] /soc@0/display-subsystem@1a00000/phy@1a98300: Fixed dependency cycle(s) with /soc@0/clock-controller@1800000
+[    0.434509] /soc@0/i2c@78b8000/bridge@39: Fixed dependency cycle(s) with /soc@0/display-subsystem@1a00000/dsi@1a98000
+[    0.445004] /soc@0/usb@78d9000: Fixed dependency cycle(s) with /soc@0/usb@78d9000/ulpi/phy
+[    0.455453] /soc@0/usb@78d9000/ulpi/phy: Fixed dependency cycle(s) with /soc@0/usb@78d9000
+[    0.463646] /soc@0/interrupt-controller@b000000: Fixed dependency cycle(s) with /soc@0/interrupt-controller@b000000
+[    0.473409] /soc@0/stm@802000: Fixed dependency cycle(s) with /soc@0/funnel@821000
+[    0.482469] /soc@0/tpiu@820000: Fixed dependency cycle(s) with /soc@0/replicator@824000
+[    0.489933] /soc@0/stm@802000: Fixed dependency cycle(s) with /soc@0/funnel@821000
+[    0.497789] /soc@0/funnel@821000: Fixed dependency cycle(s) with /soc@0/etf@825000
+[    0.505346] /soc@0/funnel@821000: Fixed dependency cycle(s) with /soc@0/stm@802000
+[    0.512973] /soc@0/funnel@821000: Fixed dependency cycle(s) with /soc@0/funnel@841000
+[    0.520581] /soc@0/tpiu@820000: Fixed dependency cycle(s) with /soc@0/replicator@824000
+[    0.528436] /soc@0/replicator@824000: Fixed dependency cycle(s) with /soc@0/etf@825000
+[    0.536162] /soc@0/replicator@824000: Fixed dependency cycle(s) with /soc@0/tpiu@820000
+[    0.544205] /soc@0/replicator@824000: Fixed dependency cycle(s) with /soc@0/etr@826000
+[    0.552164] /soc@0/replicator@824000: Fixed dependency cycle(s) with /soc@0/etf@825000
+[    0.560109] /soc@0/funnel@821000: Fixed dependency cycle(s) with /soc@0/etf@825000
+[    0.568010] /soc@0/etf@825000: Fixed dependency cycle(s) with /soc@0/replicator@824000
+[    0.575563] /soc@0/etf@825000: Fixed dependency cycle(s) with /soc@0/funnel@821000
+[    0.583543] /soc@0/replicator@824000: Fixed dependency cycle(s) with /soc@0/etr@826000
+[    0.591022] /soc@0/etr@826000: Fixed dependency cycle(s) with /soc@0/replicator@824000
+[    0.599013] /soc@0/funnel@821000: Fixed dependency cycle(s) with /soc@0/funnel@841000
+[    0.606810] /soc@0/funnel@841000: Fixed dependency cycle(s) with /soc@0/funnel@821000
+[    0.614700] /soc@0/funnel@841000: Fixed dependency cycle(s) with /soc@0/etm@85f000
+[    0.622447] /soc@0/funnel@841000: Fixed dependency cycle(s) with /soc@0/etm@85e000
+[    0.629913] /soc@0/funnel@841000: Fixed dependency cycle(s) with /soc@0/etm@85d000
+[    0.637461] /soc@0/funnel@841000: Fixed dependency cycle(s) with /soc@0/etm@85c000
+[    0.645783] /soc@0/funnel@841000: Fixed dependency cycle(s) with /soc@0/etm@85c000
+[    0.652655] /soc@0/etm@85c000: Fixed dependency cycle(s) with /soc@0/funnel@841000
+[    0.660271] /soc@0/funnel@841000: Fixed dependency cycle(s) with /soc@0/etm@85d000
+[    0.667763] /soc@0/etm@85d000: Fixed dependency cycle(s) with /soc@0/funnel@841000
+[    0.675371] /soc@0/funnel@841000: Fixed dependency cycle(s) with /soc@0/etm@85e000
+[    0.682867] /soc@0/etm@85e000: Fixed dependency cycle(s) with /soc@0/funnel@841000
+[    0.690488] /soc@0/funnel@841000: Fixed dependency cycle(s) with /soc@0/etm@85f000
+[    0.697967] /soc@0/etm@85f000: Fixed dependency cycle(s) with /soc@0/funnel@841000
+[    0.708001] /soc@0/clock-controller@1800000: Fixed dependency cycle(s) with /soc@0/display-subsystem@1a00000/phy@1a98300
+[    0.715761] /soc@0/display-subsystem@1a00000/display-controller@1a01000: Fixed dependency cycle(s) with /soc@0/display-subsystem@1a00000/dsi@1a98000
+[    0.724047] /soc@0/display-subsystem@1a00000/dsi@1a98000: Fixed dependency cycle(s) with /soc@0/i2c@78b8000/bridge@39
+[    0.737302] /soc@0/display-subsystem@1a00000/dsi@1a98000: Fixed dependency cycle(s) with /soc@0/display-subsystem@1a00000/display-controller@1a01000
+[    0.752709] /soc@0/i2c@78b8000/bridge@39: Fixed dependency cycle(s) with /soc@0/display-subsystem@1a00000/dsi@1a98000
+[    0.761922] /soc@0/usb@78d9000: Fixed dependency cycle(s) with /soc@0/usb@78d9000/ulpi/phy
+[    0.771753] /soc@0/usb@78d9000/ulpi/phy: Fixed dependency cycle(s) with /soc@0/usb@78d9000
+[    0.781889] /soc@0/i2c@78b8000/bridge@39: Fixed dependency cycle(s) with /hdmi-out
+[    0.788167] /hdmi-out: Fixed dependency cycle(s) with /soc@0/i2c@78b8000/bridge@39
+[    0.798361] SCSI subsystem initialized
+[    0.803308] usbcore: registered new interface driver usbfs
+[    0.806932] usbcore: registered new interface driver hub
+[    0.812415] usbcore: registered new device driver usb
+[    0.819068] qcom_scm: convention: smc arm 32
+[    0.824107] clocksource: Switched to clocksource arch_sys_counter
+[    0.834928] NET: Registered PF_UNIX/PF_LOCAL protocol family
+[    0.841225] workingset: timestamp_bits=62 (anon: 58) max_order=18 bucket_order=0 (anon: 0)
+[    0.850046] msm_serial 78af000.serial: msm_serial: detected port #1
+[    0.850177] msm_serial 78af000.serial: uartclk = 19200000
+[    0.855566] 78af000.serial: ttyMSM1 at MMIO 0x78af000 (irq = 16, base_baud = 1200000) is a MSM
+[    0.861277] msm_serial 78b0000.serial: msm_serial: detected port #0
+[    0.869300] msm_serial 78b0000.serial: uartclk =l		&	¬Ç ™∫ÍjÕµ}Õï…•Ö±ÈΩπÕΩ±ïÅöï—’¡ÅzπÅÇΩ…—ÅÇj§¥		&	¬äÇ¢ ÍÇ…•π—≠ÈbïùÖçÂÅΩπÕΩ±ïÅ⁄——Â5M5¡ÍÅ*πÖâ±ïë5R⁄Çr¬¬äÇ¢ ÍÇ…•π—≠ÈbïùÖçÂÅΩπÕΩ±ïÅ⁄——Â5M5¡ÍÅ*πÖâ±ïë5R⁄Çr¬¬ ≤¬äÍÇ…•π—≠ÈbïùÖçÂÅΩΩ—çΩπÕΩ±ïÅ⁄µÕµ}Õï…•Ö±}ëµ¡ÍÅ"•ÕÖâ±ïë5R⁄Çr¬¬ ≤¬äÍÇ…•π—≠ÈbïùÖçÂÅΩΩ—çΩπÕΩ±ïÅ⁄µÕµ}Õï…•Ö±}ëµ¡ÍÅ"•ÕÖâ±ïë5R⁄Çr Ç¢™¬ ÍjÕµ}Õï…•Ö±È"…•Ÿï…ÅJπ•—•Ö±•Èïë5R˛[    0.913455] loop: module loaded
+[    0.914231] spi_qup 78b7000.spi: IN:block:16, fifo:64, OUT:block:16, fifo:64
+[    0.916355] spi_qup 78b9000.spi: IN:block:16, fifo:64, OUT:block:16, fifo:64
+[    0.923301] spmi_pmic_arb 200f000.spmi: PMIC arbiter version v2 (0x20010000)
+[    0.931998] /soc@0/spmi@200f000/pmic@0/mpps@a000: Fixed dependency cycle(s) with /soc@0/spmi@200f000/pmic@0/mpps@a000/pm8916-mpp4-state
+[    0.948131] usb3503 usb2513: switched to HUB mode
+[    0.948653] usb3503 usb2513: usb3503_probe: probed in hub mode
+[    0.954338] i2c_qup 78b6000.i2c: using default clock-frequency 100000
+[    0.960041] i2c_qup 78b8000.i2c: using default clock-frequency 100000
+[    0.966300] /hdmi-out: Fixed dependency cycle(s) with /soc@0/i2c@78b8000/bridge@39
+[    0.972273] /soc@0/display-subsystem@1a00000/dsi@1a98000: Fixed dependency cycle(s) with /soc@0/i2c@78b8000/bridge@39
+[    0.979726] /soc@0/i2c@78b8000/bridge@39: Fixed dependency cycle(s) with /hdmi-out
+[    0.990412] /soc@0/i2c@78b8000/bridge@39: Fixed dependency cycle(s) with /soc@0/display-subsystem@1a00000/dsi@1a98000
+[    0.998187] i2c_qup 78ba000.i2c: using default clock-frequency 100000
+[    1.011234] clocksource: arch_mmio_counter: mask: 0xffffffffffffff max_cycles: 0x46d987e47, max_idle_ns: 440795202767 ns
+[    1.014950] arch-timer-mmio b020000.timer: mmio timer running at 19.20MHz (virt)
+[    1.068408] msm_hsusb 78d9000.usb: Failed to create device link (0x180) with supplier remoteproc for /soc@0/usb@78d9000/ulpi/phy
+[    1.070986] sdhci_msm 7864900.mmc: Got CD GPIO
+[    1.086691] sdhci_msm 7864900.mmc: Got CD GPIO
+[    1.087562] gcc-msm8916 1800000.clock-controller: sync_state() pending due to 22000.rng
+[    1.090104] gcc-msm8916 1800000.clock-controller: sync_state() pending due to 1a00000.display-subsystem
+[    1.098008] gcc-msm8916 1800000.clock-controller: sync_state() pending due to 1b0ac00.camss
+[    1.107363] gcc-msm8916 1800000.clock-controller: sync_state() pending due to 1c00000.gpu
+[    1.115650] gcc-msm8916 1800000.clock-controller: sync_state() pending due to 1d00000.video-codec
+[    1.123982] gcc-msm8916 1800000.clock-controller: sync_state() pending due to 1ef0000.iommu
+[    1.132845] gcc-msm8916 1800000.clock-controller: sync_state() pending due to soc@0:iommu@1f08000
+[    1.141003] gcc-msm8916 1800000.clock-controller: sync_state() pending due to 4080000.remoteproc
+[    1.150024] gcc-msm8916 1800000.clock-controller: sync_state() pending due to 7708000.audio-controller
+[    1.158878] gcc-msm8916 1800000.clock-controller: sync_state() pending due to 771c000.audio-codec
+[    1.167992] gcc-msm8916 1800000.clock-controller: sync_state() pending due to 7824900.mmc
+[    1.176933] gcc-msm8916 1800000.clock-controller: sync_state() pending due to 7864900.mmc
+[    1.185345] s3: Bringing 0uV into 1250000-1250000uV
+[    1.185749] input: gpio-keys as /devices/platform/gpio-keys/input/input0
+[    1.191204] sdhci_msm 7864900.mmc: Got CD GPIO
+[    1.193647] s4: Bringing 0uV into 1850000-1850000uV
+[    1.198727] sdhci_msm 7864900.mmc: Got CD GPIO
+[    1.205540] l2: Bringing 0uV into 1200000-1200000uV
+[    1.210070] clk: Disabling unused clocks
+[    1.214476] l5: Bringing 0uV into 1800000-1800000uV
+[    1.218660] PM: genpd: Disabling unused power domains
+[    1.223539] l6: Bringing 0uV into 1800000-1800000uV
+[    1.226226] sdhci_msm 7864900.mmc: Got CD GPIO
+[    1.233656] sdhci_msm 7864900.mmc: Go˛[    1.251172] l8: Bringing 0uV into 2900000-2900000uV
+[    1.251451] l9: Bringing 0uV into 3300000-3300000uV
+[    1.255296] l11: Bringing 0uV into 2950000-2950000uV
+[    1.259964] l12: Bringing 0uV into 1800000-1800000uV
+[    1.265147] l13: Bringing 0uV into 3075000-3075000uV
+[    1.270385] l15: Bringing 0uV into 1800000-1800000uV
+[    1.275457] l16: Bringing 0uV into 1800000-1800000uV
+[    1.280359] l17: Bringing 0uV into 3300000-3300000uV
+[    1.286441] Freeing unused kernel memory: 2560K
+[    1.288783] sdhci_msm 7864900.mmc: Got CD GPIO
+[    1.289875] Run /init as init process
+
+
+
+BusyBox v1.38.0 (2026-07-20 16:15:06 AEST) built-in shell (ash)
+
+~ # [    1.310113] file system registered
+[    1.310661] read descriptors
+[    1.313897] read strings
+[    1.317468] read descriptors
+[    1.319432] read strings
+[    1.322851] Mass Storage Function, version: 2009/09/11
+[    1.324819] LUN: removable file: (no medium)
+[    1.330016] LUN: removable file: (no medium)
+[    1.334440] LUN: removable file: (no medium)
+[    1.338692] LUN: removable file: (no medium)
+[    1.342931] LUN: removable file: (no medium)
+[    1.347181] LUN: removable file: (no medium)
+[    1.351453] LUN: removable file: (no medium)
+[    1.355687] LUN: removable file: (no medium)
+[    1.360546] l13: voltage operation not allowed
+[    1.420127] mmc0: SDHCI controller on 7824900.mmc [7824900.mmc] using ADMA
+[    1.460430] mmc1: SDHCI controller on 7864900.mmc [7864900.mmc] using ADMA
+[    1.543388] mmc0: Card appears overclocked; req 177770000 Hz, actual 177777777 Hz
+[    1.543435] mmc0: Card appears overclocked; req 177770000 Hz, actual 177777777 Hz
+[    1.552456] mmc0: new HS200 MMC card at address 0001
+[    1.557995] mmcblk0: mmc0:0001 DS1008 7.28 GiB
+[    1.566431]  mmcblk0: p1 p2 p3 p4 p5 p6 p7 p8 p9 p10 p11 p12 p13 p14 p15 p16 p17 p18 p19 p20 p21 p22 p23 p24 p25 p26 p27 p28 p29 p30
+[    1.571242] mmcblk0boot0: mmc0:0001 DS1008 4.00 MiB
+[    1.584857] mmcblk0boot1: mmc0:0001 DS1008 4.00 MiB
+[    1.586096] mmcblk0rpmb: mmc0:0001 DS1008 4.00 MiB, chardev (251:0)
+[    2.038527]  WARN pocketboot: no boot entries discovered
+[    3.332212]  WARN pocketboot::ui: UI thread exited error=open /dev/dri: No such file or directory (os error 2)
+[   16.560127] random: crng init done
+[  170.240563] ------------[ cut here ]------------
+[  170.240595] WARNING: kernel/workqueue.c:4327 at __flush_work+0x378/0x394, CPU#1: pocketboot-fast/87
+[  170.244254] CPU: 1 UID: 0 PID: 87 Comm: pocketboot-fast Not tainted 7.1.0-rc6+ #2 PREEMPTLAZY 
+[  170.253016] Hardware name: Qualcomm Technologies, Inc. APQ 8016 SBC (DT)
+[  170.261695] pstate: 40000005 (nZcv daif -PAN -UAO -TCO -DIT -SSBS BTYPE=--)
+[  170.268555] pc : __flush_work+0x378/0x394
+[  170.275231] lr : __flush_work+0x34/0x394
+[  170.279398] sp : ffff80008184bca0
+[  170.283391] x29: ffff80008184bca0 x28: ffff000001c96300 x27: 0000000000000000
+[  170.286607] x26: 0000000000000000 x25: 0000000000000000 x24: ffff800080a19cc8
+[  170.293725] x23: 0000000000000001 x22: ffff800080a1a000 x21: 0000000000000001
+[  170.300843] x20: ffff000001095578 x19: ffff000001095578 x18: 0000000000000000
+[  170.307964] x17: 0000000000000000 x16: 0000000000000000 x15: 0000000000000000
+[  170.315079] x14: ffff000001c96390 x13: 0000000000000278 x12: 0000000000000000
+[  170.322196] x11: 00000000000000c0 x10: 00000000000007d0 x9 : 0000000000000000
+[  170.329316] x8 : ffff80008184bd50 x7 : 0000000000000000 x6 : ffff00000111ecf8
+[  170.336433] x5 : 0000000000000000 x4 : 0000000000000008 x3 : 0000000000000000
+[  170.343552] x2 : ffffffffffffffc0 x1 : 0000000000000000 x0 : 0000000000000000
+[  170.350673] Call trace:
+[  170.350677]  __flush_work+0x378/0x394 (P)
+[  170.360041]  cancel_work_sync+0x64/0x84
+[  170.364206]  ffs_fs_kill_sb+0x70/0x84
+[  170.367853]  deactivate_locked_super+0x40/0xe4
+[  170.371673]  deactivate_super+0x74/0x84
+[  170.376012]  cleanup_mnt+0xf0/0x14c
+[  170.379744]  __cleanup_mnt+0x10/0x18
+[  170.383217]  task_work_run+0x6c/0xdc
+[  170.387038]  exit_to_user_mode_loop+0xd8/0x128
+[  170.390597]  el0_svc+0x48/0x5c
+[  170.394849]  el0t_64_sync_handler+0x98/0xdc
+[  170.397888]  el0t_64_sync+0x154/0x158
+[  170.401968] ---[ end trace 0000000000000000 ]---
+[  170.405886] ffs_data_put(): freeing
+[  170.410967] ------------[ cut here ]------------
+[  170.413688] WARNING: kernel/workqueue.c:4327 at __flush_work+0x378/0x394, CPU#1: pocketboot-fast/87
+[  170.418558] CPU: 1 UID: 0 PID: 87 Comm: pocketboot-fast Tainted: G        W           7.1.0-rc6+ #2 PREEMPTLAZY 
+[  170.427328] Tainted: [W]=WARN
+[  170.427332] Hardware name: Qualcomm Technologies, Inc. APQ 8016 SBC (DT)
+[  170.440601] pstate: 40000005 (nZcv daif -PAN -UAO -TCO -DIT -SSBS BTYPE=--)
+[  170.447371] pc : __flush_work+0x378/0x394
+[  170.454050] lr : __flush_work+0x34/0x394
+[  170.458218] sp : ffff80008184bca0
+[  170.462209] x29: ffff80008184bca0 x28: ffff000001c96300 x27: 0000000000000000
+[  170.465429] x26: 0000000000000000 x25: 0000000000000000 x24: ffff800080a19cc8
+[  170.472544] x23: 0000000000000001 x22: ffff800080a1a000 x21: 0000000000000001
+[  170.479663] x20: ffff000001095178 x19: ffff000001095178 x18: 00000027ad4836f3
+[  170.486781] x17: 0000000000000000 x16: 0000000000000000 x15: 0000000000000000
+[  170.493899] x14: ffff000001c96390 x13: ffff8000805496b8 x12: 00000000000002d0
+[  170.501017] x11: 00000000000000c0 x10: 00000000000007d0 x9 : 0000000000000000
+[  170.508137] x8 : ffff80008184bd50 x7 : 0000000000000000 x6 : ffff00000111e4f8
+[  170.515253] x5 : 0000000000000000 x4 : 0000000000000008 x3 : 0000000000000000
+[  170.522371] x2 : ffffffffffffffc0 x1 : 0000000000000000 x0 : 0000000000000000
+[  170.529489] Call trace:
+[  170.536601]  __flush_work+0x378/0x394 (P)
+[  170.538861]  cancel_work_sync+0x64/0x84
+[  170.543027]  ffs_fs_kill_sb+0x70/0x84
+[  170.546674]  deactivate_locked_super+0x40/0xe4
+[  170.550493]  deactivate_super+0x74/0x84
+[  170.554832]  cleanup_mnt+0xf0/0x14c
+[  170.558563]  __cleanup_mnt+0x10/0x18
+[  170.562037]  task_work_run+0x6c/0xdc
+[  170.565856]  exit_to_user_mode_loop+0xd8/0x128
+[  170.569416]  el0_svc+0x48/0x5c
+[  170.573669]  el0t_64_sync_handler+0x98/0xdc
+[  170.576708]  el0t_64_sync+0x154/0x158
+[  170.580787] ---[ end trace 0000000000000000 ]---
+[  170.584734] ffs_data_put(): freeing
+[  170.589442] unloading
+[  170.672986] kexec_core: Starting new kernel
+[  170.700587] IRQ38: set affinity failed(-22).
+[  170.700602] IRQ43: set affinity failed(-22).
+[  170.700610] IRQ57: set affinity failed(-22).
+[  170.700658] CPU1: persistent spin-table park acknowledged (epoch 2)
+[  170.728552] IRQ38: set affinity failed(-22).
+[  170.728568] IRQ43: set affinity failed(-22).
+[  170.728576] IRQ57: set affinity failed(-22).
+[  170.728640] CPU2: persistent spin-table park acknowledged (epoch 2)
+[  170.756544] IRQ38: set affinity failed(-22).
+[  170.756557] IRQ43: set affinity failed(-22).
+[  170.756565] IRQ57: set affinity failed(-22).
+[  170.756612] CPU3: persistent spin-table park acknowledged (epoch 2)
+[  170.769068] Bye!
+[    0.000000] Booting Linux on physical CPU 0x0000000000 [0x410fd030]
+[    0.000000] Linux version 7.1.0-rc6+ (sam@sam-desktop) (aarch64-linux-gnu-gcc (GCC) 16.1.1 20260501 (Red Hat Cross 16.1.1-1), GNU ld version 2.46-1.fc44) #2 SMP PREEMPT Fri Sep 11 09:57:12 AEST 2026
+[    0.000000] Machine model: Qualcomm Technologies, Inc. APQ 8016 SBC
+[    0.000000] earlycon: msm_serial_dm0 at MMIO 0x00000000078b0000 (options '')
+[    0.000000] printk: legacy bootconsole [msm_serial_dm0] enabled
+[    0.000000] OF: reserved mem: 0x000000008e200000..0x000000008e7fffff (6144 KiB) nomap non-reusable wcnss
+[    0.000000] OF: reserved mem: 0x000000008dd00000..0x000000008e1fffff (5120 KiB) nomap non-reusable venus
+[    0.000000] OF: reserved mem: 0x000000008dc00000..0x000000008dcfffff (1024 KiB) nomap non-reusable mba
+[    0.000000] OF: reserved mem: 0x0000000086000000..0x00000000862fffff (3072 KiB) nomap non-reusable tz-apps@86000000
+[    0.000000] OF: reserved mem: 0x0000000086300000..0x00000000863fffff (1024 KiB) nomap non-reusable smem@86300000
+[    0.000000] OF: reserved mem: 0x0000000086400000..0x00000000864fffff (1024 KiB) nomap non-reusable hypervisor@86400000
+[    0.000000] OF: reserved mem: 0x0000000086500000..0x000000008667ffff (1536 KiB) nomap non-reusable tz@86500000
+[    0.000000] OF: reserved mem: 0x0000000086680000..0x00000000866fffff (512 KiB) nomap non-reusable reserved@86680000
+[    0.000000] OF: reserved mem: 0x0000000086700000..0x00000000867dffff (896 KiB) nomap non-reusable rmtfs@86700000
+[    0.000000] OF: reserved mem: 0x00000000867e0000..0x00000000867fffff (128 KiB) nomap non-reusable rfsa@867e0000
+[    0.000000] OF: reserved mem: 0x0000000086800000..0x00000000892fffff (44032 KiB) nomap non-reusable mpss@86800000
+[    0.000000] OF: reserved mem: 0x00000000bff00000..0x00000000bfffffff (1024 KiB) map non-reusable ramoops@bff00000
+[    0.000000] OF: reserved mem: 0x00000000854ff000..0x00000000854fffff (4 KiB) nomap non-reusable spin-table@854ff000
+[    0.000000] Zone ranges:
+[    0.000000]   Normal   [mem 0x0000000080000000-0x00000000bfffffff]
+[    0.000000] Movable zone start for each node
+[    0.000000] Early memory node ranges
+[    0.000000]   node   0: [mem 0x0000000080000000-0x00000000854fefff]
+[    0.000000]   node   0: [mem 0x00000000854ff000-0x00000000854fffff]
+[    0.000000]   node   0: [mem 0x0000000085500000-0x0000000085ffffff]
+[    0.000000]   node   0: [mem 0x0000000086000000-0x00000000892fffff]
+[    0.000000]   node   0: [mem 0x0000000089300000-0x000000008dbfffff]
+[    0.000000]   node   0: [mem 0x000000008dc00000-0x000000008e7fffff]
+[    0.000000]   node   0: [mem 0x000000008e800000-0x00000000bfffffff]
+[    0.000000] Initmem setup node 0 [mem 0x0000000080000000-0x00000000bfffffff]
+[    0.000000] percpu: Embedded 14 pages/cpu s28544 r0 d28800 u57344
+[    0.000000] Detected VIPT I-cache on CPU0
+[    0.000000] CPU features: kernel page table isolation disabled by kernel configuration
+[    0.000000] alternatives: applying boot alternatives
+[    0.000000] Kernel command line: console=ttyMSM0,115200n8 earlycon loglevel=7 panic=0 androidboot.serialno=bc72e60 pocketboot.lab=kexec-generation-1
+[    0.000000] printk: log buffer data + meta data: 131072 + 458752 = 589824 bytes
+[    0.000000] Dentry cache hash table entries: 131072 (order: 8, 1048576 bytes, linear)
+[    0.000000] Inode-cache hash table entries: 65536 (order: 7, 524288 bytes, linear)
+[    0.000000] software IO TLB: SWIOTLB bounce buffer size adjusted to 1MB
+[    0.000000] software IO TLB: area num 4.
+[    0.000000] software IO TLB: mapped [mem 0x00000000be980000-0x00000000bea80000] (1MB)
+[    0.000000] Built 1 zonelists, mobility grouping on.  Total pages: 262144
+[    0.000000] mem auto-init: stack:all(zero), heap alloc:off, heap free:off
+[    0.000000] SLUB: HWalign=64, Order=0-3, MinObjects=0, CPUs=4, Nodes=1
+[    0.000000] rcu: Hierarchical RCU implementation.
+[    0.000000] rcu: RCU calculated value of scheduler-enlistment delay is 25 jiffies.
+[    0.000000] NR_IRQS: 64, nr_irqs: 64, preallocated irqs: 0
+[    0.000000] Root IRQ handler: gic_handle_irq
+[    0.000000] rcu: srcu_init: Setting srcu_struct sizes based on contention.
+[    0.000000] arch_timer: cp15 timer running at 19.20MHz (virt).
+[    0.000000] clocksource: arch_sys_counter: mask: 0xffffffffffffff max_cycles: 0x46d987e47, max_idle_ns: 440795202767 ns
+[    0.000000] sched_clock: 56 bits at 19MHz, resolution 52ns, wraps every 4398046511078ns
+[    0.010796] Console: colour dummy device 80x25
+[    0.018689] Calibrating delay loop (skipped), value calculated using timer frequency.. 38.40 BogoMIPS (lpj=76800)
+[    0.023182] pid_max: default: 32768 minimum: 301
+[    0.033704] Mount-cache hash table entries: 2048 (order: 2, 16384 bytes, linear)
+[    0.038205] Mountpoint-cache hash table entries: 2048 (order: 2, 16384 bytes, linear)
+[    0.045915] VFS: Finished mounting rootfs on nullfs
+[    0.053889] Pocketboot spin-table v1: persistent page at 0x00000000854ff000
+[    0.058886] rcu: Hierarchical SRCU implementation.
+[    0.064941] rcu: 	Max phase no-delay instances is 1000.
+[    0.070247] smp: Bringing up secondary CPUs ...
+[    0.075326] Detected VIPT I-cache on CPU1
+[    0.075470] CPU1: Booted secondary processor 0x0000000001 [0x410fd030]
+[    0.075956] Detected VIPT I-cache on CPU2
+[    0.076084] CPU2: Booted secondary processor 0x0000000002 [0x410fd030]
+[    0.076546] Detected VIPT I-cache on CPU3
+[    0.076670] CPU3: Booted secondary processor 0x0000000003 [0x410fd030]
+[    0.076760] smp: Brought up 1 node, 4 CPUs
+[    0.111034] SMP: Total of 4 processors activated.
+[    0.115101] CPU: All CPU(s) started at EL1
+[    0.119881] CPU features: detected: 32-bit EL0 Support
+[    0.123864] CPU features: detected: CRC32 instructions
+[    0.129039] alternatives: applying system-wide alternatives
+[    0.134945] Memory: 947496K/1048576K available (5312K kernel code, 834K rwdata, 1476K rodata, 2560K init, 239K bss, 97816K reserved, 0K cma-reserved)
+[    0.140140] devtmpfs: initialized
+[    0.167465] clocksource: jiffies: mask: 0xffffffff max_cycles: 0xffffffff, max_idle_ns: 7645041785100000 ns
+[    0.167534] posixtimers hash table entries: 2048 (order: 3, 32768 bytes, linear)
+[    0.176104] futex hash table entries: 1024 (65536 bytes on 1 NUMA nodes, total 64 KiB, linear).
+[    0.184682] NET: Registered PF_NETLINK/PF_ROUTE protocol family
+[    0.192627] DMA: preallocated 128 KiB GFP_KERNEL pool for atomic allocations
+[    0.199724] ASID allocator initialised with 65536 entries
+[    0.206410] pstore: Using crash dump compression: deflate
+[    0.210574] pstore: Registered ramoops as persistent store backend
+[    0.215950] ramoops: using 0x100000@0xbff00000, ecc: 0
+[    0.232765] /soc@0/stm@802000: Fixed dependency cycle(s) with /soc@0/funnel@821000
+[    0.232845] /soc@0/tpiu@820000: Fixed dependency cycle(s) with /soc@0/replicator@824000
+[    0.239264] /soc@0/funnel@821000: Fixed dependency cycle(s) with /soc@0/etf@825000
+[    0.247152] /soc@0/funnel@821000: Fixed dependency cycle(s) with /soc@0/stm@802000
+[    0.254789] /soc@0/funnel@821000: Fixed dependency cycle(s) with /soc@0/funnel@841000
+[    0.262361] /soc@0/replicator@824000: Fixed dependency cycle(s) with /soc@0/etf@825000
+[    0.270232] /soc@0/replicator@824000: Fixed dependency cycle(s) with /soc@0/tpiu@820000
+[    0.278044] /soc@0/replicator@824000: Fixed dependency cycle(s) with /soc@0/etr@826000
+[    0.285961] /soc@0/etf@825000: Fixed dependency cycle(s) with /soc@0/replicator@824000
+[    0.293943] /soc@0/etf@825000: Fixed dependency cycle(s) with /soc@0/funnel@821000
+[    0.301860] /soc@0/etr@826000: Fixed dependency cycle(s) with /soc@0/replicator@824000
+[    0.309400] /soc@0/funnel@841000: Fixed dependency cycle(s) with /soc@0/funnel@821000
+[    0.317280] /soc@0/funnel@841000: Fixed dependency cycle(s) with /soc@0/etm@85f000
+[    0.325179] /soc@0/funnel@841000: Fixed dependency cycle(s) with /soc@0/etm@85e000
+[    0.332644] /soc@0/funnel@841000: Fixed dependency cycle(s) with /soc@0/etm@85d000
+[    0.340195] /soc@0/funnel@841000: Fixed dependency cycle(s) with /soc@0/etm@85c000
+[    0.347827] /soc@0/etm@85c000: Fixed dependency cycle(s) with /soc@0/funnel@841000
+[    0.355331] /soc@0/etm@85d000: Fixed dependency cycle(s) with /soc@0/funnel@841000
+[    0.362880] /soc@0/etm@85e000: Fixed dependency cycle(s) with /soc@0/funnel@841000
+[    0.370433] /soc@0/etm@85f000: Fixed dependency cycle(s) with /soc@0/funnel@841000
+[    0.378075] /soc@0/clock-controller@1800000: Fixed dependency cycle(s) with /soc@0/display-subsystem@1a00000/phy@1a98300
+[    0.385553] /soc@0/display-subsystem@1a00000/display-controller@1a01000: Fixed dependency cycle(s) with /soc@0/display-subsystem@1a00000/dsi@1a98000
+[    0.396564] /soc@0/display-subsystem@1a00000/dsi@1a98000: Fixed dependency cycle(s) with /soc@0/i2c@78b8000/bridge@39
+[    0.409829] /soc@0/display-subsystem@1a00000/dsi@1a98000: Fixed dependency cycle(s) with /soc@0/display-subsystem@1a00000/display-controller@1a01000
+[    0.420354] /soc@0/display-subsystem@1a00000/phy@1a98300: Fixed dependency cycle(s) with /soc@0/clock-controller@1800000
+[    0.434113] /soc@0/i2c@78b8000/bridge@39: Fixed dependency cycle(s) with /soc@0/display-subsystem@1a00000/dsi@1a98000
+[    0.444614] /soc@0/usb@78d9000: Fixed dependency cycle(s) with /soc@0/usb@78d9000/ulpi/phy
+[    0.455063] /soc@0/usb@78d9000/ulpi/phy: Fixed dependency cycle(s) with /soc@0/usb@78d9000
+[    0.463254] /soc@0/interrupt-controller@b000000: Fixed dependency cycle(s) with /soc@0/interrupt-controller@b000000
+[    0.473027] /soc@0/stm@802000: Fixed dependency cycle(s) with /soc@0/funnel@821000
+[    0.482062] /soc@0/tpiu@820000: Fixed dependency cycle(s) with /soc@0/replicator@824000
+[    0.489546] /soc@0/stm@802000: Fixed dependency cycle(s) with /soc@0/funnel@821000
+[    0.497399] /soc@0/funnel@821000: Fixed dependency cycle(s) with /soc@0/etf@825000
+[    0.504956] /soc@0/funnel@821000: Fixed dependency cycle(s) with /soc@0/stm@802000
+[    0.512575] /soc@0/funnel@821000: Fixed dependency cycle(s) with /soc@0/funnel@841000
+[    0.520188] /soc@0/tpiu@820000: Fixed dependency cycle(s) with /soc@0/replicator@824000
+[    0.528046] /soc@0/replicator@824000: Fixed dependency cycle(s) with /soc@0/etf@825000
+[    0.535773] /soc@0/replicator@824000: Fixed dependency cycle(s) with /soc@0/tpiu@820000
+[    0.543822] /soc@0/replicator@824000: Fixed dependency cycle(s) with /soc@0/etr@826000
+[    0.551776] /soc@0/replicator@824000: Fixed dependency cycle(s) with /soc@0/etf@825000
+[    0.559711] /soc@0/funnel@821000: Fixed dependency cycle(s) with /soc@0/etf@825000
+[    0.567605] /soc@0/etf@825000: Fixed dependency cycle(s) with /soc@0/replicator@824000
+[    0.575170] /soc@0/etf@825000: Fixed dependency cycle(s) with /soc@0/funnel@821000
+[    0.583163] /soc@0/replicator@824000: Fixed dependency cycle(s) with /soc@0/etr@826000
+[    0.590632] /soc@0/etr@826000: Fixed dependency cycle(s) with /soc@0/replicator@824000
+[    0.598621] /soc@0/funnel@821000: Fixed dependency cycle(s) with /soc@0/funnel@841000
+[    0.606420] /soc@0/funnel@841000: Fixed dependency cycle(s) with /soc@0/funnel@821000
+[    0.614302] /soc@0/funnel@841000: Fixed dependency cycle(s) with /soc@0/etm@85f000
+[    0.622056] /soc@0/funnel@841000: Fixed dependency cycle(s) with /soc@0/etm@85e000
+[    0.629521] /soc@0/funnel@841000: Fixed dependency cycle(s) with /soc@0/etm@85d000
+[    0.637071] /soc@0/funnel@841000: Fixed dependency cycle(s) with /soc@0/etm@85c000
+[    0.645385] /soc@0/funnel@841000: Fixed dependency cycle(s) with /soc@0/etm@85c000
+[    0.652264] /soc@0/etm@85c000: Fixed dependency cycle(s) with /soc@0/funnel@841000
+[    0.659883] /soc@0/funnel@841000: Fixed dependency cycle(s) with /soc@0/etm@85d000
+[    0.667364] /soc@0/etm@85d000: Fixed dependency cycle(s) with /soc@0/funnel@841000
+[    0.674990] /soc@0/funnel@841000: Fixed dependency cycle(s) with /soc@0/etm@85e000
+[    0.682478] /soc@0/etm@85e000: Fixed dependency cycle(s) with /soc@0/funnel@841000
+[    0.690091] /soc@0/funnel@841000: Fixed dependency cycle(s) with /soc@0/etm@85f000
+[    0.697573] /soc@0/etm@85f000: Fixed dependency cycle(s) with /soc@0/funnel@841000
+[    0.707593] /soc@0/clock-controller@1800000: Fixed dependency cycle(s) with /soc@0/display-subsystem@1a00000/phy@1a98300
+[    0.715296] /soc@0/display-subsystem@1a00000/display-controller@1a01000: Fixed dependency cycle(s) with /soc@0/display-subsystem@1a00000/dsi@1a98000
+[    0.723650] /soc@0/display-subsystem@1a00000/dsi@1a98000: Fixed dependency cycle(s) with /soc@0/i2c@78b8000/bridge@39
+[    0.736909] /soc@0/display-subsystem@1a00000/dsi@1a98000: Fixed dependency cycle(s) with /soc@0/display-subsystem@1a00000/display-controller@1a01000
+[    0.752315] /soc@0/i2c@78b8000/bridge@39: Fixed dependency cycle(s) with /soc@0/display-subsystem@1a00000/dsi@1a98000
+[    0.761538] /soc@0/usb@78d9000: Fixed dependency cycle(s) with /soc@0/usb@78d9000/ulpi/phy
+[    0.771353] /soc@0/usb@78d9000/ulpi/phy: Fixed dependency cycle(s) with /soc@0/usb@78d9000
+[    0.781503] /soc@0/i2c@78b8000/bridge@39: Fixed dependency cycle(s) with /hdmi-out
+[    0.787767] /hdmi-out: Fixed dependency cycle(s) with /soc@0/i2c@78b8000/bridge@39
+[    0.797923] SCSI subsystem initialized
+[    0.802912] usbcore: registered new interface driver usbfs
+[    0.806533] usbcore: registered new interface driver hub
+[    0.812023] usbcore: registered new device driver usb
+[    0.817793] qcom_scm: convention: smc arm 32
+[    0.823679] clocksource: Switched to clocksource arch_sys_counter
+[    0.834424] NET: Registered PF_UNIX/PF_LOCAL protocol family
+[    0.840679] workingset: timestamp_bits=62 (anon: 58) max_order=18 bucket_order=0 (anon: 0)
+[    0.849654] msm_serial 78af000.serial: msm_serial: detected port #1
+[    0.849749] msm_serial 78af000.serial: uartclk = 19200000
+[    0.855210] 78af000.serial: ttyMSM1 at MMIO 0x78af000 (irq = 16, base_baud = 1200000) is a MSM
+[    0.860873] msm_serial 78b0000.serial: msm_serial: detected port #0
+[    0.868892] msm_serial 78b0000.serial: uartclk =⁄		&	¬Ç™¬ÇÍjÕµ}Õï…•Ö±ÈΩπÕΩ±ïÅöï—’¡ÅzπÅÇΩ…—ÅÇj§¥		&	¬Ç≤ö≤ÍÇ…•π—≠ÈbïùÖçÂÅΩπÕΩ±ïÅ⁄——Â5M5¡ÍÅ*πÖâ±ïë5R⁄Çr¬¬Ç≤ö≤ÍÇ…•π—≠ÈbïùÖçÂÅΩπÕΩ±ïÅ⁄——Â5M5¡ÍÅ*πÖâ±ïë5R⁄Çr¬¬ í∫¬ÍÇ…•π—≠ÈbïùÖçÂÅΩΩ—çΩπÕΩ±ïÅ⁄µÕµ}Õï…•Ö±}ëµ¡ÍÅ"•ÕÖâ±ïë5R⁄Çr¬¬ í∫¬ÍÇ…•π—≠ÈbïùÖçÂÅΩΩ—çΩπÕΩ±ïÅ⁄µÕµ}Õï…•Ö±}ëµ¡ÍÅ"•ÕÖâ±ïë5R⁄Çr Ç¢ä¢≤ÍjÕµ}Õï…•Ö±È"…•Ÿï…ÅJπ•—•Ö±•Èïë5R˛[    0.912616] loop: module loaded
+[    0.913345] spi_qup 78b7000.spi: IN:block:16, fifo:64, OUT:block:16, fifo:64
+[    0.916574] spi_qup 78b9000.spi: IN:block:16, fifo:64, OUT:block:16, fifo:64
+[    0.924271] spmi_pmic_arb 200f000.spmi: PMIC arbiter version v2 (0x20010000)
+[    0.931129] /soc@0/spmi@200f000/pmic@0/mpps@a000: Fixed dependency cycle(s) with /soc@0/spmi@200f000/pmic@0/mpps@a000/pm8916-mpp4-state
+[    0.947689] usb3503 usb2513: switched to HUB mode
+[    0.947809] usb3503 usb2513: usb3503_probe: probed in hub mode
+[    0.953440] i2c_qup 78b6000.i2c: using default clock-frequency 100000
+[    0.959114] i2c_qup 78b8000.i2c: using default clock-frequency 100000
+[    0.965414] /hdmi-out: Fixed dependency cycle(s) with /soc@0/i2c@78b8000/bridge@39
+[    0.971457] /soc@0/display-subsystem@1a00000/dsi@1a98000: Fixed dependency cycle(s) with /soc@0/i2c@78b8000/bridge@39
+[    0.978886] /soc@0/i2c@78b8000/bridge@39: Fixed dependency cycle(s) with /hdmi-out
+[    0.989568] /soc@0/i2c@78b8000/bridge@39: Fixed dependency cycle(s) with /soc@0/display-subsystem@1a00000/dsi@1a98000
+[    0.997348] i2c_qup 78ba000.i2c: using default clock-frequency 100000
+[    1.010405] clocksource: arch_mmio_counter: mask: 0xffffffffffffff max_cycles: 0x46d987e47, max_idle_ns: 440795202767 ns
+[    1.014218] arch-timer-mmio b020000.timer: mmio timer running at 19.20MHz (virt)
+[    1.106269] msm_hsusb 78d9000.usb: Failed to create device link (0x180) with supplier remoteproc for /soc@0/usb@78d9000/ulpi/phy
+[    1.112660] sdhci_msm 7864900.mmc: Got CD GPIO
+[    1.125640] s3: Bringing 0uV into 1250000-1250000uV
+[    1.126251] s4: Bringing 0uV into 1850000-1850000uV
+[    1.129932] l2: Bringing 0uV into 1200000-1200000uV
+[    1.134698] l5: Bringing 0uV into 1800000-1800000uV
+[    1.139372] l6: Bringing 0uV into 1800000-1800000uV
+[    1.144232] l7: Bringing 0uV into 1800000-1800000uV
+[    1.144560] sdhci_msm 7864900.mmc: Got CD GPIO
+[    1.149082] l8: Bringing 0uV into 2900000-2900000uV
+[    1.158408] l9: Bringing 0uV into 3300000-3300000uV
+[    1.163453] l11: Bringing 0uV into 2950000-2950000uV
+[    1.168070] l12: Bringing 0uV into 1800000-1800000uV
+[    1.173266] l13: Bringing 0uV into 3075000-3075000uV
+[    1.176575] sdhci_msm 7864900.mmc: Got CD GPIO
+[    1.178519] l15: Bringing 0uV into 1800000-1800000uV
+[    1.187832] l16: Bringing 0uV into 1800000-1800000uV
+[    1.192358] gcc-msm8916 1800000.clock-controller: sync_state() pending due to 22000.rng
+[    1.197227] gcc-msm8916 1800000.clock-controller: sync_state() pending due to 1a00000.display-subsystem
+[    1.204972] gcc-msm8916 1800000.clock-controller: sync_state() pending due to 1b0ac00.camss
+[    1.205179] l17: Bringing 0uV into 3300000-3300000uV
+[    1.214354] gcc-msm8916 1800000.clock-controller: sync_state() pending due to 1c00000.gpu
+[    1.223690] mmc0: SDHCI controller on 7824900.mmc [7824900.mmc] using ADMA
+[    1.227958] gcc-msm8916 1800000.clock-controller: sync_state() pending due to 1d00000.video-codec
+[    1.242883] gcc-msm8916 1800000.clock-controller: sync_state() pending due to 1ef0000.iommu
+[    1.251807] gcc-msm8916 1800000.clock-controller: sync_state() pending due to soc@0:iommu@1f08000
+[    1.259822] gcc-msm8916 1800000.clock-controller: sync_state() pending due to 4080000.remoteproc
+[    1.268985] gcc-msm8916 1800000.clock-controller: sync_state() pending due to 7708000.audio-controller
+[    1.275885] mmc1: SDHCI controller on 7864900.mmc [7864900.mmc] using ADMA
+[    1.277833] gcc-msm8916 1800000.clock-controller: sync_state() pending due to 771c000.audio-codec
+[    1.293823] gcc-msm8916 1800000.clock-controller: sync_state() pending due to 7824900.mmc
+[    1.302775] gcc-msm8916 1800000.clock-controller: sync_state() pending due to 7864900.mmc
+[    1.311937] input: gpio-keys as /devices/platform/gpio-keys/input/input0
+[    1.320385] clk: Disabling unused clocks
+[ ¸[    1.331934] Freeing unused kernel memory: 2560K
+[    1.332165] Run /init as init process
+
+
+
+BusyBox v1.38.0 (2026-07-20 16:15:06 AEST) built-in shell (ash)[    1.342649] file system registered
+
+
+~ # [    1.346757] read descriptors
+[    1.350532] read strings
+[    1.354118] read descriptors
+[    1.356084] read strings
+[    1.359433] Mass Storage Function, version: 2009/09/11
+[    1.361478] LUN: removable file: (no medium)
+[    1.366631] LUN: removable file: (no medium)
+[    1.371039] LUN: removable file: (no medium)
+[    1.375293] LUN: removable file: (no medium)
+[    1.379537] LUN: removable file: (no medium)
+[    1.383801] LUN: removable file: (no medium)
+[    1.388082] LUN: removable file: (no medium)
+[    1.392312] LUN: removable file: (no medium)
+[    1.397085] l13: voltage operation not allowed
+[    1.423855] mmc0: Card appears overclocked; req 177770000 Hz, actual 177777777 Hz
+[    1.423901] mmc0: Card appears overclocked; req 177770000 Hz, actual 177777777 Hz
+[    1.432901] mmc0: new HS200 MMC card at address 0001
+[    1.438444] mmcblk0: mmc0:0001 DS1008 7.28 GiB
+[    1.449909]  mmcblk0: p1 p2 p3 p4 p5 p6 p7 p8 p9 p10 p11 p12 p13 p14 p15 p16 p17 p18 p19 p20 p21 p22 p23 p24 p25 p26 p27 p28 p29 p30
+[    1.454519] mmcblk0boot0: mmc0:0001 DS1008 4.00 MiB
+[    1.465818] mmcblk0boot1: mmc0:0001 DS1008 4.00 MiB
+[    1.467048] mmcblk0rpmb: mmc0:0001 DS1008 4.00 MiB, chardev (251:0)
+[    1.918010]  WARN pocketboot: no boot entries discovered
+[    3.367789]  WARN pocketboot::ui: UI thread exited error=open /dev/dri: No such file or directory (os error 2)
+[   16.567698] random: crng init done
+[  108.731458] ------------[ cut here ]------------
+[  108.731490] WARNING: kernel/workqueue.c:4327 at __flush_work+0x378/0x394, CPU#0: pocketboot-fast/85
+[  108.735148] CPU: 0 UID: 0 PID: 85 Comm: pocketboot-fast Not tainted 7.1.0-rc6+ #2 PREEMPTLAZY 
+[  108.743909] Hardware name: Qualcomm Technologies, Inc. APQ 8016 SBC (DT)
+[  108.752590] pstate: 40000005 (nZcv daif -PAN -UAO -TCO -DIT -SSBS BTYPE=--)
+[  108.759445] pc : __flush_work+0x378/0x394
+[  108.766127] lr : __flush_work+0x34/0x394
+[  108.770293] sp : ffff800081843ca0
+[  108.774285] x29: ffff800081843ca0 x28: ffff000002062100 x27: 0000000000000000
+[  108.777501] x26: 0000000000000000 x25: 0000000000000000 x24: ffff800080a19cc8
+[  108.784619] x23: 0000000000000001 x22: ffff800080a1a000 x21: 0000000000000001
+[  108.791738] x20: ffff00000093ab78 x19: ffff00000093ab78 x18: 0000000000000000
+[  108.798856] x17: 0000000000000000 x16: 0000000000000000 x15: 00f96613f275b340
+[  108.805973] x14: ffff000002062190 x13: 000000000000021f x12: 0000000000000001
+[  108.813091] x11: 00000000000000c0 x10: 00000000000007d0 x9 : 0000000000000000
+[  108.820210] x8 : ffff800081843d50 x7 : 0000000000000000 x6 : ffff000001c85cf8
+[  108.827327] x5 : 0000000000000000 x4 : 0000000000000008 x3 : 0000000000000000
+[  108.834445] x2 : ffffffffffffffc0 x1 : 0000000000000000 x0 : 0000000000000000
+[  108.841565] Call trace:
+[  108.848677]  __flush_work+0x378/0x394 (P)
+[  108.850937]  cancel_work_sync+0x64/0x84
+[  108.855102]  ffs_fs_kill_sb+0x70/0x84
+[  108.858747]  deactivate_locked_super+0x40/0xe4
+[  108.862568]  deactivate_super+0x74/0x84
+[  108.866907]  cleanup_mnt+0xf0/0x14c
+[  108.870639]  __cleanup_mnt+0x10/0x18
+[  108.874111]  task_work_run+0x6c/0xdc
+[  108.877931]  exit_to_user_mode_loop+0xd8/0x128
+[  108.881491]  el0_svc+0x48/0x5c
+[  108.885743]  el0t_64_sync_handler+0x98/0xdc
+[  108.888783]  el0t_64_sync+0x154/0x158
+[  108.892863] ---[ end trace 0000000000000000 ]---
+[  108.896823] ffs_data_put(): freeing
+[  108.901820] ------------[ cut here ]------------
+[  108.904583] WARNING: kernel/workqueue.c:4327 at __flush_work+0x378/0x394, CPU#0: pocketboot-fast/85
+[  108.909453] CPU: 0 UID: 0 PID: 85 Comm: pocketboot-fast Tainted: G        W           7.1.0-rc6+ #2 PREEMPTLAZY 
+[  108.918220] Tainted: [W]=WARN
+[  108.928626] Hardware name: Qualcomm Technologies, Inc. APQ 8016 SBC (DT)
+[  108.931495] pstate: 40000005 (nZcv daif -PAN -UAO -TCO -DIT -SSBS BTYPE=--)
+[  108.938265] pc : __flush_work+0x378/0x394
+[  108.944945] lr : __flush_work+0x34/0x394
+[  108.949113] sp : ffff800081843ca0
+[  108.953104] x29: ffff800081843ca0 x28: ffff000002062100 x27: 0000000000000000
+[  108.956321] x26: 0000000000000000 x25: 0000000000000000 x24: ffff800080a19cc8
+[  108.963439] x23: 0000000000000001 x22: ffff800080a1a000 x21: 0000000000000001
+[  108.970557] x20: ffff00000093a778 x19: ffff00000093a778 x18: 0000000000001000
+[  108.977675] x17: 0000000000000448 x16: 0000000000000400 x15: 0000000000000000
+[  108.984794] x14: ffff000002062190 x13: 0000000000000002 x12: 0000000000000000
+[  108.991911] x11: 00000000000000c0 x10: 00000000000007d0 x9 : 0000000000000000
+[  108.999029] x8 : ffff800081843d50 x7 : 0000000000000000 x6 : ffff000001c854f8
+[  109.006147] x5 : 0000000000000000 x4 : 0000000000000008 x3 : 0000000000000000
+[  109.013265] x2 : ffffffffffffffc0 x1 : 0000000000000000 x0 : 0000000000000000
+[  109.020384] Call trace:
+[  109.027497]  __flush_work+0x378/0x394 (P)
+[  109.029756]  cancel_work_sync+0x64/0x84
+[  109.033920]  ffs_fs_kill_sb+0x70/0x84
+[  109.037567]  deactivate_locked_super+0x40/0xe4
+[  109.041387]  deactivate_super+0x74/0x84
+[  109.045726]  cleanup_mnt+0xf0/0x14c
+[  109.049458]  __cleanup_mnt+0x10/0x18
+[  109.052931]  task_work_run+0x6c/0xdc
+[  109.056751]  exit_to_user_mode_loop+0xd8/0x128
+[  109.060311]  el0_svc+0x48/0x5c
+[  109.064562]  el0t_64_sync_handler+0x98/0xdc
+[  109.067601]  el0t_64_sync+0x154/0x158
+[  109.071682] ---[ end trace 0000000000000000 ]---
+[  109.075632] ffs_data_put(): freeing
+[  109.080360] unloading
+[  109.184547] kexec_core: Starting new kernel
+[  109.208175] IRQ38: set affinity failed(-22).
+[  109.208190] IRQ43: set affinity failed(-22).
+[  109.208199] IRQ57: set affinity failed(-22).
+[  109.208246] CPU1: persistent spin-table park acknowledged (epoch 3)
+[  109.232138] IRQ38: set affinity failed(-22).
+[  109.232152] IRQ43: set affinity failed(-22).
+[  109.232160] IRQ57: set affinity failed(-22).
+[  109.232208] CPU2: persistent spin-table park acknowledged (epoch 3)
+[  109.256095] IRQ38: set affinity failed(-22).
+[  109.256108] IRQ43: set affinity failed(-22).
+[  109.256115] IRQ57: set affinity failed(-22).
+[  109.256179] CPU3: persistent spin-table park acknowledged (epoch 3)
+[  109.268571] Bye!
+[    0.000000] Booting Linux on physical CPU 0x0000000000 [0x410fd030]
+[    0.000000] Linux version 7.1.0-rc6+ (sam@sam-desktop) (aarch64-linux-gnu-gcc (GCC) 16.1.1 20260501 (Red Hat Cross 16.1.1-1), GNU ld version 2.46-1.fc44) #2 SMP PREEMPT Fri Sep 11 09:57:12 AEST 2026
+[    0.000000] Machine model: Qualcomm Technologies, Inc. APQ 8016 SBC
+[    0.000000] earlycon: msm_serial_dm0 at MMIO 0x00000000078b0000 (options '')
+[    0.000000] printk: legacy bootconsole [msm_serial_dm0] enabled
+[    0.000000] OF: reserved mem: 0x000000008e200000..0x000000008e7fffff (6144 KiB) nomap non-reusable wcnss
+[    0.000000] OF: reserved mem: 0x000000008dd00000..0x000000008e1fffff (5120 KiB) nomap non-reusable venus
+[    0.000000] OF: reserved mem: 0x000000008dc00000..0x000000008dcfffff (1024 KiB) nomap non-reusable mba
+[    0.000000] OF: reserved mem: 0x0000000086000000..0x00000000862fffff (3072 KiB) nomap non-reusable tz-apps@86000000
+[    0.000000] OF: reserved mem: 0x0000000086300000..0x00000000863fffff (1024 KiB) nomap non-reusable smem@86300000
+[    0.000000] OF: reserved mem: 0x0000000086400000..0x00000000864fffff (1024 KiB) nomap non-reusable hypervisor@86400000
+[    0.000000] OF: reserved mem: 0x0000000086500000..0x000000008667ffff (1536 KiB) nomap non-reusable tz@86500000
+[    0.000000] OF: reserved mem: 0x0000000086680000..0x00000000866fffff (512 KiB) nomap non-reusable reserved@86680000
+[    0.000000] OF: reserved mem: 0x0000000086700000..0x00000000867dffff (896 KiB) nomap non-reusable rmtfs@86700000
+[    0.000000] OF: reserved mem: 0x00000000867e0000..0x00000000867fffff (128 KiB) nomap non-reusable rfsa@867e0000
+[    0.000000] OF: reserved mem: 0x0000000086800000..0x00000000892fffff (44032 KiB) nomap non-reusable mpss@86800000
+[    0.000000] OF: reserved mem: 0x00000000bff00000..0x00000000bfffffff (1024 KiB) map non-reusable ramoops@bff00000
+[    0.000000] OF: reserved mem: 0x00000000854ff000..0x00000000854fffff (4 KiB) nomap non-reusable spin-table@854ff000
+[    0.000000] Zone ranges:
+[    0.000000]   Normal   [mem 0x0000000080000000-0x00000000bfffffff]
+[    0.000000] Movable zone start for each node
+[    0.000000] Early memory node ranges
+[    0.000000]   node   0: [mem 0x0000000080000000-0x00000000854fefff]
+[    0.000000]   node   0: [mem 0x00000000854ff000-0x00000000854fffff]
+[    0.000000]   node   0: [mem 0x0000000085500000-0x0000000085ffffff]
+[    0.000000]   node   0: [mem 0x0000000086000000-0x00000000892fffff]
+[    0.000000]   node   0: [mem 0x0000000089300000-0x000000008dbfffff]
+[    0.000000]   node   0: [mem 0x000000008dc00000-0x000000008e7fffff]
+[    0.000000]   node   0: [mem 0x000000008e800000-0x00000000bfffffff]
+[    0.000000] Initmem setup node 0 [mem 0x0000000080000000-0x00000000bfffffff]
+[    0.000000] percpu: Embedded 14 pages/cpu s28544 r0 d28800 u57344
+[    0.000000] Detected VIPT I-cache on CPU0
+[    0.000000] CPU features: kernel page table isolation disabled by kernel configuration
+[    0.000000] alternatives: applying boot alternatives
+[    0.000000] Kernel command line: console=ttyMSM0,115200n8 earlycon loglevel=7 panic=0 androidboot.serialno=bc72e60 pocketboot.lab=kexec-generation-2
+[    0.000000] printk: log buffer data + meta data: 131072 + 458752 = 589824 bytes
+[    0.000000] Dentry cache hash table entries: 131072 (order: 8, 1048576 bytes, linear)
+[    0.000000] Inode-cache hash table entries: 65536 (order: 7, 524288 bytes, linear)
+[    0.000000] software IO TLB: SWIOTLB bounce buffer size adjusted to 1MB
+[    0.000000] software IO TLB: area num 4.
+[    0.000000] software IO TLB: mapped [mem 0x00000000be980000-0x00000000bea80000] (1MB)
+[    0.000000] Built 1 zonelists, mobility grouping on.  Total pages: 262144
+[    0.000000] mem auto-init: stack:all(zero), heap alloc:off, heap free:off
+[    0.000000] SLUB: HWalign=64, Order=0-3, MinObjects=0, CPUs=4, Nodes=1
+[    0.000000] rcu: Hierarchical RCU implementation.
+[    0.000000] rcu: RCU calculated value of scheduler-enlistment delay is 25 jiffies.
+[    0.000000] NR_IRQS: 64, nr_irqs: 64, preallocated irqs: 0
+[    0.000000] Root IRQ handler: gic_handle_irq
+[    0.000000] rcu: srcu_init: Setting srcu_struct sizes based on contention.
+[    0.000000] arch_timer: cp15 timer running at 19.20MHz (virt).
+[    0.000000] clocksource: arch_sys_counter: mask: 0xffffffffffffff max_cycles: 0x46d987e47, max_idle_ns: 440795202767 ns
+[    0.000000] sched_clock: 56 bits at 19MHz, resolution 52ns, wraps every 4398046511078ns
+[    0.010799] Console: colour dummy device 80x25
+[    0.018688] Calibrating delay loop (skipped), value calculated using timer frequency.. 38.40 BogoMIPS (lpj=76800)
+[    0.023183] pid_max: default: 32768 minimum: 301
+[    0.033701] Mount-cache hash table entries: 2048 (order: 2, 16384 bytes, linear)
+[    0.038203] Mountpoint-cache hash table entries: 2048 (order: 2, 16384 bytes, linear)
+[    0.045914] VFS: Finished mounting rootfs on nullfs
+[    0.053888] Pocketboot spin-table v1: persistent page at 0x00000000854ff000
+[    0.058889] rcu: Hierarchical SRCU implementation.
+[    0.064943] rcu: 	Max phase no-delay instances is 1000.
+[    0.070246] smp: Bringing up secondary CPUs ...
+[    0.075330] Detected VIPT I-cache on CPU1
+[    0.075475] CPU1: Booted secondary processor 0x0000000001 [0x410fd030]
+[    0.075959] Detected VIPT I-cache on CPU2
+[    0.076086] CPU2: Booted secondary processor 0x0000000002 [0x410fd030]
+[    0.076548] Detected VIPT I-cache on CPU3
+[    0.076675] CPU3: Booted secondary processor 0x0000000003 [0x410fd030]
+[    0.076763] smp: Brought up 1 node, 4 CPUs
+[    0.111035] SMP: Total of 4 processors activated.
+[    0.115101] CPU: All CPU(s) started at EL1
+[    0.119880] CPU features: detected: 32-bit EL0 Support
+[    0.123864] CPU features: detected: CRC32 instructions
+[    0.129037] alternatives: applying system-wide alternatives
+[    0.134940] Memory: 947496K/1048576K available (5312K kernel code, 834K rwdata, 1476K rodata, 2560K init, 239K bss, 97816K reserved, 0K cma-reserved)
+[    0.140173] devtmpfs: initialized
+[    0.167500] clocksource: jiffies: mask: 0xffffffff max_cycles: 0xffffffff, max_idle_ns: 7645041785100000 ns
+[    0.167569] posixtimers hash table entries: 2048 (order: 3, 32768 bytes, linear)
+[    0.176138] futex hash table entries: 1024 (65536 bytes on 1 NUMA nodes, total 64 KiB, linear).
+[    0.184720] NET: Registered PF_NETLINK/PF_ROUTE protocol family
+[    0.192658] DMA: preallocated 128 KiB GFP_KERNEL pool for atomic allocations
+[    0.199761] ASID allocator initialised with 65536 entries
+[    0.206451] pstore: Using crash dump compression: deflate
+[    0.210612] pstore: Registered ramoops as persistent store backend
+[    0.215986] ramoops: using 0x100000@0xbff00000, ecc: 0
+[    0.232797] /soc@0/stm@802000: Fixed dependency cycle(s) with /soc@0/funnel@821000
+[    0.232879] /soc@0/tpiu@820000: Fixed dependency cycle(s) with /soc@0/replicator@824000
+[    0.239297] /soc@0/funnel@821000: Fixed dependency cycle(s) with /soc@0/etf@825000
+[    0.247184] /soc@0/funnel@821000: Fixed dependency cycle(s) with /soc@0/stm@802000
+[    0.254823] /soc@0/funnel@821000: Fixed dependency cycle(s) with /soc@0/funnel@841000
+[    0.262393] /soc@0/replicator@824000: Fixed dependency cycle(s) with /soc@0/etf@825000
+[    0.270264] /soc@0/replicator@824000: Fixed dependency cycle(s) with /soc@0/tpiu@820000
+[    0.278077] /soc@0/replicator@824000: Fixed dependency cycle(s) with /soc@0/etr@826000
+[    0.285992] /soc@0/etf@825000: Fixed dependency cycle(s) with /soc@0/replicator@824000
+[    0.293975] /soc@0/etf@825000: Fixed dependency cycle(s) with /soc@0/funnel@821000
+[    0.301892] /soc@0/etr@826000: Fixed dependency cycle(s) with /soc@0/replicator@824000
+[    0.309432] /soc@0/funnel@841000: Fixed dependency cycle(s) with /soc@0/funnel@821000
+[    0.317313] /soc@0/funnel@841000: Fixed dependency cycle(s) with /soc@0/etm@85f000
+[    0.325211] /soc@0/funnel@841000: Fixed dependency cycle(s) with /soc@0/etm@85e000
+[    0.332677] /soc@0/funnel@841000: Fixed dependency cycle(s) with /soc@0/etm@85d000
+[    0.340229] /soc@0/funnel@841000: Fixed dependency cycle(s) with /soc@0/etm@85c000
+[    0.347859] /soc@0/etm@85c000: Fixed dependency cycle(s) with /soc@0/funnel@841000
+[    0.355363] /soc@0/etm@85d000: Fixed dependency cycle(s) with /soc@0/funnel@841000
+[    0.362913] /soc@0/etm@85e000: Fixed dependency cycle(s) with /soc@0/funnel@841000
+[    0.370465] /soc@0/etm@85f000: Fixed dependency cycle(s) with /soc@0/funnel@841000
+[    0.378110] /soc@0/clock-controller@1800000: Fixed dependency cycle(s) with /soc@0/display-subsystem@1a00000/phy@1a98300
+[    0.385586] /soc@0/display-subsystem@1a00000/display-controller@1a01000: Fixed dependency cycle(s) with /soc@0/display-subsystem@1a00000/dsi@1a98000
+[    0.396597] /soc@0/display-subsystem@1a00000/dsi@1a98000: Fixed dependency cycle(s) with /soc@0/i2c@78b8000/bridge@39
+[    0.409861] /soc@0/display-subsystem@1a00000/dsi@1a98000: Fixed dependency cycle(s) with /soc@0/display-subsystem@1a00000/display-controller@1a01000
+[    0.420387] /soc@0/display-subsystem@1a00000/phy@1a98300: Fixed dependency cycle(s) with /soc@0/clock-controller@1800000
+[    0.434154] /soc@0/i2c@78b8000/bridge@39: Fixed dependency cycle(s) with /soc@0/display-subsystem@1a00000/dsi@1a98000
+[    0.444646] /soc@0/usb@78d9000: Fixed dependency cycle(s) with /soc@0/usb@78d9000/ulpi/phy
+[    0.455097] /soc@0/usb@78d9000/ulpi/phy: Fixed dependency cycle(s) with /soc@0/usb@78d9000
+[    0.463285] /soc@0/interrupt-controller@b000000: Fixed dependency cycle(s) with /soc@0/interrupt-controller@b000000
+[    0.473077] /soc@0/stm@802000: Fixed dependency cycle(s) with /soc@0/funnel@821000
+[    0.482099] /soc@0/tpiu@820000: Fixed dependency cycle(s) with /soc@0/replicator@824000
+[    0.489578] /soc@0/stm@802000: Fixed dependency cycle(s) with /soc@0/funnel@821000
+[    0.497430] /soc@0/funnel@821000: Fixed dependency cycle(s) with /soc@0/etf@825000
+[    0.504989] /soc@0/funnel@821000: Fixed dependency cycle(s) with /soc@0/stm@802000
+[    0.512608] /soc@0/funnel@821000: Fixed dependency cycle(s) with /soc@0/funnel@841000
+[    0.520222] /soc@0/tpiu@820000: Fixed dependency cycle(s) with /soc@0/replicator@824000
+[    0.528077] /soc@0/replicator@824000: Fixed dependency cycle(s) with /soc@0/etf@825000
+[    0.535805] /soc@0/replicator@824000: Fixed dependency cycle(s) with /soc@0/tpiu@820000
+[    0.543855] /soc@0/replicator@824000: Fixed dependency cycle(s) with /soc@0/etr@826000
+[    0.551806] /soc@0/replicator@824000: Fixed dependency cycle(s) with /soc@0/etf@825000
+[    0.559742] /soc@0/funnel@821000: Fixed dependency cycle(s) with /soc@0/etf@825000
+[    0.567637] /soc@0/etf@825000: Fixed dependency cycle(s) with /soc@0/replicator@824000
+[    0.575204] /soc@0/etf@825000: Fixed dependency cycle(s) with /soc@0/funnel@821000
+[    0.583194] /soc@0/replicator@824000: Fixed dependency cycle(s) with /soc@0/etr@826000
+[    0.590663] /soc@0/etr@826000: Fixed dependency cycle(s) with /soc@0/replicator@824000
+[    0.598652] /soc@0/funnel@821000: Fixed dependency cycle(s) with /soc@0/funnel@841000
+[    0.606450] /soc@0/funnel@841000: Fixed dependency cycle(s) with /soc@0/funnel@821000
+[    0.614335] /soc@0/funnel@841000: Fixed dependency cycle(s) with /soc@0/etm@85f000
+[    0.622088] /soc@0/funnel@841000: Fixed dependency cycle(s) with /soc@0/etm@85e000
+[    0.629554] /soc@0/funnel@841000: Fixed dependency cycle(s) with /soc@0/etm@85d000
+[    0.637104] /soc@0/funnel@841000: Fixed dependency cycle(s) with /soc@0/etm@85c000
+[    0.645418] /soc@0/funnel@841000: Fixed dependency cycle(s) with /soc@0/etm@85c000
+[    0.652296] /soc@0/etm@85c000: Fixed dependency cycle(s) with /soc@0/funnel@841000
+[    0.659916] /soc@0/funnel@841000: Fixed dependency cycle(s) with /soc@0/etm@85d000
+[    0.667398] /soc@0/etm@85d000: Fixed dependency cycle(s) with /soc@0/funnel@841000
+[    0.675022] /soc@0/funnel@841000: Fixed dependency cycle(s) with /soc@0/etm@85e000
+[    0.682509] /soc@0/etm@85e000: Fixed dependency cycle(s) with /soc@0/funnel@841000
+[    0.690124] /soc@0/funnel@841000: Fixed dependency cycle(s) with /soc@0/etm@85f000
+[    0.697606] /soc@0/etm@85f000: Fixed dependency cycle(s) with /soc@0/funnel@841000
+[    0.707604] /soc@0/clock-controller@1800000: Fixed dependency cycle(s) with /soc@0/display-subsystem@1a00000/phy@1a98300
+[    0.715321] /soc@0/display-subsystem@1a00000/display-controller@1a01000: Fixed dependency cycle(s) with /soc@0/display-subsystem@1a00000/dsi@1a98000
+[    0.723684] /soc@0/display-subsystem@1a00000/dsi@1a98000: Fixed dependency cycle(s) with /soc@0/i2c@78b8000/bridge@39
+[    0.736943] /soc@0/display-subsystem@1a00000/dsi@1a98000: Fixed dependency cycle(s) with /soc@0/display-subsystem@1a00000/display-controller@1a01000
+[    0.752359] /soc@0/i2c@78b8000/bridge@39: Fixed dependency cycle(s) with /soc@0/display-subsystem@1a00000/dsi@1a98000
+[    0.761572] /soc@0/usb@78d9000: Fixed dependency cycle(s) with /soc@0/usb@78d9000/ulpi/phy
+[    0.771389] /soc@0/usb@78d9000/ulpi/phy: Fixed dependency cycle(s) with /soc@0/usb@78d9000
+[    0.781524] /soc@0/i2c@78b8000/bridge@39: Fixed dependency cycle(s) with /hdmi-out
+[    0.787802] /hdmi-out: Fixed dependency cycle(s) with /soc@0/i2c@78b8000/bridge@39
+[    0.797974] SCSI subsystem initialized
+[    0.802948] usbcore: registered new interface driver usbfs
+[    0.806566] usbcore: registered new interface driver hub
+[    0.812054] usbcore: registered new device driver usb
+[    0.817828] qcom_scm: convention: smc arm 32
+[    0.823712] clocksource: Switched to clocksource arch_sys_counter
+[    0.834447] NET: Registered PF_UNIX/PF_LOCAL protocol family
+[    0.843920] workingset: timestamp_bits=62 (anon: 58) max_order=18 bucket_order=0 (anon: 0)
+[    0.853527] msm_serial 78af000.serial: msm_serial: detected port #1
+[    0.853623] msm_serial 78af000.serial: uartclk = 19200000
+[    0.859049] 78af000.serial: ttyMSM1 at MMIO 0x78af000 (irq = 16, base_baud = 1200000) is a MSM
+[    0.864732] msm_serial 78b0000.serial: msm_serial: detected port #0
+[    0.872767] msm_serial 78b0000.serial: uartclk =[    0.884431] msm_serial: console setup on port #0
+[    0.884488] printk: legacy console [ttyMSM0] enabled
+[    0.884488] printk: legacy console [ttyMSM0] enabled
+[    0.893105] printk: legacy bootconsole [msm_serial_dm0] disabled
+[    0.893105] printk: legacy bootconsole [msm_serial_dm0] disabled
+[    0.907626] msm_serial: driver initialized
+[    0.915465] loop: module loaded
+[    0.916204] spi_qup 78b7000.spi: IN:block:16, fifo:64, OUT:block:16, fifo:64
+[    0.920584] spi_qup 78b9000.spi: IN:block:16, fifo:64, OUT:block:16, fifo:64
+[    0.928296] spmi_pmic_arb 200f000.spmi: PMIC arbiter version v2 (0x20010000)
+[    0.933977] /soc@0/spmi@200f000/pmic@0/mpps@a000: Fixed dependency cycle(s) with /soc@0/spmi@200f000/pmic@0/mpps@a000/pm8916-mpp4-state
+[    0.951727] usb3503 usb2513: switched to HUB mode
+[    0.951757] usb3503 usb2513: usb3503_probe: probed in hub mode
+[    0.956327] i2c_qup 78b6000.i2c: using default clock-frequency 100000
+[    0.961938] i2c_qup 78b8000.i2c: using default clock-frequency 100000
+[    0.968272] /hdmi-out: Fixed dependency cycle(s) with /soc@0/i2c@78b8000/bridge@39
+[    0.974273] /soc@0/display-subsystem@1a00000/dsi@1a98000: Fixed dependency cycle(s) with /soc@0/i2c@78b8000/bridge@39
+[    0.981729] /soc@0/i2c@78b8000/bridge@39: Fixed dependency cycle(s) with /hdmi-out
+[    0.992409] /soc@0/i2c@78b8000/bridge@39: Fixed dependency cycle(s) with /soc@0/display-subsystem@1a00000/dsi@1a98000
+[    1.000180] i2c_qup 78ba000.i2c: using default clock-frequency 100000
+[    1.013265] clocksource: arch_mmio_counter: mask: 0xffffffffffffff max_cycles: 0x46d987e47, max_idle_ns: 440795202767 ns
+[    1.016976] arch-timer-mmio b020000.timer: mmio timer running at 19.20MHz (virt)
+[    1.109929] msm_hsusb 78d9000.usb: Failed to create device link (0x180) with supplier remoteproc for /soc@0/usb@78d9000/ulpi/phy
+[    1.116687] sdhci_msm 7864900.mmc: Got CD GPIO
+[    1.129456] s3: Bringing 0uV into 1250000-1250000uV
+[    1.129913] s4: Bringing 0uV into 1850000-1850000uV
+[    1.133661] l2: Bringing 0uV into 1200000-1200000uV
+[    1.138529] l5: Bringing 0uV into 1800000-1800000uV
+[    1.143156] l6: Bringing 0uV into 1800000-1800000uV
+[    1.144624] sdhci_msm 7864900.mmc: Got CD GPIO
+[    1.148005] l7: Bringing 0uV into 1800000-1800000uV
+[    1.157414] l8: Bringing 0uV into 2900000-2900000uV
+[    1.161921] gcc-msm8916 1800000.clock-controller: sync_state() pending due to 22000.rng
+[    1.163981] l9: Bringing 0uV into 3300000-3300000uV
+[    1.166760] gcc-msm8916 1800000.clock-controller: sync_state() pending due to 1a00000.display-subsystem
+[    1.175198] l11: Bringing 0uV into 2950000-2950000uV
+[    1.179593] gcc-msm8916 1800000.clock-controller: sync_state() pending due to 1b0ac00.camss
+[    1.189223] l12: Bringing 0uV into 1800000-1800000uV
+[    1.194174] gcc-msm8916 1800000.clock-controller: sync_state() pending due to 1c00000.gpu
+[    1.194182] gcc-msm8916 1800000.clock-controller: sync_state() pending due to 1d00000.video-codec
+[    1.202478] l13: Bringing 0uV into 3075000-3075000uV
+[    1.207455] gcc-msm8916 1800000.clock-controller: sync_state() pending due to 1ef0000.iommu
+[    1.216050] l15: Bringing 0uV into 1800000-1800000uV
+[    1.224408] gcc-msm8916 1800000.clock-controller: sync_state() pending due to soc@0:iommu@1f08000
+[    1.229787] l16: Bringing 0uV into 1800000-1800000uV
+[    1.237490] gcc-msm8916 1800000.clock-controller: sync_state() pending due to 4080000.remoteproc
+[    1.237500] gcc-msm8916 1800000.clock-controller: sync_state() pending due to 7708000.audio-controller
+[    1.242969] l17: Bringing 0uV into 3300000-3300000uV
+[    1.251463] gcc-msm8916 1800000.clock-controller: sync_state() pending due to 771c000.audio-codec
+[    1.279507] gcc-msm8916 1800000.clock-controller: sync_state() pending due to 7824900.mmc
+[    1.288278] gcc-msm8916 1800000.clock-controller: sync_state() pending due to 7864900.mmc
+[    1.297070] input: gpio-keys as /devices/platform/gpio-keys/input/input0
+[    1.305725] clk: Disabling unused clocks
+[    1.311578] PM: genpd: Disabling unused power˛[    1.355726] mmc0: SDHCI controller on 7824900.mmc [7824900.mmc] using ADMA
+[    1.359928] mmc1: SDHCI controller on 7864900.mmc [7864900.mmc] using ADMA
+[    1.362738] Freeing unused kernel memory: 2560K
+[    1.368643] Run /init as init process
+
+
+
+BusyBox v1.38.0 (2026-07-20 16:15:06 AEST) built-in shell (ash)
+
+~ # [    1.383637] file system registered
+[    1.384597] read descriptors
+[    1.387678] read strings
+[    1.391332] read descriptors
+[    1.393248] read strings
+[    1.396660] Mass Storage Function, version: 2009/09/11
+[    1.398605] LUN: removable file: (no medium)
+[    1.403833] LUN: removable file: (no medium)
+[    1.408241] LUN: removable file: (no medium)
+[    1.412489] LUN: removable file: (no medium)
+[    1.416743] LUN: removable file: (no medium)
+[    1.420984] LUN: removable file: (no medium)
+[    1.425252] LUN: removable file: (no medium)
+[    1.429543] LUN: removable file: (no medium)
+[    1.434295] l13: voltage operation not allowed
+[    1.521745] mmc0: Card appears overclocked; req 177770000 Hz, actual 177777777 Hz
+[    1.521795] mmc0: Card appears overclocked; req 177770000 Hz, actual 177777777 Hz
+[    1.530758] mmc0: new HS200 MMC card at address 0001
+[    1.536377] mmcblk0: mmc0:0001 DS1008 7.28 GiB
+[    1.547554]  mmcblk0: p1 p2 p3 p4 p5 p6 p7 p8 p9 p10 p11 p12 p13 p14 p15 p16 p17 p18 p19 p20 p21 p22 p23 p24 p25 p26 p27 p28 p29 p30
+[    1.552228] mmcblk0boot0: mmc0:0001 DS1008 4.00 MiB
+[    1.564220] mmcblk0boot1: mmc0:0001 DS1008 4.00 MiB
+[    1.565480] mmcblk0rpmb: mmc0:0001 DS1008 4.00 MiB, chardev (251:0)
+[    2.010527]  WARN pocketboot: no boot entries discovered
+[    3.403820]  WARN pocketboot::ui: UI thread exited error=open /dev/dri: No such file or directory (os error 2)
+[   11.299733] random: crng init done
+[   90.977094] ------------[ cut here ]------------
+[   90.977126] WARNING: kernel/workqueue.c:4327 at __flush_work+0x378/0x394, CPU#3: pocketboot-fast/82
+[   90.980783] CPU: 3 UID: 0 PID: 82 Comm: pocketboot-fast Not tainted 7.1.0-rc6+ #2 PREEMPTLAZY 
+[   90.989545] Hardware name: Qualcomm Technologies, Inc. APQ 8016 SBC (DT)
+[   90.998224] pstate: 40000005 (nZcv daif -PAN -UAO -TCO -DIT -SSBS BTYPE=--)
+[   91.005082] pc : __flush_work+0x378/0x394
+[   91.011762] lr : __flush_work+0x34/0x394
+[   91.015929] sp : ffff800081823ca0
+[   91.019921] x29: ffff800081823ca0 x28: ffff000001cec200 x27: 0000000000000000
+[   91.023137] x26: 0000000000000000 x25: 0000000000000000 x24: ffff800080a19cc8
+[   91.030256] x23: 0000000000000001 x22: ffff800080a1a000 x21: 0000000000000001
+[   91.037374] x20: ffff000001094f78 x19: ffff000001094f78 x18: 0000000000001000
+[   91.044492] x17: 0000000000000172 x16: 0000000000000400 x15: 0000000000000000
+[   91.051609] x14: ffff000001cec290 x13: 0000000000000002 x12: 0000000000000000
+[   91.058728] x11: 00000000000000c0 x10: 00000000000007d0 x9 : 0000000000000000
+[   91.065846] x8 : ffff800081823d50 x7 : 0000000000000000 x6 : ffff00000111ecf8
+[   91.072964] x5 : 0000000000000000 x4 : 0000000000000008 x3 : 0000000000000000
+[   91.080083] x2 : ffffffffffffffc0 x1 : 0000000000000000 x0 : 0000000000000000
+[   91.087202] Call trace:
+[   91.094313]  __flush_work+0x378/0x394 (P)
+[   91.096572]  cancel_work_sync+0x64/0x84
+[   91.100738]  ffs_fs_kill_sb+0x70/0x84
+[   91.104383]  deactivate_locked_super+0x40/0xe4
+[   91.108203]  deactivate_super+0x74/0x84
+[   91.112543]  cleanup_mnt+0xf0/0x14c
+[   91.116275]  __cleanup_mnt+0x10/0x18
+[   91.119747]  task_work_run+0x6c/0xdc
+[   91.123567]  exit_to_user_mode_loop+0xd8/0x128
+[   91.127127]  el0_svc+0x48/0x5c
+[   91.131380]  el0t_64_sync_handler+0x98/0xdc
+[   91.134418]  el0t_64_sync+0x154/0x158
+[   91.138499] ---[ end trace 0000000000000000 ]---
+[   91.142474] ffs_data_put(): freeing
+[   91.147480] ------------[ cut here ]------------
+[   91.150219] WARNING: kernel/workqueue.c:4327 at __flush_work+0x378/0x394, CPU#3: pocketboot-fast/82
+[   91.155089] CPU: 3 UID: 0 PID: 82 Comm: pocketboot-fast Tainted: G        W           7.1.0-rc6+ #2 PREEMPTLAZY 
+[   91.163855] Tainted: [W]=WARN
+[   91.174261] Hardware name: Qualcomm Technologies, Inc. APQ 8016 SBC (DT)
+[   91.177131] pstate: 40000005 (nZcv daif -PAN -UAO -TCO -DIT -SSBS BTYPE=--)
+[   91.183901] pc : __flush_work+0x378/0x394
+[   91.190581] lr : __flush_work+0x34/0x394
+[   91.194748] sp : ffff800081823ca0
+[   91.198741] x29: ffff800081823ca0 x28: ffff000001cec200 x27: 0000000000000000
+[   91.201956] x26: 0000000000000000 x25: 0000000000000000 x24: ffff800080a19cc8
+[   91.209075] x23: 0000000000000001 x22: ffff800080a1a000 x21: 0000000000000001
+[   91.216192] x20: ffff000001094b78 x19: ffff000001094b78 x18: 0000000000000000
+[   91.223312] x17: 0000000000000000 x16: 0000000000000000 x15: 0000000000000000
+[   91.230429] x14: ffff000001cec290 x13: 00000000000003d4 x12: 0000000000000001
+[   91.237546] x11: 00000000000000c0 x10: 00000000000007d0 x9 : 0000000000000000
+[   91.244665] x8 : ffff800081823d50 x7 : 0000000000000000 x6 : ffff00000111e4f8
+[   91.251783] x5 : 0000000000000000 x4 : 0000000000000008 x3 : 0000000000000000
+[   91.258901] x2 : ffffffffffffffc0 x1 : 0000000000000000 x0 : 0000000000000000
+[   91.266021] Call trace:
+[   91.273132]  __flush_work+0x378/0x394 (P)
+[   91.275391]  cancel_work_sync+0x64/0x84
+[   91.279558]  ffs_fs_kill_sb+0x70/0x84
+[   91.283203]  deactivate_locked_super+0x40/0xe4
+[   91.287023]  deactivate_super+0x74/0x84
+[   91.291362]  cleanup_mnt+0xf0/0x14c
+[   91.295094]  __cleanup_mnt+0x10/0x18
+[   91.298568]  task_work_run+0x6c/0xdc
+[   91.302387]  exit_to_user_mode_loop+0xd8/0x128
+[   91.305946]  el0_svc+0x48/0x5c
+[   91.310199]  el0t_64_sync_handler+0x98/0xdc
+[   91.313238]  el0t_64_sync+0x154/0x158
+[   91.317318] ---[ end trace 0000000000000000 ]---
+[   91.321594] ffs_data_put(): freeing
+[   91.325969] unloading
+[   91.432600] kexec_core: Starting new kernel
+[   91.460161] IRQ38: set affinity failed(-22).
+[   91.460175] IRQ43: set affinity failed(-22).
+[   91.460183] IRQ57: set affinity failed(-22).
+[   91.460255] CPU1: persistent spin-table park acknowledged (epoch 4)
+[   91.488147] IRQ38: set affinity failed(-22).
+[   91.488161] IRQ43: set affinity failed(-22).
+[   91.488168] IRQ57: set affinity failed(-22).
+[   91.488246] CPU2: persistent spin-table park acknowledged (epoch 4)
+[   91.512128] IRQ38: set affinity failed(-22).
+[   91.512140] IRQ43: set affinity failed(-22).
+[   91.512148] IRQ57: set affinity failed(-22).
+[   91.512211] CPU3: persistent spin-table park acknowledged (epoch 4)
+[   91.526778] Bye!
+msm8916 preboot
+pocketpreboot
+msm8916: primary CurrentEL=0x4
+msm8916: primary CPUECTLR=0x40
+msm8916: find reservation
+msm8916: validate memory
+msm8916: collect CPUs
+msm8916: patch FDT
+msm8916: clean FDT
+msm8916: cpu0x1 CPUECTLR=0x40
+msm8916: cpu0x2 CPUECTLR=0x40
+msm8916: cpu0x3 CPUECTLR=0x40
+msm8916: reusing acknowledged resident CPUs
+[    0.000000] Booting Linux on physical CPU 0x0000000000 [0x410fd030]
+[    0.000000] Linux version 7.1.0-rc6+ (sam@sam-desktop) (aarch64-linux-gnu-gcc (GCC) 16.1.1 20260501 (Red Hat Cross 16.1.1-1), GNU ld version 2.46-1.fc44) #2 SMP PREEMPT Fri Sep 11 09:57:12 AEST 2026
+[    0.000000] Machine model: Qualcomm Technologies, Inc. APQ 8016 SBC
+[    0.000000] earlycon: msm_serial_dm0 at MMIO 0x00000000078b0000 (options '')
+[    0.000000] printk: legacy bootconsole [msm_serial_dm0] enabled
+[    0.000000] OF: reserved mem: 0x000000008e200000..0x000000008e7fffff (6144 KiB) nomap non-reusable wcnss
+[    0.000000] OF: reserved mem: 0x000000008dd00000..0x000000008e1fffff (5120 KiB) nomap non-reusable venus
+[    0.000000] OF: reserved mem: 0x000000008dc00000..0x000000008dcfffff (1024 KiB) nomap non-reusable mba
+[    0.000000] OF: reserved mem: 0x0000000086000000..0x00000000862fffff (3072 KiB) nomap non-reusable tz-apps@86000000
+[    0.000000] OF: reserved mem: 0x0000000086300000..0x00000000863fffff (1024 KiB) nomap non-reusable smem@86300000
+[    0.000000] OF: reserved mem: 0x0000000086400000..0x00000000864fffff (1024 KiB) nomap non-reusable hypervisor@86400000
+[    0.000000] OF: reserved mem: 0x0000000086500000..0x000000008667ffff (1536 KiB) nomap non-reusable tz@86500000
+[    0.000000] OF: reserved mem: 0x0000000086680000..0x00000000866fffff (512 KiB) nomap non-reusable reserved@86680000
+[    0.000000] OF: reserved mem: 0x0000000086700000..0x00000000867dffff (896 KiB) nomap non-reusable rmtfs@86700000
+[    0.000000] OF: reserved mem: 0x00000000867e0000..0x00000000867fffff (128 KiB) nomap non-reusable rfsa@867e0000
+[    0.000000] OF: reserved mem: 0x0000000086800000..0x00000000892fffff (44032 KiB) nomap non-reusable mpss@86800000
+[    0.000000] OF: reserved mem: 0x00000000bff00000..0x00000000bfffffff (1024 KiB) map non-reusable ramoops@bff00000
+[    0.000000] OF: reserved mem: 0x00000000854ff000..0x00000000854fffff (4 KiB) nomap non-reusable spin-table@854ff000
+[    0.000000] Zone ranges:
+[    0.000000]   Normal   [mem 0x0000000080000000-0x00000000bfffffff]
+[    0.000000] Movable zone start for each node
+[    0.000000] Early memory node ranges
+[    0.000000]   node   0: [mem 0x0000000080000000-0x00000000854fefff]
+[    0.000000]   node   0: [mem 0x00000000854ff000-0x00000000854fffff]
+[    0.000000]   node   0: [mem 0x0000000085500000-0x0000000085ffffff]
+[    0.000000]   node   0: [mem 0x0000000086000000-0x00000000892fffff]
+[    0.000000]   node   0: [mem 0x0000000089300000-0x000000008dbfffff]
+[    0.000000]   node   0: [mem 0x000000008dc00000-0x000000008e7fffff]
+[    0.000000]   node   0: [mem 0x000000008e800000-0x00000000bfffffff]
+[    0.000000] Initmem setup node 0 [mem 0x0000000080000000-0x00000000bfffffff]
+[    0.000000] percpu: Embedded 14 pages/cpu s28544 r0 d28800 u57344
+[    0.000000] Detected VIPT I-cache on CPU0
+[    0.000000] CPU features: kernel page table isolation disabled by kernel configuration
+[    0.000000] alternatives: applying boot alternatives
+[    0.000000] Kernel command line: console=ttyMSM0,115200n8 earlycon loglevel=7 panic=0 androidboot.serialno=bc72e60 pocketboot.lab=kexec-generation-3-preboot
+[    0.000000] printk: log buffer data + meta data: 131072 + 458752 = 589824 bytes
+[    0.000000] Dentry cache hash table entries: 131072 (order: 8, 1048576 bytes, linear)
+[    0.000000] Inode-cache hash table entries: 65536 (order: 7, 524288 bytes, linear)
+[    0.000000] software IO TLB: SWIOTLB bounce buffer size adjusted to 1MB
+[    0.000000] software IO TLB: area num 4.
+[    0.000000] software IO TLB: mapped [mem 0x00000000be980000-0x00000000bea80000] (1MB)
+[    0.000000] Built 1 zonelists, mobility grouping on.  Total pages: 262144
+[    0.000000] mem auto-init: stack:all(zero), heap alloc:off, heap free:off
+[    0.000000] SLUB: HWalign=64, Order=0-3, MinObjects=0, CPUs=4, Nodes=1
+[    0.000000] rcu: Hierarchical RCU implementation.
+[    0.000000] rcu: RCU calculated value of scheduler-enlistment delay is 25 jiffies.
+[    0.000000] NR_IRQS: 64, nr_irqs: 64, preallocated irqs: 0
+[    0.000000] Root IRQ handler: gic_handle_irq
+[    0.000000] rcu: srcu_init: Setting srcu_struct sizes based on contention.
+[    0.000000] arch_timer: cp15 timer running at 19.20MHz (virt).
+[    0.000000] clocksource: arch_sys_counter: mask: 0xffffffffffffff max_cycles: 0x46d987e47, max_idle_ns: 440795202767 ns
+[    0.000000] sched_clock: 56 bits at 19MHz, resolution 52ns, wraps every 4398046511078ns
+[    0.010790] Console: colour dummy device 80x25
+[    0.018688] Calibrating delay loop (skipped), value calculated using timer frequency.. 38.40 BogoMIPS (lpj=76800)
+[    0.023183] pid_max: default: 32768 minimum: 301
+[    0.033705] Mount-cache hash table entries: 2048 (order: 2, 16384 bytes, linear)
+[    0.038204] Mountpoint-cache hash table entries: 2048 (order: 2, 16384 bytes, linear)
+[    0.045922] VFS: Finished mounting rootfs on nullfs
+[    0.053891] Pocketboot spin-table v1: persistent page at 0x00000000854ff000
+[    0.058885] rcu: Hierarchical SRCU implementation.
+[    0.064943] rcu: 	Max phase no-delay instances is 1000.
+[    0.070247] smp: Bringing up secondary CPUs ...
+[    0.075325] Detected VIPT I-cache on CPU1
+[    0.075472] CPU1: Booted secondary processor 0x0000000001 [0x410fd030]
+[    0.075956] Detected VIPT I-cache on CPU2
+[    0.076087] CPU2: Booted secondary processor 0x0000000002 [0x410fd030]
+[    0.076552] Detected VIPT I-cache on CPU3
+[    0.076679] CPU3: Booted secondary processor 0x0000000003 [0x410fd030]
+[    0.076769] smp: Brought up 1 node, 4 CPUs
+[    0.111035] SMP: Total of 4 processors activated.
+[    0.115102] CPU: All CPU(s) started at EL1
+[    0.119881] CPU features: detected: 32-bit EL0 Support
+[    0.123863] CPU features: detected: CRC32 instructions
+[    0.129038] alternatives: applying system-wide alternatives
+[    0.134953] Memory: 947492K/1048576K available (5312K kernel code, 834K rwdata, 1476K rodata, 2560K init, 239K bss, 97820K reserved, 0K cma-reserved)
+[    0.140140] devtmpfs: initialized
+[    0.167478] clocksource: jiffies: mask: 0xffffffff max_cycles: 0xffffffff, max_idle_ns: 7645041785100000 ns
+[    0.167546] posixtimers hash table entries: 2048 (order: 3, 32768 bytes, linear)
+[    0.176117] futex hash table entries: 1024 (65536 bytes on 1 NUMA nodes, total 64 KiB, linear).
+[    0.184691] NET: Registered PF_NETLINK/PF_ROUTE protocol family
+[    0.192643] DMA: preallocated 128 KiB GFP_KERNEL pool for atomic allocations
+[    0.199737] ASID allocator initialised with 65536 entries
+[    0.206420] pstore: Using crash dump compression: deflate
+[    0.210589] pstore: Registered ramoops as persistent store backend
+[    0.215964] ramoops: using 0x100000@0xbff00000, ecc: 0
+[    0.232793] /soc@0/stm@802000: Fixed dependency cycle(s) with /soc@0/funnel@821000
+[    0.232875] /soc@0/tpiu@820000: Fixed dependency cycle(s) with /soc@0/replicator@824000
+[    0.239291] /soc@0/funnel@821000: Fixed dependency cycle(s) with /soc@0/etf@825000
+[    0.247179] /soc@0/funnel@821000: Fixed dependency cycle(s) with /soc@0/stm@802000
+[    0.254818] /soc@0/funnel@821000: Fixed dependency cycle(s) with /soc@0/funnel@841000
+[    0.262390] /soc@0/replicator@824000: Fixed dependency cycle(s) with /soc@0/etf@825000
+[    0.270261] /soc@0/replicator@824000: Fixed dependency cycle(s) with /soc@0/tpiu@820000
+[    0.278073] /soc@0/replicator@824000: Fixed dependency cycle(s) with /soc@0/etr@826000
+[    0.285990] /soc@0/etf@825000: Fixed dependency cycle(s) with /soc@0/replicator@824000
+[    0.293971] /soc@0/etf@825000: Fixed dependency cycle(s) with /soc@0/funnel@821000
+[    0.301889] /soc@0/etr@826000: Fixed dependency cycle(s) with /soc@0/replicator@824000
+[    0.309429] /soc@0/funnel@841000: Fixed dependency cycle(s) with /soc@0/funnel@821000
+[    0.317309] /soc@0/funnel@841000: Fixed dependency cycle(s) with /soc@0/etm@85f000
+[    0.325208] /soc@0/funnel@841000: Fixed dependency cycle(s) with /soc@0/etm@85e000
+[    0.332673] /soc@0/funnel@841000: Fixed dependency cycle(s) with /soc@0/etm@85d000
+[    0.340224] /soc@0/funnel@841000: Fixed dependency cycle(s) with /soc@0/etm@85c000
+[    0.347857] /soc@0/etm@85c000: Fixed dependency cycle(s) with /soc@0/funnel@841000
+[    0.355360] /soc@0/etm@85d000: Fixed dependency cycle(s) with /soc@0/funnel@841000
+[    0.362909] /soc@0/etm@85e000: Fixed dependency cycle(s) with /soc@0/funnel@841000
+[    0.370462] /soc@0/etm@85f000: Fixed dependency cycle(s) with /soc@0/funnel@841000
+[    0.378103] /soc@0/clock-controller@1800000: Fixed dependency cycle(s) with /soc@0/display-subsystem@1a00000/phy@1a98300
+[    0.385581] /soc@0/display-subsystem@1a00000/display-controller@1a01000: Fixed dependency cycle(s) with /soc@0/display-subsystem@1a00000/dsi@1a98000
+[    0.396593] /soc@0/display-subsystem@1a00000/dsi@1a98000: Fixed dependency cycle(s) with /soc@0/i2c@78b8000/bridge@39
+[    0.409858] /soc@0/display-subsystem@1a00000/dsi@1a98000: Fixed dependency cycle(s) with /soc@0/display-subsystem@1a00000/display-controller@1a01000
+[    0.420384] /soc@0/display-subsystem@1a00000/phy@1a98300: Fixed dependency cycle(s) with /soc@0/clock-controller@1800000
+[    0.434150] /soc@0/i2c@78b8000/bridge@39: Fixed dependency cycle(s) with /soc@0/display-subsystem@1a00000/dsi@1a98000
+[    0.444641] /soc@0/usb@78d9000: Fixed dependency cycle(s) with /soc@0/usb@78d9000/ulpi/phy
+[    0.455092] /soc@0/usb@78d9000/ulpi/phy: Fixed dependency cycle(s) with /soc@0/usb@78d9000
+[    0.463283] /soc@0/interrupt-controller@b000000: Fixed dependency cycle(s) with /soc@0/interrupt-controller@b000000
+[    0.473064] /soc@0/stm@802000: Fixed dependency cycle(s) with /soc@0/funnel@821000
+[    0.482091] /soc@0/tpiu@820000: Fixed dependency cycle(s) with /soc@0/replicator@824000
+[    0.489576] /soc@0/stm@802000: Fixed dependency cycle(s) with /soc@0/funnel@821000
+[    0.497428] /soc@0/funnel@821000: Fixed dependency cycle(s) with /soc@0/etf@825000
+[    0.504986] /soc@0/funnel@821000: Fixed dependency cycle(s) with /soc@0/stm@802000
+[    0.512605] /soc@0/funnel@821000: Fixed dependency cycle(s) with /soc@0/funnel@841000
+[    0.520219] /soc@0/tpiu@820000: Fixed dependency cycle(s) with /soc@0/replicator@824000
+[    0.528073] /soc@0/replicator@824000: Fixed dependency cycle(s) with /soc@0/etf@825000
+[    0.535802] /soc@0/replicator@824000: Fixed dependency cycle(s) with /soc@0/tpiu@820000
+[    0.543851] /soc@0/replicator@824000: Fixed dependency cycle(s) with /soc@0/etr@826000
+[    0.551803] /soc@0/replicator@824000: Fixed dependency cycle(s) with /soc@0/etf@825000
+[    0.559739] /soc@0/funnel@821000: Fixed dependency cycle(s) with /soc@0/etf@825000
+[    0.567633] /soc@0/etf@825000: Fixed dependency cycle(s) with /soc@0/replicator@824000
+[    0.575207] /soc@0/etf@825000: Fixed dependency cycle(s) with /soc@0/funnel@821000
+[    0.583184] /soc@0/replicator@824000: Fixed dependency cycle(s) with /soc@0/etr@826000
+[    0.590660] /soc@0/etr@826000: Fixed dependency cycle(s) with /soc@0/replicator@824000
+[    0.598650] /soc@0/funnel@821000: Fixed dependency cycle(s) with /soc@0/funnel@841000
+[    0.606447] /soc@0/funnel@841000: Fixed dependency cycle(s) with /soc@0/funnel@821000
+[    0.614331] /soc@0/funnel@841000: Fixed dependency cycle(s) with /soc@0/etm@85f000
+[    0.622084] /soc@0/funnel@841000: Fixed dependency cycle(s) with /soc@0/etm@85e000
+[    0.629551] /soc@0/funnel@841000: Fixed dependency cycle(s) with /soc@0/etm@85d000
+[    0.637101] /soc@0/funnel@841000: Fixed dependency cycle(s) with /soc@0/etm@85c000
+[    0.645414] /soc@0/funnel@841000: Fixed dependency cycle(s) with /soc@0/etm@85c000
+[    0.652295] /soc@0/etm@85c000: Fixed dependency cycle(s) with /soc@0/funnel@841000
+[    0.659915] /soc@0/funnel@841000: Fixed dependency cycle(s) with /soc@0/etm@85d000
+[    0.667394] /soc@0/etm@85d000: Fixed dependency cycle(s) with /soc@0/funnel@841000
+[    0.675018] /soc@0/funnel@841000: Fixed dependency cycle(s) with /soc@0/etm@85e000
+[    0.682505] /soc@0/etm@85e000: Fixed dependency cycle(s) with /soc@0/funnel@841000
+[    0.690121] /soc@0/funnel@841000: Fixed dependency cycle(s) with /soc@0/etm@85f000
+[    0.697603] /soc@0/etm@85f000: Fixed dependency cycle(s) with /soc@0/funnel@841000
+[    0.707613] /soc@0/clock-controller@1800000: Fixed dependency cycle(s) with /soc@0/display-subsystem@1a00000/phy@1a98300
+[    0.715319] /soc@0/display-subsystem@1a00000/display-controller@1a01000: Fixed dependency cycle(s) with /soc@0/display-subsystem@1a00000/dsi@1a98000
+[    0.723680] /soc@0/display-subsystem@1a00000/dsi@1a98000: Fixed dependency cycle(s) with /soc@0/i2c@78b8000/bridge@39
+[    0.736939] /soc@0/display-subsystem@1a00000/dsi@1a98000: Fixed dependency cycle(s) with /soc@0/display-subsystem@1a00000/display-controller@1a01000
+[    0.752331] /soc@0/i2c@78b8000/bridge@39: Fixed dependency cycle(s) with /soc@0/display-subsystem@1a00000/dsi@1a98000
+[    0.761556] /soc@0/usb@78d9000: Fixed dependency cycle(s) with /soc@0/usb@78d9000/ulpi/phy
+[    0.771385] /soc@0/usb@78d9000/ulpi/phy: Fixed dependency cycle(s) with /soc@0/usb@78d9000
+[    0.781513] /soc@0/i2c@78b8000/bridge@39: Fixed dependency cycle(s) with /hdmi-out
+[    0.787799] /hdmi-out: Fixed dependency cycle(s) with /soc@0/i2c@78b8000/bridge@39
+[    0.797954] SCSI subsystem initialized
+[    0.802943] usbcore: registered new interface driver usbfs
+[    0.806563] usbcore: registered new interface driver hub
+[    0.812043] usbcore: registered new device driver usb
+[    0.817826] qcom_scm: convention: smc arm 32
+[    0.823698] clocksource: Switched to clocksource arch_sys_counter
+[    0.834464] NET: Registered PF_UNIX/PF_LOCAL protocol family
+[    0.843914] workingset: timestamp_bits=62 (anon: 58) max_order=18 bucket_order=0 (anon: 0)
+[    0.853521] msm_serial 78af000.serial: msm_serial: detected port #1
+[    0.853621] msm_serial 78af000.serial: uartclk = 19200000
+[    0.859051] 78af000.serial: ttyMSM1 at MMIO 0x78af000 (irq = 16, base_baud = 1200000) is a MSM
+[    0.864734] msm_serial 78b0000.serial: msm_serial: detected port #0
+[    0.872760] msm_serial 78b0000.serial: uartclk =[    0.884425] msm_serial: console setup on port #0
+[    0.884482] printk: legacy console [ttyMSM0] enabled
+[    0.884482] printk: legacy console [ttyMSM0] enabled
+[    0.893100] printk: legacy bootconsole [msm_serial_dm0] disabled
+[    0.893100] printk: legacy bootconsole [msm_serial_dm0] disabled
+[    0.907671] msm_serial: driver initialized
+[    0.915478] loop: module loaded
+[    0.916224] spi_qup 78b7000.spi: IN:block:16, fifo:64, OUT:block:16, fifo:64
+[    0.920574] spi_qup 78b9000.spi: IN:block:16, fifo:64, OUT:block:16, fifo:64
+[    0.928287] spmi_pmic_arb 200f000.spmi: PMIC arbiter version v2 (0x20010000)
+[    0.933987] /soc@0/spmi@200f000/pmic@0/mpps@a000: Fixed dependency cycle(s) with /soc@0/spmi@200f000/pmic@0/mpps@a000/pm8916-mpp4-state
+[    0.951713] usb3503 usb2513: switched to HUB mode
+[    0.951743] usb3503 usb2513: usb3503_probe: probed in hub mode
+[    0.956355] i2c_qup 78b6000.i2c: using default clock-frequency 100000
+[    0.961964] i2c_qup 78b8000.i2c: using default clock-frequency 100000
+[    0.968268] /hdmi-out: Fixed dependency cycle(s) with /soc@0/i2c@78b8000/bridge@39
+[    0.974286] /soc@0/display-subsystem@1a00000/dsi@1a98000: Fixed dependency cycle(s) with /soc@0/i2c@78b8000/bridge@39
+[    0.981742] /soc@0/i2c@78b8000/bridge@39: Fixed dependency cycle(s) with /hdmi-out
+[    0.992421] /soc@0/i2c@78b8000/bridge@39: Fixed dependency cycle(s) with /soc@0/display-subsystem@1a00000/dsi@1a98000
+[    1.000192] i2c_qup 78ba000.i2c: using default clock-frequency 100000
+[    1.013277] clocksource: arch_mmio_counter: mask: 0xffffffffffffff max_cycles: 0x46d987e47, max_idle_ns: 440795202767 ns
+[    1.016986] arch-timer-mmio b020000.timer: mmio timer running at 19.20MHz (virt)
+[    1.109895] msm_hsusb 78d9000.usb: Failed to create device link (0x180) with supplier remoteproc for /soc@0/usb@78d9000/ulpi/phy
+[    1.116667] sdhci_msm 7864900.mmc: Got CD GPIO
+[    1.129628] s3: Bringing 0uV into 1250000-1250000uV
+[    1.130029] s4: Bringing 0uV into 1850000-1850000uV
+[    1.134064] l2: Bringing 0uV into 1200000-1200000uV
+[    1.138846] l5: Bringing 0uV into 1800000-1800000uV
+[    1.143321] l6: Bringing 0uV into 1800000-1800000uV
+[    1.148226] l7: Bringing 0uV into 1800000-1800000uV
+[    1.148467] sdhci_msm 7864900.mmc: Got CD GPIO
+[    1.153045] l8: Bringing 0uV into 2900000-2900000uV
+[    1.162180] gcc-msm8916 1800000.clock-controller: sync_state() pending due to 22000.rng
+[    1.164053] l9: Bringing 0uV into 3300000-3300000uV
+[    1.166924] gcc-msm8916 1800000.clock-controller: sync_state() pending due to 1a00000.display-subsystem
+[    1.175391] l11: Bringing 0uV into 2950000-2950000uV
+[    1.179778] gcc-msm8916 1800000.clock-controller: sync_state() pending due to 1b0ac00.camss
+[    1.189398] l12: Bringing 0uV into 1800000-1800000uV
+[    1.194347] gcc-msm8916 1800000.clock-controller: sync_state() pending due to 1c00000.gpu
+[    1.202643] l13: Bringing 0uV into 3075000-3075000uV
+[    1.207628] gcc-msm8916 1800000.clock-controller: sync_state() pending due to 1d00000.video-codec
+[    1.216210] l15: Bringing 0uV into 1800000-1800000uV
+[    1.220763] gcc-msm8916 1800000.clock-controller: sync_state() pending due to 1ef0000.iommu
+[    1.229856] l16: Bringing 0uV into 1800000-1800000uV
+[    1.234537] gcc-msm8916 1800000.clock-controller: sync_state() pending due to soc@0:iommu@1f08000
+[    1.234547] gcc-msm8916 1800000.clock-controller: sync_state() pending due to 4080000.remoteproc
+[    1.242885] l17: Bringing 0uV into 3300000-3300000uV
+[    1.247821] gcc-msm8916 1800000.clock-controller: sync_state() pending due to 7708000.audio-controller
+[    1.247831] gcc-msm8916 1800000.clock-controller: sync_state() pending due to 771c000.audio-codec
+[    1.279508] gcc-msm8916 1800000.clock-controller: sync_state() pending due to 7824900.mmc
+[    1.288449] gcc-msm8916 1800000.clock-controller: sync_state() pending due to 7864900.mmc
+[    1.297280] input: gpio-keys as /devices/platform/gpio-keys/input/input0
+[    1.308751] clk: Disabling unused clocks
+[    1.311760] PM: genpd: Disabling unused power¸[    1.355712] mmc0: SDHCI controller on 7824900.mmc [7824900.mmc] using ADMA
+[    1.359906] mmc1: SDHCI controller on 7864900.mmc [7864900.mmc] using ADMA
+[    1.362744] Freeing unused kernel memory: 2560K
+[    1.368628] Run /init as init process
+
+
+
+BusyBox v1.38.0 (2026-07-20 16:15:06 AEST) built-in shell (ash)[    1.379827] file system registered
+
+
+~ # [    1.384285] read descriptors
+[    1.388100] read strings
+[    1.391680] read descriptors
+[    1.393645] read strings
+[    1.397066] Mass Storage Function, version: 2009/09/11
+[    1.399017] LUN: removable file: (no medium)
+[    1.404226] LUN: removable file: (no medium)
+[    1.408633] LUN: removable file: (no medium)
+[    1.412908] LUN: removable file: (no medium)
+[    1.417136] LUN: removable file: (no medium)
+[    1.421389] LUN: removable file: (no medium)
+[    1.425641] LUN: removable file: (no medium)
+[    1.429906] LUN: removable file: (no medium)
+[    1.434723] l13: voltage operation not allowed
+[    1.522075] mmc0: Card appears overclocked; req 177770000 Hz, actual 177777777 Hz
+[    1.522125] mmc0: Card appears overclocked; req 177770000 Hz, actual 177777777 Hz
+[    1.531079] mmc0: new HS200 MMC card at address 0001
+[    1.536686] mmcblk0: mmc0:0001 DS1008 7.28 GiB
+[    1.547465]  mmcblk0: p1 p2 p3 p4 p5 p6 p7 p8 p9 p10 p11 p12 p13 p14 p15 p16 p17 p18 p19 p20 p21 p22 p23 p24 p25 p26 p27 p28 p29 p30
+[    1.552089] mmcblk0boot0: mmc0:0001 DS1008 4.00 MiB
+[    1.564565] mmcblk0boot1: mmc0:0001 DS1008 4.00 MiB
+[    1.565790] mmcblk0rpmb: mmc0:0001 DS1008 4.00 MiB, chardev (251:0)
+[    2.010157]  WARN pocketboot: no boot entries discovered
+[    3.403806]  WARN pocketboot::ui: UI thread exited error=open /dev/dri: No such file or directory (os error 2)
+[   16.559722] random: crng init done

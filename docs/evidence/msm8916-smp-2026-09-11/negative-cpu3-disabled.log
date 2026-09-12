@@ -1,0 +1,11 @@
+COMMAND ['stage', 'target/db410c-lab/20260911/kexec-contract/negative-cpu3-disabled.img'] exit=0
+Sending 'target/db410c-lab/20260911/kexec-contract/negative-cpu3-disabled.img' (10388 KB) OKAY [  0.351s]
+Finished. Total time: 0.351s
+
+COMMAND ['oem', 'kexec-load'] exit=1
+FAILED (remote: 'destination CPU MPIDRs do not match the live spin-table CPUs')
+fastboot: error: Command failed
+
+COMMAND ['oem', 'kexec-status'] exit=0
+OKAY [  0.000s]
+Finished. Total time: 0.000s

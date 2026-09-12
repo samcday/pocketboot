@@ -1,0 +1,134 @@
+Panic#1 Part1
+<6>[    1.793968] LUN: removable file: (no medium)
+<6>[    1.798035] LUN: removable file: (no medium)
+<6>[    1.802471] LUN: removable file: (no medium)
+<6>[    1.806533] LUN: removable file: (no medium)
+<6>[    1.810794] LUN: removable file: (no medium)
+<6>[    1.815230] LUN: removable file: (no medium)
+<4>[    1.819824] mmc0: Card appears overclocked; req 177770000 Hz, actual 177777777 Hz
+<4>[    1.823543] mmc0: Card appears overclocked; req 177770000 Hz, actual 177777777 Hz
+<6>[    1.831325] mmc0: new HS200 MMC card at address 0001
+<6>[    1.838907] input: tm2-touchkey as /devices/platform/i2c-tkey/i2c-1/1-0020/input/input9
+<6>[    1.843572] mmcblk0: mmc0:0001 Q313MB 14.7 GiB
+<6>[    1.846668] input: MELFAS MMS345 Touchscreen as /devices/platform/soc@0/78b9000.i2c/i2c-6/6-0048/input/input10
+<6>[    1.857783] sdhci_msm 7864900.mmc: Got CD GPIO
+<6>[    1.857937] /soc@0/display-subsystem@1a00000/dsi@1a98000: Fixed dependency cycle(s) with /soc@0/display-subsystem@1a00000/dsi@1a98000/panel@0
+<6>[    1.870447] /soc@0/display-subsystem@1a00000/dsi@1a98000/panel@0: Fixed dependency cycle(s) with /soc@0/display-subsystem@1a00000/dsi@1a98000
+<6>[    1.884156] msm_mdp 1a01000.display-controller: bound 1a98000.dsi (ops 0xffff8000806384a8)
+<6>[    1.895812] msm_mdp 1a01000.display-controller: [drm:mdp5_kms_init] MDP5 version v1.6
+<6>[    1.913388]  mmcblk0: p1 p2 p3 p4 p5 p6 p7 p8 p9 p10 p11 p12 p13 p14 p15 p16 p17 p18 p19 p20 p21 p22 p23 p24 p25 p26
+<6>[    1.917715] mmcblk0boot0: mmc0:0001 Q313MB 4.00 MiB
+<4>[    1.920462] msm_mdp 1a01000.display-controller: fall back to the other CTL category for INTF 1!
+<6>[    1.924015] mmcblk0boot1: mmc0:0001 Q313MB 4.00 MiB
+<6>[    1.937685] mmc1: SDHCI controller on 7864900.mmc [7864900.mmc] using ADMA
+<6>[    1.941724] [drm] Initialized msm-kms 1.13.0 for 1a01000.display-controller on minor 0
+<6>[    1.942325] mmcblk0rpmb: mmc0:0001 Q313MB 4.00 MiB, chardev (249:0)
+<3>[    1.977192] msm_mdp 1a01000.display-controller: no GPU device was found
+<6>[    2.017344] mmc1: new UHS-I speed SDR104 SDXC card at address aaaa
+<6>[    2.018281] mmcblk1: mmc1:aaaa SR128 119 GiB
+<4>[    2.027158] GPT:Primary header thinks Alt. header is not at the end of the disk.
+<4>[    2.027412] GPT:29337599 != 249737215
+<4>[    2.034631] GPT:Alternate GPT header not at the end of the disk.
+<4>[    2.037999] GPT:29337599 != 249737215
+<4>[    2.044245] GPT: Use GNU Parted to correct GPT errors.
+<6>[    2.047654]  mmcblk1: p1 p2 p3
+<3>[    2.074525] l13: voltage operation not allowed
+<6>[    2.201684] mms114 6-0048: TSP FW Rev: bootloader 0x6 / core 0x26 / config 0x26
+<6>[    2.522782] EXT4-fs (mmcblk1p2): orphan cleanup on readonly fs
+<6>[    2.523901] EXT4-fs (mmcblk1p2): mounted filesystem 5077d4c6-b4a5-4429-af95-ee9691dbb6ca ro without journal. Quota mode: disabled.
+<3>[    2.631367] [drm:mdp5_irq_error_handler] *ERROR* errors: 04000000
+<3>[    7.100322] ci_hdrc ci_hdrc.0: not page aligned sg buffer
+<12>[    7.101019]  WARN pocketboot::fastboot: fastboot download failed command="download:0000a05e" error=Os { code: 22, kind: InvalidInput, message: "Invalid argument" }
+<12>[    8.109076]  WARN pocketboot::fastboot: fastboot server fatal transport error error=Custom { kind: TimedOut, error: "timeout waiting for exact AIO transfer" }
+<12>[    8.173043]  WARN pocketboot::gadget: fastboot server exited with error error=Custom { kind: TimedOut, error: "timeout waiting for exact AIO transfer" }
+<4>[    8.175010] ------------[ cut here ]------------
+<4>[    8.185963] WARNING: kernel/workqueue.c:4327 at __flush_work+0x378/0x394, CPU#1: pocketboot-fast/94
+<4>[    8.190749] CPU: 1 UID: 0 PID: 94 Comm: pocketboot-fast Not tainted 7.1.0-rc6+ #49 PREEMPTLAZY 
+<4>[    8.199516] Hardware name: Samsung Galaxy A5U (EUR) (DT)
+<4>[    8.208004] pstate: 40000005 (nZcv daif -PAN -UAO -TCO -DIT -SSBS BTYPE=--)
+<4>[    8.213742] pc : __flush_work+0x378/0x394
+<4>[    8.220245] lr : __flush_work+0x34/0x394
+<4>[    8.224588] sp : ffff800081873ca0
+<4>[    8.228401] x29: ffff800081873ca0 x28: ffff000002552100 x27: 0000000000000000
+<4>[    8.231619] x26: 0000000000000000 x25: 0000000000000000 x24: ffff800080adecc8
+<4>[    8.238914] x23: 0000000000000001 x22: ffff800080adf000 x21: 0000000000000001
+<4>[    8.246035] x20: ffff000001905378 x19: ffff000001905378 x18: 00000001e743d3e3
+<4>[    8.252976] x17: 0000000000000000 x16: 0000000000000000 x15: 013c8922f72859d0
+<4>[    8.260275] x14: ffff000002552190 x13: ffff8000805b96b8 x12: 0000000000000068
+<4>[    8.267386] x11: 00000000000000c0 x10: 00000000000007d0 x9 : 0000000000000000
+<4>[    8.274324] x8 : ffff800081873d50 x7 : 0000000000000000 x6 : ffff000001fd7cf8
+<4>[    8.281624] x5 : 0000000000000000 x4 : 0000000000000008 x3 : 0000000000000000
+<4>[    8.288743] x2 : ffffffffffffffc0 x1 : 0000000000000000 x0 : 0000000000000000
+<4>[    8.295683] Call trace:
+<4>[    8.302794]  __flush_work+0x378/0x394 (P)
+<4>[    8.305234]  cancel_work_sync+0x64/0x84
+<4>[    8.309214]  ffs_fs_kill_sb+0x70/0x84
+<4>[    8.312863]  deactivate_locked_super+0x40/0xe4
+<4>[    8.316860]  deactivate_super+0x74/0x84
+<4>[    8.321024]  cleanup_mnt+0xf0/0x14c
+<4>[    8.324755]  __cleanup_mnt+0x10/0x18
+<4>[    8.328408]  task_work_run+0x6c/0xdc
+<4>[    8.332047]  exit_to_user_mode_loop+0xd8/0x128
+<4>[    8.335609]  el0_svc+0x48/0x5c
+<4>[    8.340036]  el0t_64_sync_handler+0x98/0xdc
+<4>[    8.342899]  el0t_64_sync+0x154/0x158
+<4>[    8.346978] ---[ end trace 0000000000000000 ]---
+<6>[    8.351085] ffs_data_put(): freeing
+<4>[    8.356044] ------------[ cut here ]------------
+<4>[    8.358704] WARNING: kernel/workqueue.c:4327 at __flush_work+0x378/0x394, CPU#1: pocketboot-fast/94
+<4>[    8.363753] CPU: 1 UID: 0 PID: 94 Comm: pocketboot-fast Tainted: G        W           7.1.0-rc6+ #49 PREEMPTLAZY 
+<4>[    8.372518] Tainted: [W]=WARN
+<4>[    8.382740] Hardware name: Samsung Galaxy A5U (EUR) (DT)
+<4>[    8.385872] pstate: 40000005 (nZcv daif -PAN -UAO -TCO -DIT -SSBS BTYPE=--)
+<4>[    8.391257] pc : __flush_work+0x378/0x394
+<4>[    8.397759] lr : __flush_work+0x34/0x394
+<4>[    8.401927] sp : ffff800081873ca0
+<4>[    8.406095] x29: ffff800081873ca0 x28: ffff000002552100 x27: 0000000000000000
+<4>[    8.409140] x26: 0000000000000000 x25: 0000000000000000 x24: ffff800080adecc8
+<4>[    8.416437] x23: 0000000000000001 x22: ffff800080adf000 x21: 0000000000000001
+<4>[    8.423375] x20: ffff000001904f78 x19: ffff000001904f78 x18: 0000000000000000
+<4>[    8.430671] x17: 0000000000000000 x16: 0000000000000000 x15: 0000000000000000
+<4>[    8.437792] x14: ffff000002552190 x13: 00000000000000da x12: 0000000000000000
+<4>[    8.444726] x11: 00000000000000c0 x10: 00000000000007d0 x9 : 0000000000000000
+<4>[    8.452024] x8 : ffff800081873d50 x7 : 0000000000000000 x6 : ffff000001fd74f8
+<4>[    8.459140] x5 : 0000000000000000 x4 : 0000000000000008 x3 : 0000000000000000
+<4>[    8.466080] x2 : ffffffffffffffc0 x1 : 0000000000000000 x0 : 0000000000000000
+<4>[    8.473382] Call trace:
+<4>[    8.480305]  __flush_work+0x378/0x394 (P)
+<4>[    8.482568]  cancel_work_sync+0x64/0x84
+<4>[    8.486920]  ffs_fs_kill_sb+0x70/0x84
+<4>[    8.490382]  deactivate_locked_super+0x40/0xe4
+<4>[    8.494205]  deactivate_super+0x74/0x84
+<4>[    8.498726]  cleanup_mnt+0xf0/0x14c
+<4>[    8.502274]  __cleanup_mnt+0x10/0x18
+<4>[    8.505748]  task_work_run+0x6c/0xdc
+<4>[    8.509745]  exit_to_user_mode_loop+0xd8/0x128
+<4>[    8.513125]  el0_svc+0x48/0x5c
+<4>[    8.517377]  el0t_64_sync_handler+0x98/0xdc
+<4>[    8.520596]  el0t_64_sync+0x154/0x158
+<4>[    8.524496] ---[ end trace 0000000000000000 ]---
+<6>[    8.528417] ffs_data_put(): freeing
+<6>[    8.533451] unloading
+<12>[    8.617253] ERROR pocketboot::gadget: USB gadget failed error=Custom { kind: TimedOut, error: "timeout waiting for exact AIO transfer" }
+<0>[    9.621096] Kernel panic - not syncing: Attempted to kill init! exitcode=0x00000000
+<4>[    9.621533] CPU: 0 UID: 0 PID: 93 Comm: pocketboot-ui Tainted: G        W           7.1.0-rc6+ #49 PREEMPTLAZY 
+<4>[    9.627957] Tainted: [W]=WARN
+<4>[    9.637826] Hardware name: Samsung Galaxy A5U (EUR) (DT)
+<4>[    9.640959] Call trace:
+<4>[    9.646513]  show_stack+0x14/0x1c (C)
+<4>[    9.648504]  dump_stack_lvl+0x5c/0x78
+<4>[    9.652322]  dump_stack+0x14/0x1c
+<4>[    9.656144]  vpanic+0x128/0x2f0
+<4>[    9.659269]  abort+0x0/0x4
+<4>[    9.662214]  do_exit+0x898/0x8a0
+<4>[    9.664997]  do_group_exit+0x2c/0xa0
+<4>[    9.668558]  get_signal+0x7a0/0x7e0
+<4>[    9.671940]  arch_do_signal_or_restart+0x70/0x1f0
+<4>[    9.675156]  exit_to_user_mode_loop+0xe8/0x128
+<4>[    9.680194]  el0_svc+0x48/0x5c
+<4>[    9.684355]  el0t_64_sync_handler+0x98/0xdc
+<4>[    9.687394]  el0t_64_sync+0x154/0x158
+<2>[    9.691655] SMP: stopping secondary CPUs
+<0>[    9.695300] Kernel Offset: disabled
+<0>[    9.699285] CPU features: 0x00000000,00000000,00000000,0400400b
+<0>[    9.702685] Memory Limit: none

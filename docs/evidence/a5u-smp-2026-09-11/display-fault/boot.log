@@ -1,0 +1,30 @@
+('getvar', 'product')
+product: pocketboot
+Finished. Total time: 0.001s
+('getvar', 'serialno')
+serialno: cd0ee037
+Finished. Total time: 0.005s
+('getvar', 'compatible')
+compatible: samsung,a5u-eur
+Finished. Total time: 0.007s
+('boot', PosixPath('target/a5u-smp-lab/20260911/display-fault/boot.img'))
+Sending 'boot.img' (11168 KB)                      OKAY [  0.661s]
+Booting                                            OKAY [  0.954s]
+Finished. Total time: 1.622s
+('getvar', 'product')
+product: pocketboot
+Finished. Total time: 0.001s
+('getvar', 'serialno')
+serialno: cd0ee037
+Finished. Total time: 0.005s
+('getvar', 'compatible')
+compatible: samsung,a5u-eur
+Finished. Total time: 0.006s
+('oem', 'dmesg')
+(bootloader) 972 dmesg records staged (73028 bytes)
+(bootloader) run fastboot get_staged /dev/stdout to view
+OKAY [  0.030s]
+Finished. Total time: 0.030s
+('get_staged', PosixPath('target/a5u-smp-lab/20260911/display-fault/dmesg.log'))
+Uploading 'target/a5u-smp-lab/20260911/display-fault/dmesg.log' OKAY [  0.009s]
+Finished. Total time: 0.009s

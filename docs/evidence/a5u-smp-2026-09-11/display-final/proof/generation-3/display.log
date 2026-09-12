@@ -1,0 +1,182 @@
+msm.skip_gpu=1 msm.separate_gpu_kms=1 panic=5 oops=panic printk.time=1 pocketboot.log=info pocketboot.drm_page_flips=16 drm.debug=0x6 pocketboot.lab=display-final-3
+0-3
+           CPU0       CPU1       CPU2       CPU3       
+ 12:       2734       2756       2542       2628 GIC-0  20 Level     arch_timer
+ 15:          3          0          0          0  msmgpio  12 Edge      sm5502
+ 16:          0          0          0          1   sm5502   0 Edge      muic-attach
+ 17:          0          0          0          0   sm5502   1 Edge      muic-detach
+ 18:          0          0          0          0   sm5502   2 Edge      muic-kp
+ 19:          0          0          0          0   sm5502   3 Edge      muic-lkp
+ 20:          0          0          0          0   sm5502   4 Edge      muic-lkr
+ 21:          0          0          0          0   sm5502   5 Edge      muic-ovp-event
+ 22:          0          0          0          0   sm5502   6 Edge      muic-ocp-event
+ 23:          0          0          0          0   sm5502   7 Edge      muic-ovp-ocp-dis
+ 24:          0          0          0          0   sm5502   8 Edge      muic-vbus-det
+ 25:          0          0          0          0   sm5502   9 Edge      muic-rev-acce
+ 26:          0          0          0          0   sm5502  10 Edge      muic-adc-chg
+ 27:          0          0          0          0   sm5502  11 Edge      muic-stuck-key
+ 28:          0          0          0          0   sm5502  12 Edge      muic-stuck-key-rcv
+ 29:          0          0          0          0   sm5502  13 Edge      muic-mhl
+ 30:          0          0          0          0 GIC-0 270 Level     bam_dma
+ 31:          8          0          0          0 GIC-0 140 Level     msm_serial0
+ 32:          0          0          0          0 GIC-0 102 Level     qcom-iommu-fault
+ 35:          0          0          0          0 GIC-0 127 Level     i2c_qup
+ 36:          0          0          0          0 GIC-0 128 Level     i2c_qup
+ 37:         77          0          0          0 GIC-0 130 Level     i2c_qup
+ 38:          3          0          0          0 GIC-0 131 Level     i2c_qup
+ 39:         81          0          0          0 GIC-0 132 Level     i2c_qup
+ 40:          0          0          0          0 pmic_arb 524289 Edge      pm8941_pwrkey
+ 41:          0          0          0          0 pmic_arb 532481 Edge      pm8941_resin
+ 43:          0          0          0          0 GIC-0  39 Level     arch_mem_timer
+ 44:         21          0          0          0 msm_mdss   0 Edge      msm-kms
+ 45:         68          0          0          0 GIC-0 200 Edge      smd-edge
+ 46:        174          0          0          0 GIC-0 155 Level     mmc0
+ 47:        415          0          0          0 GIC-0 157 Level     mmc1
+ 48:          0          0          0          0  msmgpio  98 Edge      tm2-touchkey
+ 49:          0          0          0          0  msmgpio  13 Edge      6-0048
+ 50:        987          0          0          0 GIC-0 166 Level     ci_hdrc_msm
+ 51:         16          0          0          0 msm_mdss   4 Edge      dsi_isr
+ 52:          2          0          0          0 GIC-0 170 Level     7824900.mmc
+ 53:          0          0          0          0  msmgpio 107 Edge      Volume Up
+ 54:          0          0          0          0  msmgpio 109 Edge      Home
+ 55:          0          0          0          0  msmgpio  52 Edge      Hall Effect Sensor
+ 56:          2          0          0          0 GIC-0 253 Level     7864900.mmc
+ 58:          0          0          0          0  msmgpio  38 Edge      7864900.mmc cd
+ 62:          0          0          0          0  msmgpio  62 Edge      rt5033
+IPI0:      1048       1036       1063       1025       Rescheduling interrupts
+IPI1:       336        387        262       1360       Function call interrupts
+IPI2:         0          0          0          0       CPU stop interrupts
+IPI3:         0          0          0          0       CPU stop NMIs
+IPI4:         0          0          0          0       Timer broadcast interrupts
+IPI5:         7          6         16          4       IRQ work interrupts
+IPI6:         0          0          0          0       CPU backtrace interrupts
+IPI7:         0          0          0          0       KGDB roundup interrupts
+Err:          0
+user fb: 720x1280@XR24 ( 1, ID:64)
+   0: offset=0 pitch=2944, obj: 00020001: I  0 ( 3) 00100731 0000000000000000 03768320           dumb                            
+      vmas: [mdp_kms: vm=000000003fbcb2d9, 00732000, mapped]
+user fb: 720x1280@XR24 ( 1, ID:63)
+   0: offset=0 pitch=2944, obj: 00020001: I  0 ( 3) 00100399 0000000000000000 03768320           dumb                            
+      vmas: [mdp_kms: vm=000000003fbcb2d9, 00002000, mapped]
+user fb: 720x1280@XR24 ( 2, ID:62)
+   0: offset=0 pitch=2944, obj: 00020001: A  0 ( 3) 00100001 0000000000000000 03768320           dumb                            
+      vmas: [mdp_kms: vm=000000003fbcb2d9, 0039a000, mapped]
+plane[37]: plane-0
+	crtc=crtc-0
+	fb=62
+		allocated by = pocketboot-ui
+		refcount=2
+		format=XR24 little-endian (0x34325258)
+		modifier=0x0
+		size=720x1280
+		layers:
+			size[0]=720x1280
+			pitch[0]=2944
+			offset[0]=0
+			obj[0]:
+				name=0
+				refcount=3
+				start=00100001
+				size=3768320
+				imported=no
+	crtc-pos=720x1280+0+0
+	src-pos=720.000000x1280.000000+0.000000+0.000000
+	rotation=1
+	normalized-zpos=0
+	color-encoding=ITU-R BT.601 YCbCr
+	color-range=YCbCr limited range
+	color_mgmt_changed=0
+	color-pipeline=0
+	hwpipe=DMA0
+	blend_mode=0
+	zpos=1
+	normalized_zpos=0
+	alpha=65535
+	stage=STAGE_BASE
+plane[43]: plane-1
+	crtc=(null)
+	fb=0
+	crtc-pos=0x0+0+0
+	src-pos=0.000000x0.000000+0.000000+0.000000
+	rotation=1
+	normalized-zpos=3
+	color-encoding=ITU-R BT.601 YCbCr
+	color-range=YCbCr limited range
+	color_mgmt_changed=0
+	color-pipeline=0
+	hwpipe=(null)
+	blend_mode=0
+	zpos=3
+	normalized_zpos=3
+	alpha=65535
+	stage=STAGE_UNUSED
+plane[49]: plane-2
+	crtc=(null)
+	fb=0
+	crtc-pos=0x0+0+0
+	src-pos=0.000000x0.000000+0.000000+0.000000
+	rotation=1
+	normalized-zpos=4
+	color-encoding=ITU-R BT.601 YCbCr
+	color-range=YCbCr limited range
+	color_mgmt_changed=0
+	color-pipeline=0
+	hwpipe=(null)
+	blend_mode=0
+	zpos=4
+	normalized_zpos=4
+	alpha=65535
+	stage=STAGE_UNUSED
+plane[55]: plane-3
+	crtc=(null)
+	fb=0
+	crtc-pos=0x0+0+0
+	src-pos=0.000000x0.000000+0.000000+0.000000
+	rotation=1
+	normalized-zpos=5
+	color-encoding=ITU-R BT.601 YCbCr
+	color-range=YCbCr limited range
+	color_mgmt_changed=0
+	color-pipeline=0
+	hwpipe=(null)
+	blend_mode=0
+	zpos=5
+	normalized_zpos=5
+	alpha=65535
+	stage=STAGE_UNUSED
+crtc[61]: crtc-0
+	enable=1
+	active=1
+	self_refresh_active=0
+	planes_changed=1
+	mode_changed=0
+	active_changed=0
+	connectors_changed=0
+	color_mgmt_changed=0
+	plane_mask=1
+	connector_mask=1
+	encoder_mask=1
+	mode: "720x1280": 60 80117 720 800 896 1024 1280 1294 1296 1304 0x48 0x0
+	background_color=ffff000000000000
+	ctl=0
+	hwmixer=LM0
+	cmd_mode=0
+connector[36]: DSI-1
+	crtc=crtc-0
+	self_refresh_aware=0
+	interlace_allowed=0
+	ycbcr_420_allowed=0
+	max_requested_bpc=0
+	colorspace=Default
+name	inuse	plane
+----	-----	-----
+RGB0:0	0	(null)
+RGB1:0	0	(null)
+VIG0:0	0	(null)
+VIG0:1	0	(null)
+VIG0:2	0	(null)
+DMA0:0	1	plane-0
+DMA0:1	0	plane-0
+DMA0:2	0	plane-0
+TOTAL:	1	(of 8)
+AVAIL:	7

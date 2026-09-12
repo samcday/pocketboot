@@ -1,0 +1,17 @@
+{
+  "a5_bootimg": {
+    "path": "/var/home/sam/src/pocketboot/target/kernel/qcom/msm8916-samsung-a5u-eur/boot.img",
+    "bytes": 13797392,
+    "sha256": "1dc257372a6ca3c1e81349987453ed4b0d68b18a1c6b62d0067a03cba4dbcc08"
+  },
+  "a5_preboot": {
+    "path": "/var/home/sam/src/pocketboot/target/preboot/qcom/msm8916-samsung-a5u-eur/pocketpreboot.bin",
+    "bytes": 27624,
+    "sha256": "9c188d23a65fb3862b1eff2f26881153da82246ab1116a249f73a65930e3e496"
+  },
+  "parking_patch": {
+    "path": "/var/home/sam/src/pocketboot/patches/kernel/msm8916/0001-arm64-pocketboot-spin-table-kexec.patch",
+    "bytes": 16168,
+    "sha256": "3714dff3fc40b3e09274c02d524fb64e2a75502a25c4a1aa07919684cc5cfeec"
+  }
+}

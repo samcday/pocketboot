@@ -1,0 +1,91 @@
+{
+  "serial": "cd0ee037",
+  "compatible": "samsung,a5u-eur",
+  "kernel_build": 56,
+  "status": "PASS: cleaned display/SMP build across initial kexec entry and three further handoffs",
+  "phases": [
+    {
+      "phase": 0,
+      "marker": "display-final",
+      "four_core_workloads": "PASS",
+      "coherency": "PASS",
+      "iommu_fault_counts": [
+        0,
+        0,
+        0,
+        0
+      ],
+      "page_flips": 16,
+      "mdp_error_events": 1,
+      "preboot_reentry": false,
+      "live_dt_contract": "PASS"
+    },
+    {
+      "phase": 1,
+      "marker": "display-final-1",
+      "four_core_workloads": "PASS",
+      "coherency": "PASS",
+      "iommu_fault_counts": [
+        0,
+        0,
+        0,
+        0
+      ],
+      "page_flips": 16,
+      "mdp_error_events": 1,
+      "preboot_reentry": false,
+      "live_dt_contract": "PASS"
+    },
+    {
+      "phase": 2,
+      "marker": "display-final-2",
+      "four_core_workloads": "PASS",
+      "coherency": "PASS",
+      "iommu_fault_counts": [
+        0,
+        0,
+        0,
+        0
+      ],
+      "page_flips": 16,
+      "mdp_error_events": 1,
+      "preboot_reentry": false,
+      "live_dt_contract": "PASS"
+    },
+    {
+      "phase": 3,
+      "marker": "display-final-3",
+      "four_core_workloads": "PASS",
+      "coherency": "PASS",
+      "iommu_fault_counts": [
+        0,
+        0,
+        0,
+        0
+      ],
+      "page_flips": 16,
+      "mdp_error_events": 1,
+      "preboot_reentry": true,
+      "live_dt_contract": "PASS"
+    }
+  ],
+  "final_workload_recheck": "PASS",
+  "final_iommu_fault_irq": "32:          0          0          0          0 GIC-0 102 Level     qcom-iommu-fault",
+  "prior_console_parking": [
+    "[   13.753150] CPU1: persistent spin-table park acknowledged (epoch 13)",
+    "[   13.811295] CPU2: persistent spin-table park acknowledged (epoch 13)",
+    "[   13.834942] CPU3: persistent spin-table park acknowledged (epoch 13)",
+    "[   13.836082] Bye!"
+  ],
+  "physical_screen": "confirmation pending after fix; user confirmed blank on earlier generation-3 build",
+  "normal_boot_image": {
+    "bytes": 13862928,
+    "sha256": "0359533e3e1a7359c4925d117ddc337db9e10c9af6eaa5f41afd90c6e5b2e8ea"
+  },
+  "limitations": [
+    "one initial MDP underrun per boot remains",
+    "final #56 was entered via kexec; cold ACC/SCM proof and 300.8-second soak were on #51",
+    "normal image exceeds 13 MiB partition and is not flashed",
+    "changes beyond A5 not hardware-validated"
+  ]
+}

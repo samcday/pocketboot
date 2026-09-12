@@ -1,0 +1,36 @@
+('getvar', 'product')
+product: pocketboot
+Finished. Total time: 0.001s
+('getvar', 'serialno')
+serialno: cd0ee037
+Finished. Total time: 0.006s
+('getvar', 'compatible')
+compatible: samsung,a5u-eur
+Finished. Total time: 0.006s
+('stage', PosixPath('/var/home/sam/src/pocketboot/target/a5u-smp-lab/20260911/display-final/post-check.sh'))
+Sending '/var/home/sam/src/pocketboot/target/a5u-smp-lab/20260911/display-final/post-check.sh' (0 KB) OKAY [  0.025s]
+Finished. Total time: 0.025s
+('oem', 'shell-staged')
+(bootloader) shell exited 0; 5385 bytes staged
+(bootloader) run fastboot get_staged /dev/stdout to view
+OKAY [  0.760s]
+Finished. Total time: 0.760s
+('get_staged', PosixPath('/var/home/sam/src/pocketboot/target/a5u-smp-lab/20260911/display-final/post-check.log'))
+Uploading '/var/home/sam/src/pocketboot/target/a5u-smp-lab/20260911/display-final/post-check.log' OKAY [  0.013s]
+Finished. Total time: 0.013s
+('oem', 'cat:/tmp/pb-pstore/console-ramoops-0')
+(bootloader) /tmp/pb-pstore/console-ramoops-0 staged (43444 bytes)
+(bootloader) run fastboot get_staged /dev/stdout to view
+OKAY [  0.001s]
+Finished. Total time: 0.001s
+('get_staged', PosixPath('/var/home/sam/src/pocketboot/target/a5u-smp-lab/20260911/display-final/previous-console.log'))
+Uploading '/var/home/sam/src/pocketboot/target/a5u-smp-lab/20260911/display-final/previous-console.log' OKAY [  0.022s]
+Finished. Total time: 0.022s
+('oem', 'dmesg')
+(bootloader) 1066 dmesg records staged (81806 bytes)
+(bootloader) run fastboot get_staged /dev/stdout to view
+OKAY [  0.027s]
+Finished. Total time: 0.027s
+('get_staged', PosixPath('/var/home/sam/src/pocketboot/target/a5u-smp-lab/20260911/display-final/final-dmesg.log'))
+Uploading '/var/home/sam/src/pocketboot/target/a5u-smp-lab/20260911/display-final/final-dmesg.log' OKAY [  0.009s]
+Finished. Total time: 0.009s

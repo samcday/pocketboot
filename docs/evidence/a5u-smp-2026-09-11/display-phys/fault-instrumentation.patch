@@ -1,0 +1,25 @@
+Subject: [LAB diagnostic] report IOMMU faults with software physical translation
+
+--- a/drivers/iommu/arm/arm-smmu/qcom_iommu.c
++++ b/drivers/iommu/arm/arm-smmu/qcom_iommu.c
+@@ -200,11 +200,16 @@
+ 	fsynr = iommu_readl(ctx, ARM_SMMU_CB_FSYNR0);
+ 	iova = iommu_readq(ctx, ARM_SMMU_CB_FAR);
+ 
+-	if (!report_iommu_fault(ctx->domain, ctx->dev, iova, 0)) {
++	if (report_iommu_fault(ctx->domain, ctx->dev, iova, 0)) {
++		phys_addr_t phys = iommu_iova_to_phys(ctx->domain, iova);
++
+ 		dev_err_ratelimited(ctx->dev,
+-				    "Unhandled context fault: fsr=0x%x, "
+-				    "iova=0x%016llx, fsynr=0x%x, cb=%d\n",
+-				    fsr, iova, fsynr, ctx->asid);
++			"Unhandled context fault: fsr=%#x iova=%#llx phys=%pa "
++			"fsynr=%#x cb=%d ttbr=%#llx tcr=%#x tcr2=%#x\n",
++			fsr, iova, &phys, fsynr, ctx->asid,
++			iommu_readq(ctx, ARM_SMMU_CB_TTBR0),
++			iommu_readl(ctx, ARM_SMMU_CB_TCR),
++			iommu_readl(ctx, ARM_SMMU_CB_TCR2));
+ 	}
+ 
+ 	iommu_writel(ctx, ARM_SMMU_CB_FSR, fsr);

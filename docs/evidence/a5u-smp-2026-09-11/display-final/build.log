@@ -1,0 +1,92 @@
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.14s
+     Running `target/debug/xtask build qcom/msm8916-samsung-a5u-eur`
+kernel source /var/home/sam/src/pocketboot/target/kernel/src/msm8916
+warning: use of deprecated type alias `libc::time_t`: This type is changed to 64-bit in musl 1.2.0, we'll follow that change in the future release. See #1848 for more info.
+    --> src/adb.rs:1626:36
+     |
+1626 |             tv_sec: mtime as libc::time_t,
+     |                                    ^^^^^^
+     |
+     = note: `#[warn(deprecated)]` on by default
+
+warning: use of deprecated type alias `libc::time_t`: This type is changed to 64-bit in musl 1.2.0, we'll follow that change in the future release. See #1848 for more info.
+    --> src/adb.rs:1630:36
+     |
+1630 |             tv_sec: mtime as libc::time_t,
+     |                                    ^^^^^^
+
+warning: associated function `continue_then` is never used
+  --> src/fastboot/mod.rs:75:19
+   |
+67 | impl CommandResult {
+   | ------------------ associated function in this implementation
+...
+75 |     pub(crate) fn continue_then(action: PostResponseAction) -> Self {
+   |                   ^^^^^^^^^^^^^
+   |
+   = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+warning: `pocketboot` (bin "pocketboot") generated 3 warnings
+    Finished `release` profile [optimized] target(s) in 0.38s
+busybox /var/home/sam/src/pocketboot/target/busybox/install-aarch64-unknown-linux-musl-busybox-ee6b1f0f06d4/bin/busybox (460800 bytes)
+Using /var/home/sam/src/pocketboot/target/kernel/qcom/msm8916-samsung-a5u-eur/pocketboot.config as base
+Merging /var/home/sam/src/pocketboot/target/kernel/qcom/msm8916-samsung-a5u-eur/pocketboot-initramfs.config
+make[1]: Entering directory '/var/home/sam/src/pocketboot/target/kernel/qcom/msm8916-samsung-a5u-eur'
+#
+# configuration written to .config
+#
+make[1]: Leaving directory '/var/home/sam/src/pocketboot/target/kernel/qcom/msm8916-samsung-a5u-eur'
+make[1]: Entering directory '/var/home/sam/src/pocketboot/target/kernel/qcom/msm8916-samsung-a5u-eur'
+#
+# No change to .config
+#
+make[1]: Leaving directory '/var/home/sam/src/pocketboot/target/kernel/qcom/msm8916-samsung-a5u-eur'
+make[1]: Entering directory '/var/home/sam/src/pocketboot/target/kernel/qcom/msm8916-samsung-a5u-eur'
+  SYNC    include/config/auto.conf
+  CC      drivers/iommu/arm/arm-smmu/qcom_iommu.o
+  AR      drivers/interconnect/built-in.a
+  AR      drivers/iommu/arm/arm-smmu/built-in.a
+  AR      drivers/iommu/arm/built-in.a
+  AR      drivers/iommu/built-in.a
+  AR      drivers/built-in.a
+  AR      built-in.a
+  AR      vmlinux.a
+  LD      vmlinux.o
+  MODPOST vmlinux.symvers
+  CC      .vmlinux.export.o
+  UPD     include/generated/utsversion.h
+  CC      init/version-timestamp.o
+  KSYMS   .tmp_vmlinux0.kallsyms.S
+  AS      .tmp_vmlinux0.kallsyms.o
+  LD      .tmp_vmlinux1
+  NM      .tmp_vmlinux1.syms
+  KSYMS   .tmp_vmlinux1.kallsyms.S
+  AS      .tmp_vmlinux1.kallsyms.o
+  LD      .tmp_vmlinux2
+  NM      .tmp_vmlinux2.syms
+  KSYMS   .tmp_vmlinux2.kallsyms.S
+  AS      .tmp_vmlinux2.kallsyms.o
+  LD      vmlinux.unstripped
+  NM      System.map
+  SORTTAB vmlinux.unstripped
+  OBJCOPY vmlinux
+  GEN     modules.builtin.modinfo
+  GEN     modules.builtin
+  OBJCOPY arch/arm64/boot/Image
+  GZIP    arch/arm64/boot/Image.gz
+make[1]: Leaving directory '/var/home/sam/src/pocketboot/target/kernel/qcom/msm8916-samsung-a5u-eur'
+make[1]: Entering directory '/var/home/sam/src/pocketboot/target/kernel/qcom/msm8916-samsung-a5u-eur'
+make[1]: Leaving directory '/var/home/sam/src/pocketboot/target/kernel/qcom/msm8916-samsung-a5u-eur'
+wrote /var/home/sam/src/pocketboot/target/cpio/qcom/msm8916-samsung-a5u-eur/pocketboot-initrd.cpio
+image /var/home/sam/src/pocketboot/target/kernel/qcom/msm8916-samsung-a5u-eur/arch/arm64/boot/Image.gz
+dtb /var/home/sam/src/pocketboot/target/kernel/qcom/msm8916-samsung-a5u-eur/pocketboot.dtb
+config /var/home/sam/src/pocketboot/target/kernel/qcom/msm8916-samsung-a5u-eur/.config
+    Finished `release` profile [optimized] target(s) in 0.06s
+preboot /var/home/sam/src/pocketboot/target/preboot/qcom/msm8916-samsung-a5u-eur/pocketpreboot.bin
+preboot-features soc-msm8916,device-msm8916-samsung-a5u-eur
+preboot-payload-offset 0x1f8000
+wrote /var/home/sam/src/pocketboot/target/kernel/qcom/msm8916-samsung-a5u-eur/boot.img
+image /var/home/sam/src/pocketboot/target/kernel/qcom/msm8916-samsung-a5u-eur/pocketpreboot-kernel.img
+payload /var/home/sam/src/pocketboot/target/kernel/qcom/msm8916-samsung-a5u-eur/arch/arm64/boot/Image
+dtb /var/home/sam/src/pocketboot/target/kernel/qcom/msm8916-samsung-a5u-eur/pocketboot.dtb
+config /var/home/sam/src/pocketboot/configs/device/qcom/msm8916-samsung-a5u-eur.toml

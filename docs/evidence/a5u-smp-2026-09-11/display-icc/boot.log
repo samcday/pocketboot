@@ -1,0 +1,13 @@
+['getvar', 'product']
+product: pocketboot
+Finished. Total time: 0.001s
+['getvar', 'serialno']
+serialno: cd0ee037
+Finished. Total time: 0.005s
+['getvar', 'compatible']
+compatible: samsung,a5u-eur
+Finished. Total time: 0.006s
+['boot', 'target/a5u-smp-lab/20260911/display-icc/boot.img']
+Sending 'boot.img' (11168 KB)                      OKAY [  0.660s]
+Booting                                            OKAY [  0.958s]
+Finished. Total time: 1.625s

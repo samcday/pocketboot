@@ -1,0 +1,1 @@
+console=ttyMSM0,115200n8 earlycon loglevel=7 panic=0 androidboot.serialno=bc72e60 pocketboot.lab=psci-baseline-20260911

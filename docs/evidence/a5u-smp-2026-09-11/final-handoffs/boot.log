@@ -1,0 +1,28 @@
+('getvar', 'product')
+product: lk2nd-msm8916
+Finished. Total time: 0.002s
+('getvar', 'serialno')
+serialno: cd0ee037
+Finished. Total time: 0.002s
+('getvar', 'lk2nd:compatible')
+lk2nd:compatible: samsung,a5u-eur
+Finished. Total time: 0.003s
+('oem', 'debug', 'readl', '0xb098004')
+(bootloader) 0x00000023
+
+OKAY [  0.003s]
+Finished. Total time: 0.003s
+('oem', 'debug', 'readl', '0xb0a8004')
+(bootloader) 0x00000023
+
+OKAY [  0.003s]
+Finished. Total time: 0.003s
+('oem', 'debug', 'readl', '0xb0b8004')
+(bootloader) 0x00000023
+
+OKAY [  0.003s]
+Finished. Total time: 0.003s
+('boot', 'target/a5u-smp-lab/20260911/ramoops-iommu/cold.img')
+Sending 'boot.img' (13538 KB)                      OKAY [  0.429s]
+Booting                                            OKAY [  0.035s]
+Finished. Total time: 0.470s

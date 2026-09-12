@@ -1,0 +1,17 @@
+msm.skip_gpu=1 msm.separate_gpu_kms=1 panic=5 oops=panic printk.time=1 pocketboot.lab=kexec-generation-3-preboot-configured
+0-3
+SMP_WORK_V2 expected=292d74d0d0222325 bytes_per_cpu=67108864
+cpu=2 start_cpu=2 end_cpu=2 hash=292d74d0d0222325 cpu_seconds=0.503923 PASS
+cpu=3 start_cpu=3 end_cpu=3 hash=292d74d0d0222325 cpu_seconds=0.504163 PASS
+cpu=1 start_cpu=1 end_cpu=1 hash=292d74d0d0222325 cpu_seconds=0.504221 PASS
+cpu=0 start_cpu=0 end_cpu=0 hash=292d74d0d0222325 cpu_seconds=0.510262 PASS
+SMP_WORK_PASS all_four_cpus
+SMP_COHERENCY_V1 cpus=0,1,2,3 ring_rounds_per_cpu=10000 migration_rounds=1000 payload_bytes=2048 phase_timeout_seconds=12
+phase=ring cpu=0 completed=10000 before=0 after=0 result=PASS
+phase=ring cpu=1 completed=10000 before=1 after=1 result=PASS
+phase=ring cpu=2 completed=10000 before=2 after=2 result=PASS
+phase=ring cpu=3 completed=10000 before=3 after=3 result=PASS
+phase=ring handoffs=40000 payload_bytes=2048 elapsed_ms=134 PASS
+phase=migration cpu=3 completed=4000 before=2 after=3 result=PASS
+phase=migration transitions=4000 payload_bytes=2048 elapsed_ms=86
+SMP_COHERENCY_PASS all_four_cpus_shared_memory_and_migration

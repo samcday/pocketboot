@@ -1,0 +1,24 @@
+{
+  "selected_recovery": "majority",
+  "checksum_valid_recoveries": [
+    "majority",
+    "copy-0",
+    "copy-1",
+    "copy-2",
+    "bitwise-or"
+  ],
+  "header": {
+    "stage": "0x3",
+    "length": "0xcf",
+    "fdt": "0x48000000",
+    "current_el": "0x4",
+    "sctlr": "0xc50838",
+    "esr": "0x0",
+    "elr": "0x0",
+    "far": "0x0",
+    "text_checksum": "0x2015d850c2523841"
+  },
+  "header_copy_disagreement": {},
+  "header_caution": "Text checksum does not authenticate header fields; inspect disagreement.",
+  "text": "msm8916 preboot\r\npocketpreboot\r\nmsm8916: primary CurrentEL=0x4\r\nmsm8916: primary CPUECTLR=0x0\r\nmsm8916: setup failed: firmware did not enable Cortex-A53 SMPEN coherency\r\npocketpreboot: preboot setup failed\r\n"
+}

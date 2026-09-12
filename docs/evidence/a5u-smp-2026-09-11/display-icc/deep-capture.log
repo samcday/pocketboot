@@ -1,0 +1,56 @@
+('getvar', 'product')
+product: pocketboot
+Finished. Total time: 0.001s
+('getvar', 'serialno')
+serialno: cd0ee037
+Finished. Total time: 0.005s
+('getvar', 'compatible')
+compatible: samsung,a5u-eur
+Finished. Total time: 0.006s
+('stage', PosixPath('target/a5u-smp-lab/20260911/display-icc/deep-inventory.sh'))
+Sending 'target/a5u-smp-lab/20260911/display-icc/deep-inventory.sh' (0 KB) OKAY [  0.025s]
+Finished. Total time: 0.025s
+('oem', 'shell-staged')
+(bootloader) shell exited 0; 45888 bytes staged
+(bootloader) run fastboot get_staged /dev/stdout to view
+OKAY [  0.031s]
+Finished. Total time: 0.031s
+('get_staged', PosixPath('target/a5u-smp-lab/20260911/display-icc/deep-inventory.log'))
+Uploading 'target/a5u-smp-lab/20260911/display-icc/deep-inventory.log' OKAY [  0.015s]
+Finished. Total time: 0.015s
+('oem', 'dmesg')
+(bootloader) 2038 dmesg records staged (129077 bytes)
+(bootloader) run fastboot get_staged /dev/stdout to view
+OKAY [  0.049s]
+Finished. Total time: 0.049s
+('get_staged', PosixPath('target/a5u-smp-lab/20260911/display-icc/later-dmesg.log'))
+Uploading 'target/a5u-smp-lab/20260911/display-icc/later-dmesg.log' OKAY [  0.012s]
+Finished. Total time: 0.012s
+('getvar', 'product')
+product: pocketboot
+Finished. Total time: 0.001s
+('getvar', 'serialno')
+serialno: cd0ee037
+Finished. Total time: 0.006s
+('getvar', 'compatible')
+compatible: samsung,a5u-eur
+Finished. Total time: 0.006s
+('stage', PosixPath('target/a5u-smp-lab/20260911/display-icc/deep-inventory.sh'))
+Sending 'target/a5u-smp-lab/20260911/display-icc/deep-inventory.sh' (0 KB) OKAY [  0.025s]
+Finished. Total time: 0.025s
+('oem', 'shell-staged')
+(bootloader) shell exited 0; 10595 bytes staged
+(bootloader) run fastboot get_staged /dev/stdout to view
+OKAY [  0.030s]
+Finished. Total time: 0.030s
+('get_staged', PosixPath('target/a5u-smp-lab/20260911/display-icc/deep-inventory.log'))
+Uploading 'target/a5u-smp-lab/20260911/display-icc/deep-inventory.log' OKAY [  0.014s]
+Finished. Total time: 0.014s
+('oem', 'dmesg')
+(bootloader) 2039 dmesg records staged (129118 bytes)
+(bootloader) run fastboot get_staged /dev/stdout to view
+OKAY [  0.048s]
+Finished. Total time: 0.048s
+('get_staged', PosixPath('target/a5u-smp-lab/20260911/display-icc/later-dmesg.log'))
+Uploading 'target/a5u-smp-lab/20260911/display-icc/later-dmesg.log' OKAY [  0.012s]
+Finished. Total time: 0.012s

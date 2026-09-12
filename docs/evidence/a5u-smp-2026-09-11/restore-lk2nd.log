@@ -1,0 +1,29 @@
+['fastboot', '-s', 'cd0ee037', 'getvar', 'product']
+product: pocketboot
+Finished. Total time: 0.000s
+['fastboot', '-s', 'cd0ee037', 'getvar', 'serialno']
+serialno: cd0ee037
+Finished. Total time: 0.000s
+['fastboot', '-s', 'cd0ee037', 'getvar', 'compatible']
+compatible: samsung,a5u-eur
+Finished. Total time: 0.000s
+['fastboot', '-s', 'cd0ee037', 'getvar', 'is-userspace']
+is-userspace: yes
+Finished. Total time: 0.000s
+['fastboot', '-s', 'cd0ee037', 'flash', 'boot', 'target/a5u-smp-lab/20260911/lk2nd-msm8916.img']
+Sending 'boot' (412 KB)                            OKAY [  0.035s]
+Writing 'boot'                                     (bootloader) flashing 421904 bytes to boot (/dev/mmcblk0p16)
+(bootloader) wrote 421904 bytes
+OKAY [  0.029s]
+Finished. Total time: 0.086s
+['fastboot', '-s', 'cd0ee037', 'oem', 'cat:/dev/mmcblk0p16']
+(bootloader) /dev/mmcblk0p16 staged (13631488 bytes)
+(bootloader) run fastboot get_staged /dev/stdout to view
+OKAY [  0.107s]
+Finished. Total time: 0.107s
+['fastboot', '-s', 'cd0ee037', 'get_staged', 'target/a5u-smp-lab/20260911/boot-after-lk2nd.img']
+Uploading 'target/a5u-smp-lab/20260911/boot-after-lk2nd.img' OKAY [  0.415s]
+Finished. Total time: 0.415s
+['fastboot', '-s', 'cd0ee037', 'reboot', 'bootloader']
+Rebooting into bootloader                          OKAY [  0.000s]
+Finished. Total time: 0.601s

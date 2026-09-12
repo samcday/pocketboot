@@ -1,0 +1,244 @@
+['fastboot', '-s', 'cd0ee037', 'getvar', 'product']
+product: pocketboot
+Finished. Total time: 0.000s
+exit=0
+['fastboot', '-s', 'cd0ee037', 'getvar', 'serialno']
+serialno: cd0ee037
+Finished. Total time: 0.006s
+exit=0
+['fastboot', '-s', 'cd0ee037', 'getvar', 'compatible']
+compatible: samsung,a5u-eur
+Finished. Total time: 0.007s
+exit=0
+['fastboot', '-s', 'cd0ee037', 'getvar', 'is-userspace']
+is-userspace: yes
+Finished. Total time: 0.007s
+exit=0
+['fastboot', '-s', 'cd0ee037', 'stage', '/var/home/sam/src/pocketboot/target/a5u-smp-lab/20260911/display-final/kexec/workload-v2-install/000.sh']
+Sending '/var/home/sam/src/pocketboot/target/a5u-smp-lab/20260911/display-final/kexec/workload-v2-install/000.sh' (40 KB) OKAY [  0.024s]
+Finished. Total time: 0.024s
+exit=0
+['fastboot', '-s', 'cd0ee037', 'oem', 'shell-staged']
+(bootloader) shell exited 0; 0 bytes staged
+(bootloader) run fastboot get_staged /dev/stdout to view
+OKAY [  0.034s]
+Finished. Total time: 0.034s
+exit=0
+['fastboot', '-s', 'cd0ee037', 'stage', '/var/home/sam/src/pocketboot/target/a5u-smp-lab/20260911/display-final/kexec/workload-v2-install/001.sh']
+Sending '/var/home/sam/src/pocketboot/target/a5u-smp-lab/20260911/display-final/kexec/workload-v2-install/001.sh' (40 KB) OKAY [  0.018s]
+Finished. Total time: 0.018s
+exit=0
+['fastboot', '-s', 'cd0ee037', 'oem', 'shell-staged']
+(bootloader) shell exited 0; 0 bytes staged
+(bootloader) run fastboot get_staged /dev/stdout to view
+OKAY [  0.034s]
+Finished. Total time: 0.034s
+exit=0
+['fastboot', '-s', 'cd0ee037', 'stage', '/var/home/sam/src/pocketboot/target/a5u-smp-lab/20260911/display-final/kexec/workload-v2-install/002.sh']
+Sending '/var/home/sam/src/pocketboot/target/a5u-smp-lab/20260911/display-final/kexec/workload-v2-install/002.sh' (40 KB) OKAY [  0.018s]
+Finished. Total time: 0.018s
+exit=0
+['fastboot', '-s', 'cd0ee037', 'oem', 'shell-staged']
+(bootloader) shell exited 0; 0 bytes staged
+(bootloader) run fastboot get_staged /dev/stdout to view
+OKAY [  0.034s]
+Finished. Total time: 0.034s
+exit=0
+['fastboot', '-s', 'cd0ee037', 'stage', '/var/home/sam/src/pocketboot/target/a5u-smp-lab/20260911/display-final/kexec/workload-v2-install/003.sh']
+Sending '/var/home/sam/src/pocketboot/target/a5u-smp-lab/20260911/display-final/kexec/workload-v2-install/003.sh' (40 KB) OKAY [  0.018s]
+Finished. Total time: 0.018s
+exit=0
+['fastboot', '-s', 'cd0ee037', 'oem', 'shell-staged']
+(bootloader) shell exited 0; 0 bytes staged
+(bootloader) run fastboot get_staged /dev/stdout to view
+OKAY [  0.034s]
+Finished. Total time: 0.034s
+exit=0
+['fastboot', '-s', 'cd0ee037', 'stage', '/var/home/sam/src/pocketboot/target/a5u-smp-lab/20260911/display-final/kexec/workload-v2-install/004.sh']
+Sending '/var/home/sam/src/pocketboot/target/a5u-smp-lab/20260911/display-final/kexec/workload-v2-install/004.sh' (40 KB) OKAY [  0.018s]
+Finished. Total time: 0.018s
+exit=0
+['fastboot', '-s', 'cd0ee037', 'oem', 'shell-staged']
+(bootloader) shell exited 0; 0 bytes staged
+(bootloader) run fastboot get_staged /dev/stdout to view
+OKAY [  0.035s]
+Finished. Total time: 0.035s
+exit=0
+['fastboot', '-s', 'cd0ee037', 'stage', '/var/home/sam/src/pocketboot/target/a5u-smp-lab/20260911/display-final/kexec/workload-v2-install/005.sh']
+Sending '/var/home/sam/src/pocketboot/target/a5u-smp-lab/20260911/display-final/kexec/workload-v2-install/005.sh' (40 KB) OKAY [  0.018s]
+Finished. Total time: 0.018s
+exit=0
+['fastboot', '-s', 'cd0ee037', 'oem', 'shell-staged']
+(bootloader) shell exited 0; 0 bytes staged
+(bootloader) run fastboot get_staged /dev/stdout to view
+OKAY [  0.035s]
+Finished. Total time: 0.035s
+exit=0
+['fastboot', '-s', 'cd0ee037', 'stage', '/var/home/sam/src/pocketboot/target/a5u-smp-lab/20260911/display-final/kexec/workload-v2-install/006.sh']
+Sending '/var/home/sam/src/pocketboot/target/a5u-smp-lab/20260911/display-final/kexec/workload-v2-install/006.sh' (40 KB) OKAY [  0.018s]
+Finished. Total time: 0.018s
+exit=0
+['fastboot', '-s', 'cd0ee037', 'oem', 'shell-staged']
+(bootloader) shell exited 0; 0 bytes staged
+(bootloader) run fastboot get_staged /dev/stdout to view
+OKAY [  0.035s]
+Finished. Total time: 0.035s
+exit=0
+['fastboot', '-s', 'cd0ee037', 'stage', '/var/home/sam/src/pocketboot/target/a5u-smp-lab/20260911/display-final/kexec/workload-v2-install/007.sh']
+Sending '/var/home/sam/src/pocketboot/target/a5u-smp-lab/20260911/display-final/kexec/workload-v2-install/007.sh' (40 KB) OKAY [  0.017s]
+Finished. Total time: 0.018s
+exit=0
+['fastboot', '-s', 'cd0ee037', 'oem', 'shell-staged']
+(bootloader) shell exited 0; 0 bytes staged
+(bootloader) run fastboot get_staged /dev/stdout to view
+OKAY [  0.035s]
+Finished. Total time: 0.035s
+exit=0
+['fastboot', '-s', 'cd0ee037', 'stage', '/var/home/sam/src/pocketboot/target/a5u-smp-lab/20260911/display-final/kexec/workload-v2-install/008.sh']
+Sending '/var/home/sam/src/pocketboot/target/a5u-smp-lab/20260911/display-final/kexec/workload-v2-install/008.sh' (11 KB) OKAY [  0.018s]
+Finished. Total time: 0.018s
+exit=0
+['fastboot', '-s', 'cd0ee037', 'oem', 'shell-staged']
+(bootloader) shell exited 0; 0 bytes staged
+(bootloader) run fastboot get_staged /dev/stdout to view
+OKAY [  0.031s]
+Finished. Total time: 0.031s
+exit=0
+['fastboot', '-s', 'cd0ee037', 'stage', '/var/home/sam/src/pocketboot/target/a5u-smp-lab/20260911/display-final/kexec/coherency-install/000.sh']
+Sending '/var/home/sam/src/pocketboot/target/a5u-smp-lab/20260911/display-final/kexec/coherency-install/000.sh' (40 KB) OKAY [  0.017s]
+Finished. Total time: 0.018s
+exit=0
+['fastboot', '-s', 'cd0ee037', 'oem', 'shell-staged']
+(bootloader) shell exited 0; 0 bytes staged
+(bootloader) run fastboot get_staged /dev/stdout to view
+OKAY [  0.034s]
+Finished. Total time: 0.034s
+exit=0
+['fastboot', '-s', 'cd0ee037', 'stage', '/var/home/sam/src/pocketboot/target/a5u-smp-lab/20260911/display-final/kexec/coherency-install/001.sh']
+Sending '/var/home/sam/src/pocketboot/target/a5u-smp-lab/20260911/display-final/kexec/coherency-install/001.sh' (40 KB) OKAY [  0.018s]
+Finished. Total time: 0.018s
+exit=0
+['fastboot', '-s', 'cd0ee037', 'oem', 'shell-staged']
+(bootloader) shell exited 0; 0 bytes staged
+(bootloader) run fastboot get_staged /dev/stdout to view
+OKAY [  0.034s]
+Finished. Total time: 0.034s
+exit=0
+['fastboot', '-s', 'cd0ee037', 'stage', '/var/home/sam/src/pocketboot/target/a5u-smp-lab/20260911/display-final/kexec/coherency-install/002.sh']
+Sending '/var/home/sam/src/pocketboot/target/a5u-smp-lab/20260911/display-final/kexec/coherency-install/002.sh' (40 KB) OKAY [  0.018s]
+Finished. Total time: 0.018s
+exit=0
+['fastboot', '-s', 'cd0ee037', 'oem', 'shell-staged']
+(bootloader) shell exited 0; 0 bytes staged
+(bootloader) run fastboot get_staged /dev/stdout to view
+OKAY [  0.035s]
+Finished. Total time: 0.035s
+exit=0
+['fastboot', '-s', 'cd0ee037', 'stage', '/var/home/sam/src/pocketboot/target/a5u-smp-lab/20260911/display-final/kexec/coherency-install/003.sh']
+Sending '/var/home/sam/src/pocketboot/target/a5u-smp-lab/20260911/display-final/kexec/coherency-install/003.sh' (40 KB) OKAY [  0.017s]
+Finished. Total time: 0.018s
+exit=0
+['fastboot', '-s', 'cd0ee037', 'oem', 'shell-staged']
+(bootloader) shell exited 0; 0 bytes staged
+(bootloader) run fastboot get_staged /dev/stdout to view
+OKAY [  0.035s]
+Finished. Total time: 0.035s
+exit=0
+['fastboot', '-s', 'cd0ee037', 'stage', '/var/home/sam/src/pocketboot/target/a5u-smp-lab/20260911/display-final/kexec/coherency-install/004.sh']
+Sending '/var/home/sam/src/pocketboot/target/a5u-smp-lab/20260911/display-final/kexec/coherency-install/004.sh' (40 KB) OKAY [  0.018s]
+Finished. Total time: 0.018s
+exit=0
+['fastboot', '-s', 'cd0ee037', 'oem', 'shell-staged']
+(bootloader) shell exited 0; 0 bytes staged
+(bootloader) run fastboot get_staged /dev/stdout to view
+OKAY [  0.034s]
+Finished. Total time: 0.034s
+exit=0
+['fastboot', '-s', 'cd0ee037', 'stage', '/var/home/sam/src/pocketboot/target/a5u-smp-lab/20260911/display-final/kexec/coherency-install/005.sh']
+Sending '/var/home/sam/src/pocketboot/target/a5u-smp-lab/20260911/display-final/kexec/coherency-install/005.sh' (40 KB) OKAY [  0.018s]
+Finished. Total time: 0.018s
+exit=0
+['fastboot', '-s', 'cd0ee037', 'oem', 'shell-staged']
+(bootloader) shell exited 0; 0 bytes staged
+(bootloader) run fastboot get_staged /dev/stdout to view
+OKAY [  0.035s]
+Finished. Total time: 0.035s
+exit=0
+['fastboot', '-s', 'cd0ee037', 'stage', '/var/home/sam/src/pocketboot/target/a5u-smp-lab/20260911/display-final/kexec/coherency-install/006.sh']
+Sending '/var/home/sam/src/pocketboot/target/a5u-smp-lab/20260911/display-final/kexec/coherency-install/006.sh' (40 KB) OKAY [  0.018s]
+Finished. Total time: 0.018s
+exit=0
+['fastboot', '-s', 'cd0ee037', 'oem', 'shell-staged']
+(bootloader) shell exited 0; 0 bytes staged
+(bootloader) run fastboot get_staged /dev/stdout to view
+OKAY [  0.035s]
+Finished. Total time: 0.035s
+exit=0
+['fastboot', '-s', 'cd0ee037', 'stage', '/var/home/sam/src/pocketboot/target/a5u-smp-lab/20260911/display-final/kexec/coherency-install/007.sh']
+Sending '/var/home/sam/src/pocketboot/target/a5u-smp-lab/20260911/display-final/kexec/coherency-install/007.sh' (40 KB) OKAY [  0.018s]
+Finished. Total time: 0.018s
+exit=0
+['fastboot', '-s', 'cd0ee037', 'oem', 'shell-staged']
+(bootloader) shell exited 0; 0 bytes staged
+(bootloader) run fastboot get_staged /dev/stdout to view
+OKAY [  0.035s]
+Finished. Total time: 0.035s
+exit=0
+['fastboot', '-s', 'cd0ee037', 'stage', '/var/home/sam/src/pocketboot/target/a5u-smp-lab/20260911/display-final/kexec/coherency-install/008.sh']
+Sending '/var/home/sam/src/pocketboot/target/a5u-smp-lab/20260911/display-final/kexec/coherency-install/008.sh' (9 KB) OKAY [  0.018s]
+Finished. Total time: 0.018s
+exit=0
+['fastboot', '-s', 'cd0ee037', 'oem', 'shell-staged']
+(bootloader) shell exited 0; 0 bytes staged
+(bootloader) run fastboot get_staged /dev/stdout to view
+OKAY [  0.031s]
+Finished. Total time: 0.031s
+exit=0
+['fastboot', '-s', 'cd0ee037', 'stage', '/var/home/sam/src/pocketboot/target/a5u-smp-lab/20260911/display-final/kexec/snapshot-v2.sh']
+Sending '/var/home/sam/src/pocketboot/target/a5u-smp-lab/20260911/display-final/kexec/snapshot-v2.sh' (0 KB) OKAY [  0.018s]
+Finished. Total time: 0.018s
+exit=0
+['fastboot', '-s', 'cd0ee037', 'oem', 'shell-staged']
+(bootloader) shell exited 0; 2032 bytes staged
+(bootloader) run fastboot get_staged /dev/stdout to view
+OKAY [  0.535s]
+Finished. Total time: 0.535s
+exit=0
+['fastboot', '-s', 'cd0ee037', 'get_staged', '/var/home/sam/src/pocketboot/target/a5u-smp-lab/20260911/display-final/proof/generation-0/snapshot.log']
+Uploading '/var/home/sam/src/pocketboot/target/a5u-smp-lab/20260911/display-final/proof/generation-0/snapshot.log' OKAY [  0.013s]
+Finished. Total time: 0.013s
+exit=0
+['fastboot', '-s', 'cd0ee037', 'stage', '/var/home/sam/src/pocketboot/target/a5u-smp-lab/20260911/display-final/kexec/coherency-run.sh']
+Sending '/var/home/sam/src/pocketboot/target/a5u-smp-lab/20260911/display-final/kexec/coherency-run.sh' (0 KB) OKAY [  0.018s]
+Finished. Total time: 0.018s
+exit=0
+['fastboot', '-s', 'cd0ee037', 'oem', 'shell-staged']
+(bootloader) shell exited 0; 795 bytes staged
+(bootloader) run fastboot get_staged /dev/stdout to view
+OKAY [  0.226s]
+Finished. Total time: 0.226s
+exit=0
+['fastboot', '-s', 'cd0ee037', 'get_staged', '/var/home/sam/src/pocketboot/target/a5u-smp-lab/20260911/display-final/proof/generation-0/coherency.log']
+Uploading '/var/home/sam/src/pocketboot/target/a5u-smp-lab/20260911/display-final/proof/generation-0/coherency.log' OKAY [  0.013s]
+Finished. Total time: 0.013s
+exit=0
+['fastboot', '-s', 'cd0ee037', 'oem', 'cat:/sys/firmware/fdt']
+(bootloader) /sys/firmware/fdt staged (59814 bytes)
+(bootloader) run fastboot get_staged /dev/stdout to view
+OKAY [  0.001s]
+Finished. Total time: 0.001s
+exit=0
+['fastboot', '-s', 'cd0ee037', 'get_staged', '/var/home/sam/src/pocketboot/target/a5u-smp-lab/20260911/display-final/proof/generation-0/live.dtb']
+Uploading '/var/home/sam/src/pocketboot/target/a5u-smp-lab/20260911/display-final/proof/generation-0/live.dtb' OKAY [  0.021s]
+Finished. Total time: 0.021s
+exit=0
+['fastboot', '-s', 'cd0ee037', 'oem', 'dmesg']
+(bootloader) 1052 dmesg records staged (80419 bytes)
+(bootloader) run fastboot get_staged /dev/stdout to view
+OKAY [  0.026s]
+Finished. Total time: 0.026s
+exit=0
+['fastboot', '-s', 'cd0ee037', 'get_staged', '/var/home/sam/src/pocketboot/target/a5u-smp-lab/20260911/display-final/proof/generation-0/dmesg.log']
+Uploading '/var/home/sam/src/pocketboot/target/a5u-smp-lab/20260911/display-final/proof/generation-0/dmesg.log' OKAY [  0.009s]
+Finished. Total time: 0.009s
+exit=0

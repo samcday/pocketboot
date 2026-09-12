@@ -1,0 +1,23 @@
+{
+  "status": "prepared; hardware validation not started",
+  "source_bootimg": {
+    "path": "/var/home/sam/src/pocketboot/target/kernel/qcom/msm8916-samsung-a5u-eur/boot.img",
+    "sha256": "02a44672a842d90b7386fbf747c87eee768ea9e6baacf5e3803fc54bfaa1f9e0"
+  },
+  "cold_image": {
+    "path": "/var/home/sam/src/pocketboot/target/a5u-smp-lab/20260911/cold.img",
+    "bytes": 13797392,
+    "sha256": "388f62be503b46409416ac69e13cd74d11c71ad09841b802d1edbde74b6fd8e5"
+  },
+  "source_cmdline": "msm.skip_gpu=1 msm.separate_gpu_kms=1",
+  "lab_cmdline": "msm.skip_gpu=1 msm.separate_gpu_kms=1 pocketboot.lab=a5-cold",
+  "change": "Only Android header cmdline gains pocketboot.lab=a5-cold; all payload bytes unchanged.",
+  "expected_compatible": "samsung,a5u-eur",
+  "historical_serial": "cd0ee037",
+  "identity_gate": "Identify attached lk2nd device before boot. Serial alone is insufficient.",
+  "next_steps": [
+    "Boot cold.img transiently from identified A5 lk2nd fastboot.",
+    "Capture live DTB, cmdline, dmesg and identity before preparing kexec destinations.",
+    "Require four useful CPUs and coherency workload, then repeat after bare and packaged-preboot kexec."
+  ]
+}
