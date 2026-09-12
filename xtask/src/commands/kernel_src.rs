@@ -1,7 +1,8 @@
 use std::{
     fs,
+    io::Write,
     path::{Path, PathBuf},
-    process::Command,
+    process::{Command, Output, Stdio},
 };
 
 use crate::Result;
@@ -60,13 +61,109 @@ pub(super) fn ensure_device_kernel_source(
         .join("kernel")
         .join("src")
         .join(&source.identity.tree_path);
-    let status = ensure_kernel_source(&workspace_root, &source_tree, &source.identity, source)?;
+    let mut status = ensure_kernel_source(&workspace_root, &source_tree, &source.identity, source)?;
+    if ensure_kernel_patches(workspace_root, &source_tree, &source.patches)? {
+        status = KernelSourceStatus::Updated;
+    }
 
     Ok(KernelSourceTree {
         path: source_tree,
         sha: source.sha.clone(),
         status,
     })
+}
+
+// Feed the series to one git-apply invocation as a single patch stream. Separate
+// file arguments do not share dry-run state and can partially modify the tree
+// if a later patch fails. One stream supports dependent patches and Git checks
+// all of its changes before writing any files. Never reset local source edits.
+fn ensure_kernel_patches(
+    workspace_root: &Path,
+    source_tree: &Path,
+    patches: &[PathBuf],
+) -> Result<bool> {
+    if patches.is_empty() {
+        return Ok(false);
+    }
+    let root = fs::canonicalize(workspace_root)
+        .map_err(|err| format!("resolve kernel patch root: {err}"))?;
+    let mut series = Vec::new();
+    for path in patches {
+        if path.is_absolute()
+            || path
+                .components()
+                .any(|part| matches!(part, std::path::Component::ParentDir))
+        {
+            return Err(format!(
+                "kernel patch must be relative to workspace: {}",
+                path.display()
+            ));
+        }
+        let resolved = fs::canonicalize(root.join(path))
+            .map_err(|err| format!("resolve kernel patch {}: {err}", path.display()))?;
+        if !resolved.starts_with(&root) || !resolved.is_file() {
+            return Err(format!(
+                "kernel patch is not a file inside workspace: {}",
+                path.display()
+            ));
+        }
+        let contents = fs::read(&resolved)
+            .map_err(|err| format!("read kernel patch {}: {err}", path.display()))?;
+        if contents.is_empty() {
+            return Err(format!("kernel patch is empty: {}", path.display()));
+        }
+        series.extend_from_slice(&contents);
+        if series.last() != Some(&b'\n') {
+            series.push(b'\n');
+        }
+    }
+
+    let forward = git_apply_series(source_tree, &series, &["--check"])?;
+    if forward.status.success() {
+        let applied = git_apply_series(source_tree, &series, &[])?;
+        if !applied.status.success() {
+            return Err(format!(
+                "apply configured kernel patches at {}: {}",
+                source_tree.display(),
+                String::from_utf8_lossy(&applied.stderr)
+            ));
+        }
+        return Ok(true);
+    }
+    // Git reverses successive changes to the same file within one stream.
+    if git_apply_series(source_tree, &series, &["--check", "--reverse"])?
+        .status
+        .success()
+    {
+        return Ok(false);
+    }
+    Err(format!(
+        "configured kernel patches neither apply nor match the existing source at {}; resolve the source edits or use a fresh tree:\n{}",
+        source_tree.display(),
+        String::from_utf8_lossy(&forward.stderr)
+    ))
+}
+
+fn git_apply_series(source_tree: &Path, series: &[u8], flags: &[&str]) -> Result<Output> {
+    let mut command = git_at(source_tree);
+    command
+        .arg("apply")
+        .args(flags)
+        .args(["--", "-"])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+    let mut child = command
+        .spawn()
+        .map_err(|err| format!("spawn git apply for kernel patches: {err}"))?;
+    let write_result = child.stdin.take().unwrap().write_all(series);
+    let output = child
+        .wait_with_output()
+        .map_err(|err| format!("wait for git apply for kernel patches: {err}"))?;
+    if output.status.success() {
+        write_result.map_err(|err| format!("write kernel patch stream: {err}"))?;
+    }
+    Ok(output)
 }
 
 fn ensure_kernel_source(
@@ -326,4 +423,190 @@ fn stdout(bytes: Vec<u8>, action: &str) -> Result<String> {
     String::from_utf8(bytes)
         .map(|value| value.trim().to_string())
         .map_err(|err| format!("decode {action} output: {err}"))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::atomic::{AtomicU64, Ordering};
+
+    static NEXT_TEST_DIR: AtomicU64 = AtomicU64::new(0);
+
+    struct PatchFixture {
+        root: PathBuf,
+        source: PathBuf,
+    }
+
+    impl PatchFixture {
+        fn new() -> Self {
+            let nonce = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos();
+            let root = std::env::temp_dir().join(format!(
+                "pocketboot-kernel-patches-{}-{nonce}-{}",
+                std::process::id(),
+                NEXT_TEST_DIR.fetch_add(1, Ordering::Relaxed)
+            ));
+            let source = root.join("source");
+            fs::create_dir_all(&source).unwrap();
+            assert!(
+                Command::new("git")
+                    .args(["init", "--quiet"])
+                    .arg(&source)
+                    .status()
+                    .unwrap()
+                    .success()
+            );
+            fs::write(source.join("core"), "one\n").unwrap();
+            fs::write(source.join("unrelated"), "original\n").unwrap();
+            assert!(
+                git_at(&source)
+                    .args(["add", "."])
+                    .status()
+                    .unwrap()
+                    .success()
+            );
+            // Preserve both the user's dirty worktree and existing index.
+            fs::write(source.join("unrelated"), "local work\n").unwrap();
+            Self { root, source }
+        }
+
+        fn patch(&self, name: &str, file: &str, before: &str, after: &str) -> PathBuf {
+            let path = PathBuf::from(name);
+            fs::write(
+                self.root.join(&path),
+                format!(
+                    "diff --git a/{file} b/{file}\n--- a/{file}\n+++ b/{file}\n@@ -1 +1 @@\n-{before}\n+{after}\n"
+                ),
+            )
+            .unwrap();
+            path
+        }
+
+        fn read(&self, file: &str) -> String {
+            fs::read_to_string(self.source.join(file)).unwrap()
+        }
+    }
+
+    impl Drop for PatchFixture {
+        fn drop(&mut self) {
+            fs::remove_dir_all(&self.root).unwrap();
+        }
+    }
+
+    #[test]
+    fn kernel_patch_applies_once_preserving_local_work_and_index() {
+        let f = PatchFixture::new();
+        let patch = f.patch("one.patch", "core", "one", "two");
+        let index = fs::read(f.source.join(".git/index")).unwrap();
+        assert!(ensure_kernel_patches(&f.root, &f.source, &[patch.clone()]).unwrap());
+        assert_eq!(f.read("core"), "two\n");
+        assert!(!ensure_kernel_patches(&f.root, &f.source, &[patch]).unwrap());
+        assert_eq!(f.read("unrelated"), "local work\n");
+        assert_eq!(fs::read(f.source.join(".git/index")).unwrap(), index);
+    }
+
+    #[test]
+    fn dependent_kernel_patch_series_applies_and_is_idempotent() {
+        let f = PatchFixture::new();
+        let patches = [
+            f.patch("one.patch", "core", "one", "two"),
+            f.patch("two.patch", "core", "two", "three"),
+        ];
+        assert!(ensure_kernel_patches(&f.root, &f.source, &patches).unwrap());
+        assert_eq!(f.read("core"), "three\n");
+        assert!(!ensure_kernel_patches(&f.root, &f.source, &patches).unwrap());
+        assert_eq!(f.read("core"), "three\n");
+    }
+
+    #[test]
+    fn kernel_patch_series_can_create_then_modify_a_file() {
+        let f = PatchFixture::new();
+        let create = PathBuf::from("create.patch");
+        fs::write(
+            f.root.join(&create),
+            "diff --git a/created b/created\nnew file mode 100644\n\
+             --- /dev/null\n+++ b/created\n@@ -0,0 +1 @@\n+first\n",
+        )
+        .unwrap();
+        let patches = [
+            create,
+            f.patch("modify.patch", "created", "first", "second"),
+        ];
+        assert!(ensure_kernel_patches(&f.root, &f.source, &patches).unwrap());
+        assert_eq!(f.read("created"), "second\n");
+        assert!(!ensure_kernel_patches(&f.root, &f.source, &patches).unwrap());
+        assert_eq!(f.read("created"), "second\n");
+    }
+
+    #[test]
+    fn kernel_patch_conflict_and_partial_series_preserve_source() {
+        let f = PatchFixture::new();
+        let patches = [
+            f.patch("one.patch", "core", "one", "two"),
+            f.patch("two.patch", "core", "two", "three"),
+        ];
+        for original in ["user edit\n", "two\n"] {
+            fs::write(f.source.join("core"), original).unwrap();
+            assert!(ensure_kernel_patches(&f.root, &f.source, &patches).is_err());
+            assert_eq!(f.read("core"), original);
+            assert_eq!(f.read("unrelated"), "local work\n");
+        }
+    }
+
+    #[test]
+    fn failing_later_patch_is_atomic_even_during_apply() {
+        let f = PatchFixture::new();
+        let first = f.patch("one.patch", "core", "one", "two");
+        let second = f.patch("two.patch", "core", "not-two", "three");
+        let mut stream = fs::read(f.root.join(first)).unwrap();
+        stream.extend_from_slice(&fs::read(f.root.join(second)).unwrap());
+        // Exercise the mutation invocation itself, not only its prior dry-run.
+        assert!(
+            !git_apply_series(&f.source, &stream, &[])
+                .unwrap()
+                .status
+                .success()
+        );
+        assert_eq!(f.read("core"), "one\n");
+        assert_eq!(f.read("unrelated"), "local work\n");
+    }
+
+    #[test]
+    fn kernel_patch_path_escape_is_rejected_before_any_apply() {
+        let f = PatchFixture::new();
+        let patch = f.patch("one.patch", "core", "one", "two");
+        for escape in [PathBuf::from("../escape.patch"), f.root.join(&patch)] {
+            assert!(ensure_kernel_patches(&f.root, &f.source, &[patch.clone(), escape]).is_err());
+            assert_eq!(f.read("core"), "one\n");
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn kernel_patch_symlink_outside_workspace_is_rejected() {
+        let f = PatchFixture::new();
+        let external = PatchFixture::new();
+        let patch = external.patch("external.patch", "core", "one", "two");
+        std::os::unix::fs::symlink(external.root.join(patch), f.root.join("link.patch")).unwrap();
+        assert!(ensure_kernel_patches(&f.root, &f.source, &[PathBuf::from("link.patch")]).is_err());
+        assert_eq!(f.read("core"), "one\n");
+    }
+
+    #[test]
+    fn kernel_patch_cannot_modify_files_outside_source() {
+        let f = PatchFixture::new();
+        fs::write(f.root.join("outside"), "original\n").unwrap();
+        let patches = [
+            f.patch("one.patch", "core", "one", "two"),
+            f.patch("escape.patch", "../outside", "original", "damaged"),
+        ];
+        assert!(ensure_kernel_patches(&f.root, &f.source, &patches).is_err());
+        assert_eq!(f.read("core"), "one\n");
+        assert_eq!(
+            fs::read_to_string(f.root.join("outside")).unwrap(),
+            "original\n"
+        );
+    }
 }

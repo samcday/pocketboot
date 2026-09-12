@@ -123,6 +123,13 @@ fn memfd_payload(name: &str, data: &[u8]) -> io::Result<File> {
 
 fn prepare_kernel_payload_bytes(payload: &[u8]) -> io::Result<Option<Vec<u8>>> {
     tracing::debug!(bytes = payload.len(), "preparing kernel payload");
+    if is_raw_arm64_image(payload) {
+        tracing::debug!(
+            bytes = payload.len(),
+            "detected raw arm64 Image kernel payload"
+        );
+        return Ok(None);
+    }
     if payload.starts_with(&GZIP_MAGIC) {
         tracing::debug!(
             bytes = payload.len(),
@@ -412,12 +419,22 @@ fn is_raw_arm64_image(payload: &[u8]) -> bool {
 }
 
 fn read_current_dtb() -> io::Result<Vec<u8>> {
-    fs::read("/sys/firmware/fdt").map_err(|err| {
+    let dtb = fs::read("/sys/firmware/fdt").map_err(|err| {
         io::Error::new(
             err.kind(),
             format!("no DTB supplied and /sys/firmware/fdt could not be read: {err}"),
         )
-    })
+    })?;
+    // The live-tree fallback needs the same ownership checks and early memory
+    // reservation as an independently supplied tree.
+    #[cfg(target_arch = "aarch64")]
+    {
+        fdt::graft_spin_table(&dtb, &dtb)
+    }
+    #[cfg(not(target_arch = "aarch64"))]
+    {
+        Ok(dtb)
+    }
 }
 
 #[cfg(target_arch = "aarch64")]
@@ -431,9 +448,10 @@ fn with_live_memory(dtb: Vec<u8>) -> io::Result<Vec<u8>> {
         )
     })?;
     let grafted = fdt::graft_memory(&dtb, &live_dtb)?;
+    let grafted = fdt::graft_spin_table(&grafted, &live_dtb)?;
     tracing::info!(
         bytes = grafted.len(),
-        "grafted live /memory nodes into supplied DTB"
+        "grafted live memory and CPU handoff contract into supplied DTB"
     );
     Ok(grafted)
 }
@@ -570,7 +588,19 @@ __pb_tramp_end:
             ));
         }
 
-        let usable = read_usable_memory()?;
+        let mut usable = read_usable_memory()?;
+        for (start, end) in fdt::reserved_ranges(dtb)? {
+            let reserved = PhysRange { start, end };
+            tracing::debug!(
+                start = format_args!("0x{:x}", reserved.start),
+                end = format_args!("0x{:x}", reserved.end),
+                "excluding destination DTB reserved memory from kexec placement"
+            );
+            subtract_range(&mut usable, reserved);
+        }
+        if usable.is_empty() {
+            return invalid_data("destination DTB reservations exclude all usable System RAM");
+        }
         let mut occupied = Vec::new();
         let mut segments = Vec::new();
 
@@ -912,8 +942,19 @@ mod tests {
 
     #[test]
     fn raw_kernel_payload_passes_through() {
-        let raw = b"raw arm64 Image payload";
-        let payload = payload_file("test-raw-kernel", raw);
+        let raw = raw_arm64_image();
+        let payload = payload_file("test-raw-kernel", &raw);
+
+        let prepared = prepare_kernel_payload(payload).unwrap();
+
+        assert_eq!(read_file(&prepared), raw);
+    }
+
+    #[test]
+    fn raw_kernel_with_efi_mz_prefix_passes_through() {
+        let mut raw = raw_arm64_image();
+        raw[..2].copy_from_slice(b"MZ");
+        let payload = payload_file("test-raw-kernel-mz", &raw);
 
         let prepared = prepare_kernel_payload(payload).unwrap();
 
@@ -1119,6 +1160,10 @@ mod fdt {
     const PROP_INITRD_START: &[u8] = b"linux,initrd-start";
     const PROP_INITRD_END: &[u8] = b"linux,initrd-end";
     const PROP_BOOTED_FROM_KEXEC: &[u8] = b"linux,booted-from-kexec";
+    const PROP_ADDRESS_CELLS: &[u8] = b"#address-cells";
+    const PROP_SIZE_CELLS: &[u8] = b"#size-cells";
+    const PROP_REG: &[u8] = b"reg";
+    const PROP_STATUS: &[u8] = b"status";
 
     struct Header {
         totalsize: usize,
@@ -1149,6 +1194,11 @@ mod fdt {
         value_start: usize,
         value_end: usize,
         next: usize,
+    }
+
+    struct ReservedChild {
+        enabled: bool,
+        reg: Option<Vec<u8>>,
     }
 
     pub(super) fn patch_chosen(
@@ -1223,6 +1273,575 @@ mod fdt {
         build_dtb(&header, &reserve_map, &new_struct, &strings)
     }
 
+    const SPIN_TABLE_COMPAT: &[u8] = b"pocketboot,spin-table-v1";
+    const SPIN_TABLE_BYTES: u64 = 0x1000;
+    const SPIN_TABLE_SLOTS: u64 = 0x400;
+    const SPIN_TABLE_STRIDE: u64 = 0x80;
+
+    struct SpinTableContract {
+        base: u64,
+    }
+
+    /// Preserve the running CPUs' boot protocol when a boot entry supplies its
+    /// own DTB. An unowned spin-table cannot safely be guessed into this ABI.
+    pub(super) fn graft_spin_table(dtb: &[u8], live_dtb: &[u8]) -> io::Result<Vec<u8>> {
+        let mut live = contract_tree(live_dtb)?;
+        let Some(contract) = spin_table_contract(&live)? else {
+            return Ok(dtb.to_vec());
+        };
+        if Header::parse(live_dtb)?.boot_cpuid_phys != 0 || Header::parse(dtb)?.boot_cpuid_phys != 0
+        {
+            return invalid_data("spin-table v1 requires CPU0 as the boot CPU");
+        }
+        // Validate the live ownership too: a second overlapping reservation
+        // would make the persistent code's lifetime ambiguous.
+        graft_parking_reservation(&mut live, &contract)?;
+        validate_parking_reserve_map(live_dtb, &contract)?;
+        let mut target = contract_tree(dtb)?;
+        let live_cpus = cpu_nodes(&live)?;
+        let target_cpus = cpu_nodes(&target)?;
+        if live_cpus.keys().ne(target_cpus.keys()) {
+            return invalid_data("destination CPU MPIDRs do not match the live spin-table CPUs");
+        }
+
+        let providers = power_domain_providers(&target)?;
+        let cpus = target
+            .children
+            .iter_mut()
+            .find(|node| node.name == b"cpus")
+            .unwrap();
+        for (mpidr, index) in target_cpus {
+            let cpu = &mut cpus.children[index];
+            cpu.set(b"enable-method", b"spin-table\0");
+            cpu.set(
+                b"cpu-release-addr",
+                &(contract.base + SPIN_TABLE_SLOTS + mpidr * SPIN_TABLE_STRIDE).to_be_bytes(),
+            );
+            cpu.remove(b"cpu-idle-states");
+            remove_psci_cpu_domains(cpu, &providers)?;
+        }
+        disable_psci(&mut target);
+        graft_parking_reservation(&mut target, &contract)?;
+
+        let header = Header::parse(dtb)?;
+        let mut reservations = reserve_map(dtb, &header)?;
+        let already_reserved = validate_parking_reserve_map(dtb, &contract)?;
+        if !already_reserved {
+            reservations.truncate(reservations.len() - 16);
+            reservations.extend_from_slice(&contract.base.to_be_bytes());
+            reservations.extend_from_slice(&SPIN_TABLE_BYTES.to_be_bytes());
+            reservations.extend_from_slice(&[0; 16]);
+        }
+        build_contract_tree(dtb, &target, &reservations)
+    }
+
+    fn validate_parking_reserve_map(dtb: &[u8], contract: &SpinTableContract) -> io::Result<bool> {
+        let header = Header::parse(dtb)?;
+        let end = contract.base + SPIN_TABLE_BYTES;
+        let mut already_reserved = false;
+        for (start, existing_end) in reserve_map_ranges(dtb, &header)? {
+            if start < end && contract.base < existing_end {
+                if (start, existing_end) != (contract.base, end) {
+                    return invalid_data("DTB reserve map overlaps the spin-table page");
+                }
+                already_reserved = true;
+            }
+        }
+        Ok(already_reserved)
+    }
+
+    fn cpu_nodes(root: &ContractNode) -> io::Result<std::collections::BTreeMap<u64, usize>> {
+        let cpus = root
+            .child(b"cpus")
+            .ok_or_else(|| invalid_data_error("DTB has no /cpus node"))?;
+        let address_cells = cpus.cells(PROP_ADDRESS_CELLS, 2)?;
+        if !(1..=2).contains(&address_cells) || cpus.cells(PROP_SIZE_CELLS, 0)? != 0 {
+            return invalid_data("unsupported /cpus cell format");
+        }
+        let mut result = std::collections::BTreeMap::new();
+        for (index, cpu) in cpus.children.iter().enumerate() {
+            if cpu.get(b"device_type") != Some(b"cpu\0") || !cpu.enabled() {
+                continue;
+            }
+            let reg = cpu
+                .get(PROP_REG)
+                .ok_or_else(|| invalid_data_error("CPU has no reg property"))?;
+            if reg.len() != address_cells as usize * 4 {
+                return invalid_data("CPU reg property does not encode one MPIDR");
+            }
+            let mpidr = decode_cells(reg);
+            if mpidr & !0xff_00ff_ffff != 0 || result.insert(mpidr, index).is_some() {
+                return invalid_data("CPU reg contains an invalid or duplicate MPIDR");
+            }
+        }
+        Ok(result)
+    }
+
+    fn spin_table_contract(root: &ContractNode) -> io::Result<Option<SpinTableContract>> {
+        let has_spin_table_cpu = root.child(b"cpus").is_some_and(|cpus| {
+            cpus.children.iter().any(|cpu| {
+                cpu.enabled()
+                    && cpu.get(b"device_type") == Some(b"cpu\0")
+                    && cpu.get(b"enable-method") == Some(b"spin-table\0")
+            })
+        });
+        // The reserved page may be present in the board DTB before preboot
+        // activates it. Ordinary PSCI boots must not inherit a dormant ABI.
+        if !has_spin_table_cpu {
+            return Ok(None);
+        }
+        let mut reservations = root
+            .child(b"reserved-memory")
+            .into_iter()
+            .flat_map(|node| &node.children)
+            .filter(|node| {
+                node.get(b"compatible").is_some_and(|value| {
+                    value
+                        .split(|byte| *byte == 0)
+                        .any(|item| item.starts_with(b"pocketboot,spin-table-"))
+                })
+            });
+        let owned = reservations.next();
+        if reservations.next().is_some() {
+            return invalid_data("live DTB has multiple spin-table parking reservations");
+        }
+        let Some(owned) = owned else {
+            return invalid_data("live spin-table CPUs have no owned parking contract");
+        };
+        if !owned.compatible(SPIN_TABLE_COMPAT)
+            || !owned.enabled()
+            || owned.get(b"no-map") != Some(&[])
+            || owned.get(b"reusable").is_some()
+        {
+            return invalid_data("invalid or unsupported live spin-table parking reservation");
+        }
+        let reserved = root.child(b"reserved-memory").unwrap();
+        let (address_cells, size_cells) = reserved_cells(root, reserved)?;
+        let reg = owned
+            .get(PROP_REG)
+            .ok_or_else(|| invalid_data_error("live spin-table reservation has no reg"))?;
+        let ranges = decode_reg_ranges(reg, address_cells, size_cells)?;
+        if ranges.len() != 1 || reg.len() != (address_cells + size_cells) as usize * 4 {
+            return invalid_data("spin-table v1 requires exactly one reservation range");
+        }
+        let (base, end) = ranges[0];
+        if base == 0 || base % SPIN_TABLE_BYTES != 0 || end - base != SPIN_TABLE_BYTES {
+            return invalid_data("spin-table v1 requires one aligned 4 KiB page");
+        }
+        let cpus = cpu_nodes(root)?;
+        if !cpus.keys().copied().eq(0..4) {
+            return invalid_data("spin-table v1 requires enabled CPU MPIDRs 0 through 3");
+        }
+        let nodes = &root.child(b"cpus").unwrap().children;
+        for (mpidr, index) in cpus {
+            let cpu = &nodes[index];
+            let expected = (base + SPIN_TABLE_SLOTS + mpidr * SPIN_TABLE_STRIDE).to_be_bytes();
+            if cpu.get(b"enable-method") != Some(b"spin-table\0")
+                || cpu.get(b"cpu-release-addr") != Some(expected.as_slice())
+            {
+                return invalid_data(
+                    "live CPU release address or enable method does not match spin-table v1",
+                );
+            }
+        }
+        Ok(Some(SpinTableContract { base }))
+    }
+
+    fn reserved_cells(root: &ContractNode, reserved: &ContractNode) -> io::Result<(u32, u32)> {
+        if !reserved.enabled() || reserved.get(b"ranges") != Some(&[]) {
+            return invalid_data(
+                "spin-table requires an enabled /reserved-memory with empty ranges",
+            );
+        }
+        let address_cells = reserved.cells(PROP_ADDRESS_CELLS, 0)?;
+        let size_cells = reserved.cells(PROP_SIZE_CELLS, 0)?;
+        // Linux rejects the whole reserved-memory subtree if these properties
+        // are absent or differ from the root's cells.
+        if !(1..=2).contains(&address_cells)
+            || !(1..=2).contains(&size_cells)
+            || address_cells != root.cells(PROP_ADDRESS_CELLS, 2)?
+            || size_cells != root.cells(PROP_SIZE_CELLS, 1)?
+        {
+            return invalid_data(
+                "unsupported or inconsistent spin-table reserved-memory cell format",
+            );
+        }
+        Ok((address_cells, size_cells))
+    }
+
+    fn graft_parking_reservation(
+        root: &mut ContractNode,
+        contract: &SpinTableContract,
+    ) -> io::Result<()> {
+        let name = format!("spin-table@{:x}", contract.base).into_bytes();
+        if root.child(b"reserved-memory").is_none() {
+            let mut reserved = ContractNode::new(b"reserved-memory");
+            reserved.set(
+                PROP_ADDRESS_CELLS,
+                &root.cells(PROP_ADDRESS_CELLS, 2)?.to_be_bytes(),
+            );
+            reserved.set(
+                PROP_SIZE_CELLS,
+                &root.cells(PROP_SIZE_CELLS, 1)?.to_be_bytes(),
+            );
+            reserved.set(b"ranges", &[]);
+            root.children.push(reserved);
+        }
+        let (address_cells, size_cells) =
+            reserved_cells(root, root.child(b"reserved-memory").unwrap())?;
+        let reserved = root
+            .children
+            .iter_mut()
+            .find(|node| node.name == b"reserved-memory")
+            .unwrap();
+        let end = contract.base + SPIN_TABLE_BYTES;
+        let mut already_reserved = false;
+        for node in &reserved.children {
+            let is_contract = node.get(b"compatible").is_some_and(|value| {
+                value
+                    .split(|byte| *byte == 0)
+                    .any(|item| item.starts_with(b"pocketboot,spin-table-"))
+            });
+            let ranges = node
+                .get(PROP_REG)
+                .map(|reg| decode_reg_ranges(reg, address_cells, size_cells))
+                .transpose()?
+                .unwrap_or_default();
+            let overlaps = ranges
+                .iter()
+                .any(|&(start, other_end)| start < end && contract.base < other_end);
+            if overlaps || is_contract || node.name == name {
+                if !node.enabled()
+                    || !node.compatible(SPIN_TABLE_COMPAT)
+                    || node.get(b"no-map") != Some(&[])
+                    || node.get(b"reusable").is_some()
+                    || ranges != [(contract.base, end)]
+                    || already_reserved
+                {
+                    return invalid_data(
+                        "destination reserved-memory conflicts with the live spin-table page",
+                    );
+                }
+                already_reserved = true;
+            }
+        }
+        if !already_reserved {
+            let mut node = ContractNode::new(&name);
+            node.set(b"compatible", &[SPIN_TABLE_COMPAT, &[0]].concat());
+            node.set(b"no-map", &[]);
+            let mut reg = encode_cells(contract.base, address_cells)?;
+            reg.extend(encode_cells(SPIN_TABLE_BYTES, size_cells)?);
+            node.set(PROP_REG, &reg);
+            reserved.children.push(node);
+        }
+        Ok(())
+    }
+
+    fn encode_cells(value: u64, count: u32) -> io::Result<Vec<u8>> {
+        match count {
+            1 if value <= u32::MAX as u64 => Ok((value as u32).to_be_bytes().to_vec()),
+            2 => Ok(value.to_be_bytes().to_vec()),
+            _ => invalid_data("spin-table physical address does not fit destination DTB cells"),
+        }
+    }
+
+    struct PowerDomainProvider {
+        phandle: u32,
+        cells: u32,
+        psci: bool,
+    }
+
+    fn is_psci(node: &ContractNode) -> bool {
+        [b"arm,psci".as_slice(), b"arm,psci-0.2", b"arm,psci-1.0"]
+            .iter()
+            .any(|value| node.compatible(value))
+    }
+
+    fn power_domain_providers(root: &ContractNode) -> io::Result<Vec<PowerDomainProvider>> {
+        fn visit(
+            node: &ContractNode,
+            psci_parent: bool,
+            providers: &mut Vec<PowerDomainProvider>,
+        ) -> io::Result<()> {
+            let psci = psci_parent || is_psci(node);
+            if let Some(cells) = node.get(b"#power-domain-cells") {
+                let phandle = node.get(b"phandle").or_else(|| node.get(b"linux,phandle"));
+                if let Some(phandle) = phandle {
+                    let phandle = property_u32(phandle, b"phandle")?;
+                    if phandle == 0
+                        || phandle == u32::MAX
+                        || providers.iter().any(|provider| provider.phandle == phandle)
+                    {
+                        return invalid_data("invalid or duplicate power-domain provider phandle");
+                    }
+                    providers.push(PowerDomainProvider {
+                        phandle,
+                        cells: property_u32(cells, b"#power-domain-cells")?,
+                        psci,
+                    });
+                }
+            }
+            for child in &node.children {
+                visit(child, psci, providers)?;
+            }
+            Ok(())
+        }
+        let mut providers = Vec::new();
+        visit(root, false, &mut providers)?;
+        Ok(providers)
+    }
+
+    fn remove_psci_cpu_domains(
+        cpu: &mut ContractNode,
+        providers: &[PowerDomainProvider],
+    ) -> io::Result<()> {
+        let Some(domains) = cpu.get(b"power-domains") else {
+            return Ok(());
+        };
+        if domains.len() % 4 != 0 {
+            return invalid_data("CPU power-domains contains a partial cell");
+        }
+        let mut retained = Vec::new();
+        let mut keep_names = Vec::new();
+        let mut offset = 0;
+        while offset < domains.len() {
+            let phandle = read_be32(domains, offset)?;
+            let provider = providers
+                .iter()
+                .find(|provider| provider.phandle == phandle)
+                .ok_or_else(|| {
+                    invalid_data_error("CPU power-domains refers to an unknown provider")
+                })?;
+            let bytes = (u64::from(provider.cells) + 1) * 4;
+            if bytes > (domains.len() - offset) as u64 {
+                return invalid_data("CPU power-domains contains a partial provider tuple");
+            }
+            let end = offset + bytes as usize;
+            keep_names.push(!provider.psci);
+            if !provider.psci {
+                retained.extend_from_slice(&domains[offset..end]);
+            }
+            offset = end;
+        }
+        let retained_names = if let Some(names) = cpu.get(b"power-domain-names") {
+            let Some(names) = names.strip_suffix(&[0]) else {
+                return invalid_data("unterminated CPU power-domain-names");
+            };
+            let names: Vec<_> = names.split(|byte| *byte == 0).collect();
+            if names.len() != keep_names.len() {
+                return invalid_data("CPU power-domain-names does not match its provider tuples");
+            }
+            let mut retained_names = Vec::new();
+            for (name, keep) in names.into_iter().zip(keep_names) {
+                if keep {
+                    retained_names.extend_from_slice(name);
+                    retained_names.push(0);
+                }
+            }
+            Some(retained_names)
+        } else {
+            None
+        };
+        if retained.is_empty() {
+            cpu.remove(b"power-domains");
+            cpu.remove(b"power-domain-names");
+        } else {
+            cpu.set(b"power-domains", &retained);
+            if let Some(names) = retained_names {
+                cpu.set(b"power-domain-names", &names);
+            }
+        }
+        Ok(())
+    }
+
+    fn disable_psci(node: &mut ContractNode) {
+        if is_psci(node) {
+            node.set(PROP_STATUS, b"disabled\0");
+        }
+        // PSCI idle states cannot be entered by CPUs that firmware did not boot.
+        node.children.retain(|child| {
+            child.get(b"entry-method") != Some(b"psci\0")
+                && child.get(b"arm,psci-suspend-param").is_none()
+        });
+        for child in &mut node.children {
+            disable_psci(child);
+        }
+    }
+
+    // An owned tree is used only for the spin-table contract: names and phandles
+    // in an independently supplied DTB need not match those in the live tree.
+    #[derive(Clone, Debug)]
+    struct ContractNode {
+        name: Vec<u8>,
+        props: Vec<(Vec<u8>, Vec<u8>)>,
+        children: Vec<ContractNode>,
+    }
+
+    impl ContractNode {
+        fn new(name: &[u8]) -> Self {
+            Self {
+                name: name.to_vec(),
+                props: Vec::new(),
+                children: Vec::new(),
+            }
+        }
+
+        fn get(&self, name: &[u8]) -> Option<&[u8]> {
+            self.props
+                .iter()
+                .find(|(key, _)| key == name)
+                .map(|(_, value)| value.as_slice())
+        }
+
+        fn set(&mut self, name: &[u8], value: &[u8]) {
+            if let Some((_, old)) = self.props.iter_mut().find(|(key, _)| key == name) {
+                *old = value.to_vec();
+            } else {
+                self.props.push((name.to_vec(), value.to_vec()));
+            }
+        }
+
+        fn remove(&mut self, name: &[u8]) {
+            self.props.retain(|(key, _)| key != name);
+        }
+
+        fn child(&self, name: &[u8]) -> Option<&Self> {
+            self.children.iter().find(|node| node.name == name)
+        }
+
+        fn enabled(&self) -> bool {
+            self.get(PROP_STATUS).is_none_or(property_status_enabled)
+        }
+
+        fn compatible(&self, value: &[u8]) -> bool {
+            self.get(b"compatible")
+                .is_some_and(|list| list.split(|byte| *byte == 0).any(|item| item == value))
+        }
+
+        fn cells(&self, name: &[u8], default: u32) -> io::Result<u32> {
+            self.get(name)
+                .map(|value| property_u32(value, name))
+                .unwrap_or(Ok(default))
+        }
+
+        fn write(&self, structure: &mut Vec<u8>, strings: &mut Vec<u8>) -> io::Result<()> {
+            write_begin_node(structure, &self.name);
+            for (name, value) in &self.props {
+                let offset = ensure_string(strings, name)?;
+                write_prop(structure, offset, value);
+            }
+            for child in &self.children {
+                child.write(structure, strings)?;
+            }
+            write_be32(structure, FDT_END_NODE);
+            Ok(())
+        }
+    }
+
+    fn contract_tree(dtb: &[u8]) -> io::Result<ContractNode> {
+        let header = Header::parse(dtb)?;
+        let structure = checked_slice(
+            dtb,
+            header.off_dt_struct,
+            header.size_dt_struct,
+            "DTB structure block",
+        )?;
+        let strings = checked_slice(
+            dtb,
+            header.off_dt_strings,
+            header.size_dt_strings,
+            "DTB strings block",
+        )?;
+        let mut stack: Vec<ContractNode> = Vec::new();
+        let mut root = None;
+        let mut cursor = 0;
+        loop {
+            let token = read_be32(structure, cursor)?;
+            cursor += 4;
+            match token {
+                FDT_BEGIN_NODE => {
+                    let end = find_nul(structure, cursor)?;
+                    let name = &structure[cursor..end];
+                    if stack.is_empty() && (root.is_some() || !name.is_empty()) {
+                        return invalid_data("DTB must have exactly one unnamed root");
+                    }
+                    if stack.len() >= 64 {
+                        return invalid_data("DTB exceeds maximum node nesting depth");
+                    }
+                    stack.push(ContractNode::new(name));
+                    cursor = align_usize(end + 1, 4)?;
+                }
+                FDT_END_NODE => {
+                    let node = stack
+                        .pop()
+                        .ok_or_else(|| invalid_data_error("DTB has unmatched END_NODE"))?;
+                    if let Some(parent) = stack.last_mut() {
+                        if parent.child(&node.name).is_some() {
+                            return invalid_data("DTB has duplicate sibling node names");
+                        }
+                        parent.children.push(node);
+                    } else {
+                        root = Some(node);
+                    }
+                }
+                FDT_PROP => {
+                    let parts = property_parts(structure, cursor)?;
+                    let name = string_at(strings, parts.nameoff).ok_or_else(|| {
+                        invalid_data_error("DTB property has invalid string offset")
+                    })?;
+                    let node = stack
+                        .last_mut()
+                        .ok_or_else(|| invalid_data_error("DTB property outside a node"))?;
+                    if node.get(name).is_some() || !node.children.is_empty() {
+                        return invalid_data(
+                            "DTB has duplicate property or property after child nodes",
+                        );
+                    }
+                    node.set(name, &structure[parts.value_start..parts.value_end]);
+                    cursor = parts.next;
+                }
+                FDT_NOP => {}
+                FDT_END if stack.is_empty() => {
+                    return root.ok_or_else(|| invalid_data_error("DTB has no root node"));
+                }
+                FDT_END => return invalid_data("DTB has unterminated nodes"),
+                _ => return invalid_data(format!("DTB has unknown structure token {token}")),
+            }
+        }
+    }
+
+    fn build_contract_tree(
+        dtb: &[u8],
+        root: &ContractNode,
+        reserve_map: &[u8],
+    ) -> io::Result<Vec<u8>> {
+        let header = Header::parse(dtb)?;
+        let mut structure = Vec::new();
+        let mut strings = Vec::new();
+        root.write(&mut structure, &mut strings)?;
+        write_be32(&mut structure, FDT_END);
+        build_dtb(&header, reserve_map, &structure, &strings)
+    }
+
+    pub(super) fn reserved_ranges(dtb: &[u8]) -> io::Result<Vec<(u64, u64)>> {
+        let header = Header::parse(dtb)?;
+        let mut ranges = reserve_map_ranges(dtb, &header)?;
+        let struct_block = checked_slice(
+            dtb,
+            header.off_dt_struct,
+            header.size_dt_struct,
+            "DTB structure block",
+        )?;
+        let strings = checked_slice(
+            dtb,
+            header.off_dt_strings,
+            header.size_dt_strings,
+            "DTB strings block",
+        )?;
+        ranges.extend(reserved_memory_node_ranges(struct_block, strings)?);
+        Ok(ranges)
+    }
+
     impl Header {
         fn parse(dtb: &[u8]) -> io::Result<Self> {
             if dtb.len() < 40 {
@@ -1287,6 +1906,184 @@ mod fdt {
                 return Ok(reserve_map);
             }
         }
+    }
+
+    fn reserve_map_ranges(dtb: &[u8], header: &Header) -> io::Result<Vec<(u64, u64)>> {
+        let mut cursor = header.off_mem_rsvmap;
+        let mut ranges = Vec::new();
+        loop {
+            if cursor
+                .checked_add(16)
+                .is_none_or(|end| end > header.totalsize)
+            {
+                return invalid_data("DTB reserve map is unterminated");
+            }
+            let address = u64::from_be_bytes(dtb[cursor..cursor + 8].try_into().unwrap());
+            let size = u64::from_be_bytes(dtb[cursor + 8..cursor + 16].try_into().unwrap());
+            cursor += 16;
+            if address == 0 && size == 0 {
+                return Ok(ranges);
+            }
+            if size == 0 {
+                continue;
+            }
+            let end = address
+                .checked_add(size)
+                .ok_or_else(|| invalid_data_error("DTB reserve map range overflows u64"))?;
+            ranges.push((address, end));
+        }
+    }
+
+    fn reserved_memory_node_ranges(
+        struct_block: &[u8],
+        strings: &[u8],
+    ) -> io::Result<Vec<(u64, u64)>> {
+        let mut cursor = 0usize;
+        let mut stack: Vec<Vec<u8>> = Vec::new();
+        let mut root_address_cells = 2u32;
+        let mut root_size_cells = 1u32;
+        let mut reserved_address_cells = None;
+        let mut reserved_size_cells = None;
+        let mut child = None;
+        let mut ranges = Vec::new();
+
+        loop {
+            let token = read_be32(struct_block, cursor)?;
+            cursor += 4;
+
+            match token {
+                FDT_BEGIN_NODE => {
+                    let name_start = cursor;
+                    let name_end = find_nul(struct_block, name_start)?;
+                    let name = &struct_block[name_start..name_end];
+                    cursor = align_usize(name_end + 1, 4)?;
+                    stack.push(name.to_vec());
+                    if is_reserved_memory_child(&stack) {
+                        child = Some(ReservedChild {
+                            enabled: true,
+                            reg: None,
+                        });
+                    }
+                }
+                FDT_END_NODE => {
+                    if is_reserved_memory_child(&stack) {
+                        let child = child.take().ok_or_else(|| {
+                            invalid_data_error("missing reserved-memory child state")
+                        })?;
+                        if child.enabled {
+                            if let Some(reg) = child.reg {
+                                let address_cells =
+                                    reserved_address_cells.unwrap_or(root_address_cells);
+                                let size_cells = reserved_size_cells.unwrap_or(root_size_cells);
+                                ranges.extend(decode_reg_ranges(&reg, address_cells, size_cells)?);
+                            }
+                        }
+                    }
+                    if stack.pop().is_none() {
+                        return invalid_data("DTB structure has too many END_NODE tokens");
+                    }
+                }
+                FDT_PROP => {
+                    let parts = property_parts(struct_block, cursor)?;
+                    cursor = parts.next;
+                    let name = string_at(strings, parts.nameoff).ok_or_else(|| {
+                        invalid_data_error(format!(
+                            "DTB property name offset {} is out of range",
+                            parts.nameoff
+                        ))
+                    })?;
+                    let value = &struct_block[parts.value_start..parts.value_end];
+
+                    if is_root(&stack) {
+                        if name == PROP_ADDRESS_CELLS {
+                            root_address_cells = property_u32(value, name)?;
+                        } else if name == PROP_SIZE_CELLS {
+                            root_size_cells = property_u32(value, name)?;
+                        }
+                    } else if is_reserved_memory(&stack) {
+                        if name == PROP_ADDRESS_CELLS {
+                            reserved_address_cells = Some(property_u32(value, name)?);
+                        } else if name == PROP_SIZE_CELLS {
+                            reserved_size_cells = Some(property_u32(value, name)?);
+                        }
+                    } else if is_reserved_memory_child(&stack) {
+                        let child = child.as_mut().ok_or_else(|| {
+                            invalid_data_error("missing reserved-memory child state")
+                        })?;
+                        if name == PROP_REG {
+                            child.reg = Some(value.to_vec());
+                        } else if name == PROP_STATUS {
+                            child.enabled = property_status_enabled(value);
+                        }
+                    }
+                }
+                FDT_NOP => {}
+                FDT_END => {
+                    if !stack.is_empty() {
+                        return invalid_data("DTB structure ended before all nodes were closed");
+                    }
+                    return Ok(ranges);
+                }
+                _ => return invalid_data(format!("DTB has unknown structure token {token}")),
+            }
+        }
+    }
+
+    fn decode_reg_ranges(
+        reg: &[u8],
+        address_cells: u32,
+        size_cells: u32,
+    ) -> io::Result<Vec<(u64, u64)>> {
+        let tuple_cells = address_cells
+            .checked_add(size_cells)
+            .ok_or_else(|| invalid_data_error("reserved-memory reg cell count overflow"))?;
+        if !(1..=2).contains(&address_cells) || !(1..=2).contains(&size_cells) {
+            return invalid_data(format!(
+                "unsupported reserved-memory reg format: #address-cells={address_cells}, #size-cells={size_cells}"
+            ));
+        }
+        let tuple_bytes = (tuple_cells as usize)
+            .checked_mul(4)
+            .ok_or_else(|| invalid_data_error("reserved-memory reg tuple size overflow"))?;
+        if reg.len() % tuple_bytes != 0 {
+            return invalid_data("reserved-memory reg property has a partial tuple");
+        }
+
+        let mut ranges = Vec::new();
+        for tuple in reg.chunks_exact(tuple_bytes) {
+            let address_bytes = address_cells as usize * 4;
+            let address = decode_cells(&tuple[..address_bytes]);
+            let size = decode_cells(&tuple[address_bytes..]);
+            if size == 0 {
+                continue;
+            }
+            let end = address
+                .checked_add(size)
+                .ok_or_else(|| invalid_data_error("reserved-memory reg range overflows u64"))?;
+            ranges.push((address, end));
+        }
+        Ok(ranges)
+    }
+
+    fn decode_cells(cells: &[u8]) -> u64 {
+        cells.chunks_exact(4).fold(0u64, |value, cell| {
+            value << 32 | u32::from_be_bytes(cell.try_into().unwrap()) as u64
+        })
+    }
+
+    fn property_u32(value: &[u8], name: &[u8]) -> io::Result<u32> {
+        if value.len() != 4 {
+            return invalid_data(format!(
+                "DTB property {} is not one cell",
+                String::from_utf8_lossy(name)
+            ));
+        }
+        Ok(u32::from_be_bytes(value.try_into().unwrap()))
+    }
+
+    fn property_status_enabled(value: &[u8]) -> bool {
+        let value = value.strip_suffix(&[0]).unwrap_or(value);
+        value == b"ok" || value == b"okay"
     }
 
     fn patch_structure_block(
@@ -1702,6 +2499,14 @@ mod fdt {
         stack.len() == 2 && stack[0].is_empty() && stack[1] == b"chosen"
     }
 
+    fn is_reserved_memory(stack: &[Vec<u8>]) -> bool {
+        stack.len() == 2 && stack[0].is_empty() && stack[1] == b"reserved-memory"
+    }
+
+    fn is_reserved_memory_child(stack: &[Vec<u8>]) -> bool {
+        stack.len() == 3 && stack[0].is_empty() && stack[1] == b"reserved-memory"
+    }
+
     fn write_begin_node(output: &mut Vec<u8>, name: &[u8]) {
         write_be32(output, FDT_BEGIN_NODE);
         output.extend_from_slice(name);
@@ -1977,6 +2782,392 @@ mod fdt {
             );
         }
 
+        #[test]
+        fn reserved_ranges_include_reserve_map_and_enabled_reserved_memory_nodes() {
+            let mut reserve_map = Vec::new();
+            reserve_map.extend_from_slice(&0x8100_0000u64.to_be_bytes());
+            reserve_map.extend_from_slice(&0x0020_0000u64.to_be_bytes());
+            reserve_map.extend_from_slice(&[0; 16]);
+
+            let dtb = test_dtb_with_reserve_map(&reserve_map, |structure, strings| {
+                let address_cells = ensure_string(strings, PROP_ADDRESS_CELLS).unwrap();
+                let size_cells = ensure_string(strings, PROP_SIZE_CELLS).unwrap();
+                let ranges = ensure_string(strings, b"ranges").unwrap();
+                let reg = ensure_string(strings, PROP_REG).unwrap();
+                let status = ensure_string(strings, PROP_STATUS).unwrap();
+
+                write_prop(structure, address_cells, &2u32.to_be_bytes());
+                write_prop(structure, size_cells, &2u32.to_be_bytes());
+                write_begin_node(structure, b"reserved-memory");
+                write_prop(structure, address_cells, &2u32.to_be_bytes());
+                write_prop(structure, size_cells, &2u32.to_be_bytes());
+                write_prop(structure, ranges, &[]);
+
+                write_begin_node(structure, b"mpss@86800000");
+                write_prop(structure, reg, &reg64(&[(0x8680_0000, 0x0540_0000)]));
+                write_be32(structure, FDT_END_NODE);
+
+                write_begin_node(structure, b"firmware@8dc00000");
+                write_prop(
+                    structure,
+                    reg,
+                    &reg64(&[(0x8dc0_0000, 0x0010_0000), (0x8dd0_0000, 0x00b0_0000)]),
+                );
+                write_be32(structure, FDT_END_NODE);
+
+                write_begin_node(structure, b"disabled@90000000");
+                write_prop(structure, reg, &reg64(&[(0x9000_0000, 0x0010_0000)]));
+                write_prop(structure, status, b"disabled\0");
+                write_be32(structure, FDT_END_NODE);
+
+                write_be32(structure, FDT_END_NODE);
+            });
+
+            assert_eq!(
+                reserved_ranges(&dtb).unwrap(),
+                vec![
+                    (0x8100_0000, 0x8120_0000),
+                    (0x8680_0000, 0x8bc0_0000),
+                    (0x8dc0_0000, 0x8dd0_0000),
+                    (0x8dd0_0000, 0x8e80_0000),
+                ]
+            );
+        }
+
+        const PARKING_BASE: u64 = 0x854f_f000;
+
+        fn contract_fixture(
+            spin_table: bool,
+            reverse_cpus: bool,
+            address_cells: u32,
+        ) -> ContractNode {
+            let mut root = ContractNode::new(b"");
+            root.set(PROP_ADDRESS_CELLS, &address_cells.to_be_bytes());
+            root.set(PROP_SIZE_CELLS, &address_cells.to_be_bytes());
+            let mut cpus = ContractNode::new(b"cpus");
+            cpus.set(PROP_ADDRESS_CELLS, &address_cells.to_be_bytes());
+            cpus.set(PROP_SIZE_CELLS, &0u32.to_be_bytes());
+            let ids: Vec<u64> = if reverse_cpus {
+                (0..4).rev().collect()
+            } else {
+                (0..4).collect()
+            };
+            for id in ids {
+                let mut cpu = ContractNode::new(format!("cpu@{id}").as_bytes());
+                cpu.set(b"device_type", b"cpu\0");
+                cpu.set(PROP_REG, &encode_cells(id, address_cells).unwrap());
+                cpu.set(b"phandle", &(0x200 + id as u32).to_be_bytes());
+                cpu.set(
+                    b"enable-method",
+                    if spin_table {
+                        b"spin-table\0"
+                    } else {
+                        b"psci\0"
+                    },
+                );
+                if spin_table {
+                    cpu.set(
+                        b"cpu-release-addr",
+                        &(PARKING_BASE + 0x400 + id * 0x80).to_be_bytes(),
+                    );
+                }
+                cpus.children.push(cpu);
+            }
+            root.children.push(cpus);
+            if spin_table {
+                let mut reserved = ContractNode::new(b"reserved-memory");
+                reserved.set(PROP_ADDRESS_CELLS, &address_cells.to_be_bytes());
+                reserved.set(PROP_SIZE_CELLS, &address_cells.to_be_bytes());
+                reserved.set(b"ranges", &[]);
+                let mut parking = ContractNode::new(b"live-parking@854ff000");
+                parking.set(b"compatible", b"pocketboot,spin-table-v1\0");
+                parking.set(b"no-map", &[]);
+                // This deliberately collides with a target provider in one test.
+                parking.set(b"phandle", &7u32.to_be_bytes());
+                let mut reg = encode_cells(PARKING_BASE, address_cells).unwrap();
+                reg.extend(encode_cells(0x1000, address_cells).unwrap());
+                parking.set(PROP_REG, &reg);
+                reserved.children.push(parking);
+                root.children.push(reserved);
+            }
+            root
+        }
+
+        fn fixture_dtb(root: &ContractNode) -> Vec<u8> {
+            fixture_dtb_with_reservations(root, &[0; 16])
+        }
+
+        fn fixture_dtb_with_reservations(root: &ContractNode, reserve_map: &[u8]) -> Vec<u8> {
+            let template = test_dtb(|_, _| {});
+            build_contract_tree(&template, root, reserve_map).unwrap()
+        }
+
+        fn fixture_cpu(root: &mut ContractNode, index: usize) -> &mut ContractNode {
+            &mut root
+                .children
+                .iter_mut()
+                .find(|node| node.name == b"cpus")
+                .unwrap()
+                .children[index]
+        }
+
+        fn fixture_parking(root: &mut ContractNode) -> &mut ContractNode {
+            &mut root
+                .children
+                .iter_mut()
+                .find(|node| node.name == b"reserved-memory")
+                .unwrap()
+                .children[0]
+        }
+
+        #[test]
+        fn spin_table_graft_leaves_psci_boots_unchanged() {
+            let target = fixture_dtb(&contract_fixture(false, true, 1));
+            let live = fixture_dtb(&contract_fixture(false, false, 2));
+            assert_eq!(graft_spin_table(&target, &live).unwrap(), target);
+        }
+
+        #[test]
+        fn spin_table_graft_ignores_dormant_reservation_on_psci_boot() {
+            let target = fixture_dtb(&contract_fixture(false, true, 1));
+            let mut live = contract_fixture(true, false, 2);
+            for index in 0..4 {
+                let cpu = fixture_cpu(&mut live, index);
+                cpu.set(b"enable-method", b"psci\0");
+                cpu.remove(b"cpu-release-addr");
+            }
+            assert_eq!(
+                graft_spin_table(&target, &fixture_dtb(&live)).unwrap(),
+                target
+            );
+        }
+
+        #[test]
+        fn spin_table_graft_matches_mpidrs_and_reserves_parking_page() {
+            let live = fixture_dtb(&contract_fixture(true, false, 2));
+            let target = fixture_dtb(&contract_fixture(false, true, 1));
+            let grafted = graft_spin_table(&target, &live).unwrap();
+            let root = contract_tree(&grafted).unwrap();
+            let cpus = root.child(b"cpus").unwrap();
+            assert_eq!(
+                cpus.children[0].get(PROP_REG),
+                Some(3u32.to_be_bytes().as_slice())
+            );
+            for (id, index) in cpu_nodes(&root).unwrap() {
+                let cpu = &cpus.children[index];
+                assert_eq!(cpu.get(b"enable-method"), Some(b"spin-table\0".as_slice()));
+                assert_eq!(
+                    cpu.get(b"cpu-release-addr"),
+                    Some((PARKING_BASE + 0x400 + id * 0x80).to_be_bytes().as_slice())
+                );
+                assert_eq!(
+                    cpu.get(b"phandle"),
+                    Some((0x200 + id as u32).to_be_bytes().as_slice())
+                );
+            }
+            let reserved = root.child(b"reserved-memory").unwrap();
+            let parking = &reserved.children[0];
+            assert_eq!(
+                parking.get(PROP_REG),
+                Some(
+                    [0x854f_f000u32.to_be_bytes(), 0x1000u32.to_be_bytes()]
+                        .concat()
+                        .as_slice()
+                )
+            );
+            assert_eq!(parking.get(b"no-map"), Some([].as_slice()));
+            assert_eq!(parking.get(b"phandle"), None);
+            assert_eq!(
+                reserved_ranges(&grafted).unwrap(),
+                [(PARKING_BASE, PARKING_BASE + 0x1000); 2]
+            );
+            // /chosen rewriting must retain both forms of the reservation.
+            let patched = patch_chosen(&grafted, "console=ttyMSM0", None).unwrap();
+            assert_eq!(
+                reserved_ranges(&patched).unwrap(),
+                reserved_ranges(&grafted).unwrap()
+            );
+            assert_eq!(graft_spin_table(&grafted, &live).unwrap(), grafted);
+        }
+
+        #[test]
+        fn spin_table_graft_rejects_invalid_live_contracts() {
+            let target = fixture_dtb(&contract_fixture(false, false, 2));
+            let valid = contract_fixture(true, false, 2);
+            let mut cases = Vec::new();
+            let mut missing = valid.clone();
+            missing
+                .children
+                .retain(|node| node.name != b"reserved-memory");
+            cases.push(missing);
+            let mut no_map = valid.clone();
+            fixture_parking(&mut no_map).remove(b"no-map");
+            cases.push(no_map);
+            let mut reusable = valid.clone();
+            fixture_parking(&mut reusable).set(b"reusable", &[]);
+            cases.push(reusable);
+            let mut version = valid.clone();
+            fixture_parking(&mut version).set(b"compatible", b"pocketboot,spin-table-v2\0");
+            cases.push(version);
+            let mut size = valid.clone();
+            fixture_parking(&mut size).set(PROP_REG, &reg64(&[(PARKING_BASE, 0x800)]));
+            cases.push(size);
+            let mut unaligned = valid.clone();
+            fixture_parking(&mut unaligned).set(PROP_REG, &reg64(&[(PARKING_BASE + 8, 0x1000)]));
+            cases.push(unaligned);
+            let mut release = valid.clone();
+            fixture_cpu(&mut release, 2)
+                .set(b"cpu-release-addr", &(PARKING_BASE + 0x480).to_be_bytes());
+            cases.push(release);
+            let mut psci = valid.clone();
+            fixture_cpu(&mut psci, 2).set(b"enable-method", b"psci\0");
+            cases.push(psci);
+            let mut duplicate = valid.clone();
+            fixture_cpu(&mut duplicate, 2).set(PROP_REG, &1u64.to_be_bytes());
+            cases.push(duplicate);
+            let mut overlapping = valid.clone();
+            let reserved = overlapping
+                .children
+                .iter_mut()
+                .find(|node| node.name == b"reserved-memory")
+                .unwrap();
+            let mut conflict = ContractNode::new(b"other-owner@854ff000");
+            conflict.set(PROP_REG, &reg64(&[(PARKING_BASE + 0x800, 0x1000)]));
+            reserved.children.push(conflict);
+            cases.push(overlapping);
+            let mut inconsistent_cells = valid.clone();
+            inconsistent_cells.set(PROP_ADDRESS_CELLS, &1u32.to_be_bytes());
+            cases.push(inconsistent_cells);
+            for (index, live) in cases.iter().enumerate() {
+                assert!(
+                    graft_spin_table(&target, &fixture_dtb(live)).is_err(),
+                    "invalid source case {index} accepted"
+                );
+            }
+        }
+
+        #[test]
+        fn spin_table_graft_rejects_changed_destination_cpu_sets() {
+            let live = fixture_dtb(&contract_fixture(true, false, 2));
+            for reg in [4u64, 0x100, 0x1_0000_0000, 0x100_0000_0000] {
+                let mut target = contract_fixture(false, false, 2);
+                fixture_cpu(&mut target, 3).set(PROP_REG, &reg.to_be_bytes());
+                assert!(graft_spin_table(&fixture_dtb(&target), &live).is_err());
+            }
+            let mut target = contract_fixture(false, false, 2);
+            fixture_cpu(&mut target, 3).set(PROP_STATUS, b"disabled\0");
+            assert!(graft_spin_table(&fixture_dtb(&target), &live).is_err());
+            let mut target = contract_fixture(false, false, 2);
+            fixture_cpu(&mut target, 3).set(PROP_REG, &3u32.to_be_bytes());
+            assert!(graft_spin_table(&fixture_dtb(&target), &live).is_err());
+        }
+
+        #[test]
+        fn spin_table_graft_rejects_destination_reservation_conflicts() {
+            let live = fixture_dtb(&contract_fixture(true, false, 2));
+            for (start, size, compatible) in [
+                (PARKING_BASE, 0x1000, b"some,other-owner\0".as_slice()),
+                (
+                    PARKING_BASE - 0x1000,
+                    0x1800,
+                    b"some,other-owner\0".as_slice(),
+                ),
+                (
+                    PARKING_BASE + 0x800,
+                    0x1000,
+                    b"some,other-owner\0".as_slice(),
+                ),
+                (
+                    PARKING_BASE + 0x1000,
+                    0x1000,
+                    b"pocketboot,spin-table-v1\0".as_slice(),
+                ),
+            ] {
+                let mut target = contract_fixture(true, false, 2);
+                let parking = fixture_parking(&mut target);
+                parking.set(b"compatible", compatible);
+                parking.set(PROP_REG, &reg64(&[(start, size)]));
+                assert!(graft_spin_table(&fixture_dtb(&target), &live).is_err());
+            }
+            let mut reserve_map = reg64(&[(PARKING_BASE - 0x1000, 0x3000)]);
+            reserve_map.extend_from_slice(&[0; 16]);
+            let target =
+                fixture_dtb_with_reservations(&contract_fixture(false, false, 2), &reserve_map);
+            assert!(graft_spin_table(&target, &live).is_err());
+        }
+
+        #[test]
+        fn spin_table_graft_removes_only_psci_cpu_power_domain_tuples() {
+            let live = fixture_dtb(&contract_fixture(true, false, 2));
+            let mut target = contract_fixture(false, true, 1);
+            let mut psci = ContractNode::new(b"firmware-cpu-service");
+            psci.set(b"compatible", b"arm,psci-1.0\0");
+            let mut domain = ContractNode::new(b"cpu-domain");
+            domain.set(b"#power-domain-cells", &0u32.to_be_bytes());
+            domain.set(b"phandle", &7u32.to_be_bytes());
+            psci.children.push(domain);
+            target.children.push(psci);
+            let mut regulator = ContractNode::new(b"regulator-domain");
+            regulator.set(b"#power-domain-cells", &1u32.to_be_bytes());
+            regulator.set(b"phandle", &8u32.to_be_bytes());
+            target.children.push(regulator);
+            let cpu = fixture_cpu(&mut target, 0);
+            cpu.set(
+                b"power-domains",
+                &[7u32.to_be_bytes(), 8u32.to_be_bytes(), 42u32.to_be_bytes()].concat(),
+            );
+            cpu.set(b"power-domain-names", b"psci\0voltage\0");
+            cpu.set(b"cpu-idle-states", &9u32.to_be_bytes());
+            let mut idle_states = ContractNode::new(b"idle-states");
+            idle_states.set(b"entry-method", b"psci\0");
+            target
+                .children
+                .iter_mut()
+                .find(|node| node.name == b"cpus")
+                .unwrap()
+                .children
+                .push(idle_states);
+            let mut unrelated = ContractNode::new(b"unrelated-state");
+            unrelated.set(b"compatible", b"vendor,idle-state\0");
+            target.children.push(unrelated.clone());
+            let grafted = graft_spin_table(&fixture_dtb(&target), &live).unwrap();
+            let root = contract_tree(&grafted).unwrap();
+            let cpu = &root.child(b"cpus").unwrap().children[0];
+            assert_eq!(
+                cpu.get(b"power-domains"),
+                Some(
+                    [8u32.to_be_bytes(), 42u32.to_be_bytes()]
+                        .concat()
+                        .as_slice()
+                )
+            );
+            assert_eq!(
+                cpu.get(b"power-domain-names"),
+                Some(b"voltage\0".as_slice())
+            );
+            assert_eq!(cpu.get(b"cpu-idle-states"), None);
+            assert_eq!(
+                root.child(b"firmware-cpu-service")
+                    .unwrap()
+                    .get(PROP_STATUS),
+                Some(b"disabled\0".as_slice())
+            );
+            assert!(root.child(b"cpus").unwrap().child(b"idle-states").is_none());
+            assert!(root.child(b"unrelated-state").is_some());
+            assert_eq!(
+                root.child(b"reserved-memory").unwrap().children[0].get(b"phandle"),
+                None
+            );
+        }
+
+        #[test]
+        fn spin_table_graft_rejects_unresolved_cpu_power_domains() {
+            let live = fixture_dtb(&contract_fixture(true, false, 2));
+            let mut target = contract_fixture(false, false, 2);
+            fixture_cpu(&mut target, 1).set(b"power-domains", &99u32.to_be_bytes());
+            assert!(graft_spin_table(&fixture_dtb(&target), &live).is_err());
+        }
+
         fn test_dtb_with_chosen_child() -> Vec<u8> {
             test_dtb(|structure, strings| {
                 let bootargs = ensure_string(strings, PROP_BOOTARGS).unwrap();
@@ -1992,6 +3183,13 @@ mod fdt {
         }
 
         fn test_dtb(build_root: impl FnOnce(&mut Vec<u8>, &mut Vec<u8>)) -> Vec<u8> {
+            test_dtb_with_reserve_map(&[0; 16], build_root)
+        }
+
+        fn test_dtb_with_reserve_map(
+            reserve_map: &[u8],
+            build_root: impl FnOnce(&mut Vec<u8>, &mut Vec<u8>),
+        ) -> Vec<u8> {
             let mut strings = Vec::new();
             let mut structure = Vec::new();
 
@@ -2012,11 +3210,20 @@ mod fdt {
                     size_dt_strings: 0,
                     size_dt_struct: 0,
                 },
-                &[0; 16],
+                reserve_map,
                 &structure,
                 &strings,
             )
             .unwrap()
+        }
+
+        fn reg64(ranges: &[(u64, u64)]) -> Vec<u8> {
+            let mut reg = Vec::new();
+            for (address, size) in ranges {
+                reg.extend_from_slice(&address.to_be_bytes());
+                reg.extend_from_slice(&size.to_be_bytes());
+            }
+            reg
         }
 
         fn write_memory_node(

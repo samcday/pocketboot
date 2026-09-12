@@ -50,6 +50,7 @@ pub(super) struct KernelSource {
     pub(super) identity: KernelSourceIdentity,
     pub(super) remote: String,
     pub(super) sha: String,
+    pub(super) patches: Vec<PathBuf>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -65,6 +66,8 @@ pub(super) struct KernelSourceIdentity {
 struct KernelSourceLayer {
     remote: String,
     sha: String,
+    #[serde(default)]
+    patches: Vec<PathBuf>,
 }
 
 #[derive(Clone, Debug, Default, Deserialize)]
@@ -383,6 +386,7 @@ fn parse_kernel_source(
         identity,
         remote: source.remote.clone(),
         sha: source.sha.clone(),
+        patches: source.patches.clone(),
     })
 }
 
@@ -616,6 +620,38 @@ mod tests {
     use super::*;
 
     #[test]
+    fn kernel_source_patch_list_defaults_empty_and_preserves_order() {
+        let source: KernelSourceLayer =
+            toml::from_str("remote = 'https://example.invalid/linux.git'\nsha = 'abcd'\n").unwrap();
+        let parsed = parse_kernel_source(
+            KernelSourceScope::Default,
+            default_kernel_source_identity(),
+            &source,
+        )
+        .unwrap();
+        assert!(parsed.patches.is_empty());
+
+        let source: KernelSourceLayer = toml::from_str(
+            "remote = 'https://example.invalid/linux.git'\nsha = 'abcd'\n\
+             patches = ['patches/first.patch', 'patches/second.patch']\n",
+        )
+        .unwrap();
+        let parsed = parse_kernel_source(
+            KernelSourceScope::Default,
+            default_kernel_source_identity(),
+            &source,
+        )
+        .unwrap();
+        assert_eq!(
+            parsed.patches,
+            vec![
+                PathBuf::from("patches/first.patch"),
+                PathBuf::from("patches/second.patch")
+            ]
+        );
+    }
+
+    #[test]
     fn kconfig_values_render_to_kernel_fragment_syntax() {
         let mut contents = String::new();
         write_kconfig_line(&mut contents, "BLOCK", &KconfigValue::Bool(true)).unwrap();
@@ -755,8 +791,9 @@ mod tests {
         .unwrap();
 
         for enabled_path in ["/soc@0/display-subsystem@1a00000", "/soc@0/iommu@1ef0000"] {
+            // A child secure-context override does not disable the parent IOMMU.
             assert!(
-                !overlay.contains(enabled_path),
+                !overlay.contains(&format!("&{{{enabled_path}}}")),
                 "display path must no longer be disabled: {enabled_path}"
             );
         }
@@ -817,8 +854,9 @@ mod tests {
         .unwrap();
 
         for enabled_path in ["/soc@0/display-subsystem@1a00000", "/soc@0/iommu@1ef0000"] {
+            // A child secure-context override does not disable the parent IOMMU.
             assert!(
-                !overlay.contains(enabled_path),
+                !overlay.contains(&format!("&{{{enabled_path}}}")),
                 "display path must not be disabled: {enabled_path}"
             );
         }

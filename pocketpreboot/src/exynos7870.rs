@@ -30,6 +30,17 @@ pub mod uart {
     }
 }
 
+pub fn early_init(_fdt: usize) {
+    #[cfg(feature = "device-exynos7870-j7xelte")]
+    {
+        let _ = j7xelte::route_muic_to_uart();
+    }
+}
+
+pub fn prepare_fdt(fdt: usize, _payload: usize, _payload_size: usize) -> Option<usize> {
+    Some(fdt)
+}
+
 mod clock {
     const CMU_PERI_BASE: usize = 0x101f_0000;
     const CLK_CON_GAT_PERI_I2C: usize = 0x0810;

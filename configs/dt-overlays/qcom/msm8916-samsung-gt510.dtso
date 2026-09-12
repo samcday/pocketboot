@@ -1,6 +1,23 @@
 /dts-v1/;
 /plugin/;
 
+/* lk2nd only starts CPUs labelled psci/spin-table. Let preboot own ACC+SCM. */
+&{/cpus/cpu@0} { enable-method = "pocketboot,msm8916-acc"; };
+&{/cpus/cpu@1} { enable-method = "pocketboot,msm8916-acc"; };
+&{/cpus/cpu@2} { enable-method = "pocketboot,msm8916-acc"; };
+&{/cpus/cpu@3} { enable-method = "pocketboot,msm8916-acc"; };
+
+/* Resident secondary entry and parking slots, preserved across kexec. */
+&{/reserved-memory} {
+	#address-cells = <2>;
+	#size-cells = <2>;
+	spin-table@854ff000 {
+		compatible = "pocketboot,spin-table-v1";
+		reg = <0 0x854ff000 0 0x1000>;
+		no-map;
+	};
+};
+
 /* Keep Adreno out of the firmware-independent MDP5/DSI bring-up. */
 &{/soc@0/iommu@1f08000} {
 	status = "disabled";

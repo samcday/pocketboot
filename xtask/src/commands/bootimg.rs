@@ -27,6 +27,8 @@ const DTBH_MAGIC: &[u8; 4] = b"DTBH";
 const DTBH_VERSION: u32 = 2;
 const DTBH_RECORD_SPACE: u32 = 0x20;
 const ARM64_IMAGE_MIN_SIZE: usize = 64;
+const ARM64_IMAGE_TEXT_OFFSET: usize = 8;
+const ARM64_IMAGE_BASE_ALIGNMENT: u64 = 0x20_0000;
 const ARM64_IMAGE_SIZE_OFFSET: usize = 16;
 const ARM64_IMAGE_MAGIC_OFFSET: usize = 56;
 const ARM64_IMAGE_MAGIC: &[u8; 4] = b"ARM\x64";
@@ -130,26 +132,59 @@ fn stage_preboot_kernel(
     let mut staged = fs::read(&preboot.binary)
         .map_err(|err| format!("read {}: {err}", preboot.binary.display()))?;
     let preboot_image_size = arm64_image_size(&staged, "pocketpreboot image")?;
+    set_preboot_text_offset(&mut staged, config.load_addr)?;
 
     let kernel = fs::read(kernel).map_err(|err| format!("read {}: {err}", kernel.display()))?;
-    arm64_image_size(&kernel, "preboot payload kernel")?;
-
     let payload_offset =
         preboot_payload_offset(config.load_addr, preboot_image_size, config.payload_align)?;
-    if payload_offset < staged.len() {
-        return Err(format!(
-            "preboot payload offset 0x{payload_offset:x} is inside pocketpreboot file size 0x{:x}",
-            staged.len()
-        ));
-    }
-    staged.resize(payload_offset, 0);
-    staged.extend_from_slice(&kernel);
+    append_preboot_payload(&mut staged, &kernel, payload_offset)?;
 
     fs::write(output, &staged).map_err(|err| format!("write {}: {err}", output.display()))?;
     println!("preboot {}", preboot.binary.display());
     println!("preboot-features {}", preboot.features);
     println!("preboot-payload-offset 0x{payload_offset:x}");
     Ok(output.to_path_buf())
+}
+
+fn set_preboot_text_offset(image: &mut [u8], load_addr: u64) -> Result<()> {
+    arm64_image_size(image, "pocketpreboot image")?;
+    if load_addr & 0xfff != 0 {
+        return Err("preboot load address must be page-aligned".into());
+    }
+    // lk2nd and legacy kexec honor the ARM64 header's offset from a 2 MiB
+    // base. It must describe the same placement used to pad the inner kernel,
+    // even when a stock loader instead follows the Android header address.
+    let offset = load_addr & (ARM64_IMAGE_BASE_ALIGNMENT - 1);
+    image[ARM64_IMAGE_TEXT_OFFSET..ARM64_IMAGE_TEXT_OFFSET + 8]
+        .copy_from_slice(&offset.to_le_bytes());
+    Ok(())
+}
+
+fn append_preboot_payload(
+    staged: &mut Vec<u8>,
+    kernel: &[u8],
+    payload_offset: usize,
+) -> Result<()> {
+    let kernel_image_size = arm64_image_size(kernel, "preboot payload kernel")?;
+    let kernel_image_size = usize::try_from(kernel_image_size)
+        .map_err(|_| "preboot payload image_size does not fit usize".to_string())?;
+    let combined_size = payload_offset
+        .checked_add(kernel_image_size.max(kernel.len()))
+        .ok_or_else(|| "preboot payload runtime footprint overflows usize".to_string())?;
+    if payload_offset < staged.len() {
+        return Err(format!(
+            "preboot payload offset 0x{payload_offset:x} is inside pocketpreboot file size 0x{:x}",
+            staged.len()
+        ));
+    }
+    // Keep the outer image_size unchanged: pocketpreboot uses it to find the
+    // aligned payload. Make the file cover the inner Image's complete runtime
+    // extent instead, so a loader reserving max(image_size, file length) cannot
+    // place the next DTB/trampoline in the inner kernel's otherwise absent BSS.
+    staged.resize(payload_offset, 0);
+    staged.extend_from_slice(kernel);
+    staged.resize(combined_size, 0);
+    Ok(())
 }
 
 fn preboot_payload_offset(load_addr: u64, image_size: u64, payload_align: u64) -> Result<usize> {
@@ -703,6 +738,91 @@ mod tests {
             preboot_payload_offset(0x4008_0000, 0x4100, 0x20_0000).unwrap(),
             0x18_0000
         );
+    }
+
+    #[test]
+    fn preboot_header_keeps_payload_at_expected_address_for_arm64_loaders() {
+        // lk2nd normalizes to a 2 MiB base before adding the Image text_offset.
+        // The A5 previously advertised zero, moving its payload 32 KiB early.
+        for load_addr in [0x8000_8000u64, 0x8000_0000, 0x4008_0000] {
+            let mut shim = arm64_image(0x8f000);
+            set_preboot_text_offset(&mut shim, load_addr).unwrap();
+            let offset = u64::from_le_bytes(shim[8..16].try_into().unwrap());
+            let actual_load = (load_addr & !0x1f_ffff) + offset;
+            let payload_offset = preboot_payload_offset(load_addr, 0x8f000, 0x20_0000).unwrap();
+            assert_eq!(actual_load, load_addr);
+            assert_eq!(
+                actual_load + payload_offset as u64,
+                align_up_u64(actual_load + 0x8f000, 0x20_0000).unwrap()
+            );
+            assert_eq!(arm64_image_size(&shim, "shim").unwrap(), 0x8f000);
+        }
+    }
+
+    #[test]
+    fn preboot_text_offset_rejects_unaligned_placement() {
+        let mut shim = arm64_image(0x4100);
+        let before = shim.clone();
+        assert!(set_preboot_text_offset(&mut shim, 0x8000_8001).is_err());
+        assert_eq!(shim, before);
+    }
+
+    #[test]
+    fn preboot_payload_padding_keeps_entry_header_and_protects_inner_bss() {
+        let load_addr = 0x4008_0000;
+        let mut staged = arm64_image(0x4100);
+        let shim_header = staged.clone();
+        let kernel = arm64_image(0x10000);
+        let payload_offset = preboot_payload_offset(load_addr, 0x4100, 0x20_0000).unwrap();
+
+        append_preboot_payload(&mut staged, &kernel, payload_offset).unwrap();
+
+        // The preboot entry still discovers the original aligned payload.
+        assert_eq!(&staged[..shim_header.len()], shim_header);
+        assert_eq!(
+            preboot_payload_offset(
+                load_addr,
+                arm64_image_size(&staged, "shim").unwrap(),
+                0x20_0000
+            )
+            .unwrap(),
+            payload_offset
+        );
+        assert_eq!(
+            &staged[payload_offset..payload_offset + kernel.len()],
+            kernel
+        );
+        // The file length seen by kexec includes BSS absent from the kernel file.
+        assert_eq!(staged.len(), payload_offset + 0x10000);
+        assert!(
+            staged[payload_offset + kernel.len()..]
+                .iter()
+                .all(|byte| *byte == 0)
+        );
+        assert_eq!(
+            load_addr + staged.len() as u64,
+            load_addr + payload_offset as u64 + 0x10000
+        );
+    }
+
+    #[test]
+    fn preboot_payload_padding_preserves_file_bytes_beyond_image_size() {
+        let mut staged = arm64_image(0x1000);
+        let mut kernel = arm64_image(64);
+        kernel.extend_from_slice(&[0xa5; 128]);
+        append_preboot_payload(&mut staged, &kernel, 0x1000).unwrap();
+        assert_eq!(staged.len(), 0x1000 + kernel.len());
+        assert_eq!(&staged[0x1000..], kernel);
+    }
+
+    #[test]
+    fn preboot_payload_padding_rejects_overflow_before_changing_image() {
+        let mut staged = arm64_image(0x1000);
+        let before = staged.clone();
+        let err = append_preboot_payload(&mut staged, &arm64_image(0x1000), usize::MAX - 0x100)
+            .unwrap_err();
+        assert!(err.contains("runtime footprint overflows"));
+        assert_eq!(staged, before);
     }
 
     #[test]

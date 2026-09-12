@@ -1,0 +1,5 @@
+# Unified-diff context includes significant trailing spaces.
+*.patch -whitespace
+
+# Preserve hardware evidence while keeping generated captures out of default reviews.
+docs/evidence/** -whitespace linguist-generated=true

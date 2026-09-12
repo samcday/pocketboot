@@ -1,0 +1,535 @@
+diff --git a/arch/arm64/Kconfig b/arch/arm64/Kconfig
+index fe60738e5943b..1c2b9a615f0f4 100644
+--- a/arch/arm64/Kconfig
++++ b/arch/arm64/Kconfig
+@@ -2368,6 +2368,17 @@ config ARM64_ACPI_PARKING_PROTOCOL
+ 	  protocol even if the corresponding data is present in the ACPI
+ 	  MADT table.
+ 
++config ARM64_SPIN_TABLE_KEXEC
++	bool "Pocketboot v1 spin-table kexec parking (experimental)"
++	depends on KEXEC_CORE && HOTPLUG_CPU && OF && ARCH_QCOM && ARM64_4K_PAGES
++	help
++	  Repark Cortex-A53 secondary CPUs into an immutable trampoline installed
++	  by Pocketpreboot in a dedicated no-map reservation. This requires the
++	  pocketboot,spin-table-v1 binding and EL1 entry, and supports normal kexec
++	  on CPU0 only. Ordinary hotplug, suspend and crash kexec are unsupported.
++	  No PSCI calls are used. Both kernels and the loader must preserve the
++	  reservation and spin-table CPU descriptions across the handoff.
++
+ config CMDLINE
+ 	string "Default kernel command string"
+ 	default ""
+diff --git a/arch/arm64/include/asm/kexec.h b/arch/arm64/include/asm/kexec.h
+index 892e5bebda957..bfb5dbe5dd51f 100644
+--- a/arch/arm64/include/asm/kexec.h
++++ b/arch/arm64/include/asm/kexec.h
+@@ -94,6 +94,10 @@ static inline void crash_post_resume(void) {}
+ #endif
+ 
+ struct kimage;
++#ifdef CONFIG_ARM64_SPIN_TABLE_KEXEC
++int arch_kexec_pre_shutdown(struct kimage *image);
++#define arch_kexec_pre_shutdown arch_kexec_pre_shutdown
++#endif
+ 
+ #if defined(CONFIG_KEXEC_CORE)
+ void cpu_soft_restart(unsigned long el2_switch, unsigned long entry,
+diff --git a/arch/arm64/include/asm/spin_table.h b/arch/arm64/include/asm/spin_table.h
+new file mode 100644
+index 0000000000000..7be0f259a655d
+--- /dev/null
++++ b/arch/arm64/include/asm/spin_table.h
+@@ -0,0 +1,15 @@
++/* SPDX-License-Identifier: GPL-2.0-only */
++#ifndef __ASM_SPIN_TABLE_H
++#define __ASM_SPIN_TABLE_H
++
++struct kimage;
++#ifdef CONFIG_ARM64_SPIN_TABLE_KEXEC
++int smp_spin_table_kexec_prepare(struct kimage *image);
++void smp_spin_table_kexec_shutdown(void);
++void smp_spin_table_kexec_verify(void);
++#else
++static inline int smp_spin_table_kexec_prepare(struct kimage *image) { return 0; }
++static inline void smp_spin_table_kexec_shutdown(void) { }
++static inline void smp_spin_table_kexec_verify(void) { }
++#endif
++#endif
+diff --git a/arch/arm64/kernel/Makefile b/arch/arm64/kernel/Makefile
+index 74b76bb704523..27cee3c132948 100644
+--- a/arch/arm64/kernel/Makefile
++++ b/arch/arm64/kernel/Makefile
+@@ -87,3 +87,5 @@ endif
+ 
+ # for cleaning
+ subdir- += vdso vdso32
++
++obj-$(CONFIG_ARM64_SPIN_TABLE_KEXEC) += smp_spin_table_exit.o
+diff --git a/arch/arm64/kernel/machine_kexec.c b/arch/arm64/kernel/machine_kexec.c
+index c5693a32e49b0..de35e7475eaf2 100644
+--- a/arch/arm64/kernel/machine_kexec.c
++++ b/arch/arm64/kernel/machine_kexec.c
+@@ -23,6 +23,7 @@
+ #include <asm/mmu_context.h>
+ #include <asm/page.h>
+ #include <asm/sections.h>
++#include <asm/spin_table.h>
+ #include <asm/trans_pgd.h>
+ 
+ /**
+@@ -59,7 +60,7 @@ int machine_kexec_prepare(struct kimage *kimage)
+ 		return -EBUSY;
+ 	}
+ 
+-	return 0;
++	return smp_spin_table_kexec_prepare(kimage);
+ }
+ 
+ /**
+@@ -171,6 +172,8 @@ void machine_kexec(struct kimage *kimage)
+ 	WARN(in_kexec_crash && (stuck_cpus || smp_crash_stop_failed()),
+ 		"Some CPUs may be stale, kdump will be unreliable.\n");
+ 
++	smp_spin_table_kexec_verify();
++
+ 	pr_info("Bye!\n");
+ 
+ 	local_daif_mask();
+diff --git a/arch/arm64/kernel/process.c b/arch/arm64/kernel/process.c
+index 033643cd4e5ed..c987d00f69e76 100644
+--- a/arch/arm64/kernel/process.c
++++ b/arch/arm64/kernel/process.c
+@@ -59,6 +59,7 @@
+ #include <asm/stacktrace.h>
+ #include <asm/switch_to.h>
+ #include <asm/system_misc.h>
++#include <asm/spin_table.h>
+ 
+ #if defined(CONFIG_STACKPROTECTOR) && !defined(CONFIG_STACKPROTECTOR_PER_TASK)
+ #include <linux/stackprotector.h>
+@@ -82,14 +83,15 @@ void __noreturn arch_cpu_idle_dead(void)
+ /*
+  * Called by kexec, immediately prior to machine_kexec().
+  *
+- * This must completely disable all secondary CPUs; simply causing those CPUs
+- * to execute e.g. a RAM-based pin loop is not sufficient. This allows the
+- * kexec'd kernel to use any and all RAM as it sees fit, without having to
+- * avoid any code or data used by any SW CPU pin loop. The CPU hotplug
+- * functionality embodied in smpt_shutdown_nonboot_cpus() to achieve this.
++ * Normally secondary CPUs must be completely disabled so that the next
++ * kernel may reuse all RAM. Pocketboot v1 is an explicit exception: its
++ * immutable parking code and mailboxes occupy reserved, no-map memory that
++ * the loader and next kernel must preserve. Its acknowledgements must prove
++ * that every secondary left this kernel before relocation can begin.
+  */
+ void machine_shutdown(void)
+ {
++	smp_spin_table_kexec_shutdown();
+ 	smp_shutdown_nonboot_cpus(reboot_cpu);
+ }
+ 
+diff --git a/arch/arm64/kernel/smp_spin_table.c b/arch/arm64/kernel/smp_spin_table.c
+index 49029eace3ad9..2ef3dae9dac9b 100644
+--- a/arch/arm64/kernel/smp_spin_table.c
++++ b/arch/arm64/kernel/smp_spin_table.c
+@@ -11,9 +11,17 @@
+ #include <linux/smp.h>
+ #include <linux/types.h>
+ #include <linux/mm.h>
++#include <linux/kexec.h>
++#include <linux/of_address.h>
++#include <linux/of_reserved_mem.h>
++#include <linux/reboot.h>
+ 
+ #include <asm/cacheflush.h>
+ #include <asm/cpu_ops.h>
++#include <asm/cpu.h>
++#include <asm/mmu_context.h>
++#include <asm/spin_table.h>
++#include <asm/virt.h>
+ #include <asm/cputype.h>
+ #include <asm/io.h>
+ #include <asm/smp_plat.h>
+@@ -40,6 +48,260 @@ static void write_pen_release(u64 val)
+ }
+ 
+ 
++#ifdef CONFIG_ARM64_SPIN_TABLE_KEXEC
++/* pocketboot,spin-table-v1: immutable code and separate release/ack lines. */
++#define PB_REGION_SIZE 0x1000
++#define PB_ENTRY 0x100
++#define PB_SLOTS 0x400
++#define PB_STRIDE 0x80
++#define PB_ACK 0x40
++#define PB_ENTRY_EL 0x48
++#define PB_REQUEST 8
++#define PB_CPUS 4
++#define PB_CACHE_LINE 64
++#define PB_TIMEOUT_US 1000000
++
++extern const struct cpu_operations smp_spin_table_ops;
++extern void __noreturn smp_spin_table_exit(phys_addr_t entry);
++
++static void __iomem *pb_region;
++static phys_addr_t pb_base;
++static int pb_setup_status = -EAGAIN;
++static bool pb_shutting_down;
++static u64 pb_epoch[NR_CPUS];
++
++static void __iomem *pb_slot(unsigned int cpu)
++{
++	return pb_region + PB_SLOTS + cpu_logical_map(cpu) * PB_STRIDE;
++}
++
++static void pb_clean_release(unsigned int cpu)
++{
++	unsigned long addr = (__force unsigned long)pb_slot(cpu);
++
++	dcache_clean_inval_poc(addr, addr + PB_CACHE_LINE);
++}
++
++static u64 pb_read_ack(unsigned int cpu)
++{
++	void __iomem *ack = pb_slot(cpu) + PB_ACK;
++	unsigned long addr = (__force unsigned long)ack;
++
++	/*
++	 * The writer has its caches off. Invalidate the WHOLE isolated line,
++	 * never clean a stale cached value over the writer's acknowledgement.
++	 */
++	dcache_inval_poc(addr, addr + PB_CACHE_LINE);
++	return readq_relaxed(ack);
++}
++
++static int pb_setup(void)
++{
++	struct device_node *parent, *child, *region = NULL;
++	struct reserved_mem *reserved;
++	struct resource res;
++	unsigned int cpu, count = 0;
++	char magic[8];
++	int ret = -EINVAL;
++
++	if (pb_setup_status != -EAGAIN)
++		return pb_setup_status;
++
++	parent = of_find_node_by_path("/reserved-memory");
++	if (!parent) {
++		pb_setup_status = 0;
++		return 0;
++	}
++	for_each_available_child_of_node(parent, child) {
++		if (!of_device_is_compatible(child, "pocketboot,spin-table-v1"))
++			continue;
++		count++;
++		of_node_put(region);
++		region = of_node_get(child);
++	}
++	of_node_put(parent);
++	if (!count) {
++		pb_setup_status = 0;
++		return 0;
++	}
++	if (count != 1 || !of_property_read_bool(region, "no-map") ||
++	    of_property_read_bool(region, "reusable") ||
++	    of_address_to_resource(region, 0, &res) ||
++	    resource_size(&res) != PB_REGION_SIZE ||
++	    !IS_ALIGNED(res.start, PB_REGION_SIZE))
++		goto out;
++	reserved = of_reserved_mem_lookup(region);
++	if (!reserved || reserved->base != res.start ||
++	    reserved->size != PB_REGION_SIZE)
++		goto out;
++	if (cpu_logical_map(0) != 0 || num_possible_cpus() != PB_CPUS)
++		goto out;
++	for_each_possible_cpu(cpu) {
++		struct device_node *dn = of_get_cpu_node(cpu, NULL);
++		u64 release, mpidr = cpu_logical_map(cpu);
++		int err;
++
++		/* cpu_init() is not called for CPU0; validate its DT directly. */
++		err = of_property_read_u64(dn, "cpu-release-addr", &release);
++		of_node_put(dn);
++		if (err || mpidr >= PB_CPUS ||
++		    get_cpu_ops(cpu) != &smp_spin_table_ops ||
++		    release != res.start + PB_SLOTS + mpidr * PB_STRIDE)
++			goto out;
++	}
++
++	pb_region = ioremap_cache(res.start, PB_REGION_SIZE);
++	if (!pb_region) {
++		ret = -ENOMEM;
++		goto out;
++	}
++	memcpy_fromio(magic, pb_region + 0x90, sizeof(magic));
++	if (memcmp(magic, "PBSPIN01", sizeof(magic)) ||
++	    readl_relaxed(pb_region + 0x98) != 1 ||
++	    readl_relaxed(pb_region + 0x9c) != PB_REGION_SIZE ||
++	    readl_relaxed(pb_region + 0xa0) != PB_ENTRY ||
++	    readl_relaxed(pb_region + 0xa4) != PB_SLOTS ||
++	    readl_relaxed(pb_region + 0xa8) != PB_STRIDE ||
++	    readl_relaxed(pb_region + 0xac) != PB_CPUS) {
++		iounmap(pb_region);
++		pb_region = NULL;
++		goto out;
++	}
++	pb_base = res.start;
++	ret = 0;
++	pr_info("Pocketboot spin-table v1: persistent page at %pa\n", &pb_base);
++out:
++	of_node_put(region);
++	pb_setup_status = ret;
++	if (ret)
++		pr_err("Pocketboot spin-table v1: invalid parking reservation (%d)\n", ret);
++	return ret;
++}
++
++static bool pb_uses_spin_table(void)
++{
++	unsigned int cpu;
++
++	for_each_possible_cpu(cpu)
++		if (get_cpu_ops(cpu) == &smp_spin_table_ops)
++			return true;
++	return false;
++}
++
++int smp_spin_table_kexec_prepare(struct kimage *image)
++{
++	unsigned int cpu, segment;
++
++	if (!pb_uses_spin_table())
++		return 0;
++	if (!pb_region || pb_setup_status || image->type == KEXEC_TYPE_CRASH ||
++	    reboot_cpu != 0 || !cpu_online(0) || is_hyp_mode_available())
++		return -EOPNOTSUPP;
++	for_each_possible_cpu(cpu) {
++		u32 midr = per_cpu(cpu_data, cpu).reg_midr;
++
++		if (cpu) {
++			/* Resident code publishes CurrentEL before its acknowledgement. */
++			pb_read_ack(cpu);
++			if (readq_relaxed(pb_slot(cpu) + PB_ENTRY_EL) != 4)
++				return -EOPNOTSUPP;
++		}
++		if (!cpu_online(cpu) ||
++		    (midr & MIDR_CPU_MODEL_MASK) != MIDR_CORTEX_A53 ||
++		    readq_relaxed(pb_slot(cpu) + PB_REQUEST) == U64_MAX)
++			return -EOPNOTSUPP;
++	}
++	for (segment = 0; segment < image->nr_segments; segment++) {
++		unsigned long start = image->segment[segment].mem;
++		unsigned long size = image->segment[segment].memsz;
++
++		if (size > ULONG_MAX - start ||
++		    (start < pb_base + PB_REGION_SIZE && start + size > pb_base))
++			return -EINVAL;
++	}
++	return 0;
++}
++
++int arch_kexec_pre_shutdown(struct kimage *image)
++{
++	return smp_spin_table_kexec_prepare(image);
++}
++
++void smp_spin_table_kexec_shutdown(void)
++{
++	if (!pb_uses_spin_table())
++		return;
++	if (!kexec_in_progress || raw_smp_processor_id() != 0 ||
++	    smp_spin_table_kexec_prepare(kexec_image))
++		panic("Pocketboot: unsafe spin-table kexec shutdown");
++	WRITE_ONCE(pb_shutting_down, true);
++}
++
++void smp_spin_table_kexec_verify(void)
++{
++	unsigned int cpu;
++
++	if (!pb_uses_spin_table())
++		return;
++	if (!READ_ONCE(pb_shutting_down) || raw_smp_processor_id() != 0)
++		panic("Pocketboot: spin-table kexec was not prepared");
++	for_each_possible_cpu(cpu) {
++		if (!cpu)
++			continue;
++		if (!pb_epoch[cpu] || pb_read_ack(cpu) != pb_epoch[cpu])
++			panic("Pocketboot: CPU%u not in persistent parking code", cpu);
++	}
++}
++
++static int smp_spin_table_cpu_disable(unsigned int cpu)
++{
++	void __iomem *slot;
++	u64 epoch;
++
++	if (!cpu || !pb_region || !READ_ONCE(pb_shutting_down) ||
++	    !kexec_in_progress)
++		return -EOPNOTSUPP;
++	slot = pb_slot(cpu);
++	epoch = readq_relaxed(slot + PB_REQUEST);
++	if (epoch == U64_MAX)
++		return -EOVERFLOW;
++	pb_epoch[cpu] = epoch + 1;
++	writeq_relaxed(0, slot);
++	writeq_relaxed(epoch + 1, slot + PB_REQUEST);
++	pb_clean_release(cpu);
++	return 0;
++}
++
++static void smp_spin_table_cpu_die(unsigned int cpu)
++{
++	typeof(smp_spin_table_exit) *exit;
++
++	/* Early CPU bringup failure has not established a new parking epoch. */
++	if (!cpu || !pb_region || !pb_epoch[cpu] || !READ_ONCE(pb_shutting_down))
++		panic("Pocketboot: unprepared CPU%u parking", cpu);
++
++	cpu_install_idmap();
++	exit = (void *)__pa_symbol(smp_spin_table_exit);
++	exit(pb_base + PB_ENTRY);
++}
++
++static int smp_spin_table_cpu_kill(unsigned int cpu)
++{
++	unsigned int timeout = PB_TIMEOUT_US;
++
++	while (timeout--) {
++		if (pb_epoch[cpu] && pb_read_ack(cpu) == pb_epoch[cpu]) {
++			pr_info("CPU%u: persistent spin-table park acknowledged (epoch %llu)\n",
++				cpu, pb_epoch[cpu]);
++			return 0;
++		}
++		udelay(1);
++	}
++	/* Generic hotplug merely warns on cpu_kill errors. Never let it return. */
++	panic("Pocketboot: CPU%u parking acknowledgement timed out", cpu);
++}
++#endif
++
+ static int smp_spin_table_cpu_init(unsigned int cpu)
+ {
+ 	struct device_node *dn;
+@@ -68,6 +330,13 @@ static int smp_spin_table_cpu_prepare(unsigned int cpu)
+ 	__le64 __iomem *release_addr;
+ 	phys_addr_t pa_holding_pen = __pa_symbol(secondary_holding_pen);
+ 
++#ifdef CONFIG_ARM64_SPIN_TABLE_KEXEC
++	int ret = pb_setup();
++
++	if (ret)
++		return ret;
++#endif
++
+ 	if (!cpu_release_addr[cpu])
+ 		return -ENODEV;
+ 
+@@ -124,4 +393,9 @@ const struct cpu_operations smp_spin_table_ops = {
+ 	.cpu_init	= smp_spin_table_cpu_init,
+ 	.cpu_prepare	= smp_spin_table_cpu_prepare,
+ 	.cpu_boot	= smp_spin_table_cpu_boot,
++#ifdef CONFIG_ARM64_SPIN_TABLE_KEXEC
++	.cpu_disable	= smp_spin_table_cpu_disable,
++	.cpu_die	= smp_spin_table_cpu_die,
++	.cpu_kill	= smp_spin_table_cpu_kill,
++#endif
+ };
+diff --git a/arch/arm64/kernel/smp_spin_table_exit.S b/arch/arm64/kernel/smp_spin_table_exit.S
+new file mode 100644
+index 0000000000000..f12909ae18883
+--- /dev/null
++++ b/arch/arm64/kernel/smp_spin_table_exit.S
+@@ -0,0 +1,58 @@
++/* SPDX-License-Identifier: GPL-2.0-only */
++/*
++ * Cortex-A53 EL1-only exit to Pocketpreboot's immutable reserved trampoline.
++ * x0: physical resident entry. Called through the identity mapping.
++ *
++ * No stack accesses or data stores. Follow the A53 individual-core cache
++ * shutdown order: disable allocation (C=0), then clean/invalidate private L1.
++ * Do not sweep the shared L2 while the other cores still execute: L2 and
++ * SMPEN remain enabled. This is coherent parking, not cluster power-off.
++ * A53 has the original CCSIDR layout (no FEAT_CCIDX).
++ */
++#include <linux/linkage.h>
++#include <linux/cfi_types.h>
++#include <asm/assembler.h>
++#include <asm/sysreg.h>
++
++.pushsection .idmap.text, "a"
++SYM_TYPED_FUNC_START(smp_spin_table_exit)
++	mov	x19, x0
++	dsb	sy
++	mrs	x1, sctlr_el1
++	bic	x1, x1, #SCTLR_ELx_C
++	msr	sctlr_el1, x1
++	isb
++	msr	csselr_el1, xzr		// private L1 data cache only
++	isb
++	mrs	x1, ccsidr_el1
++	and	x2, x1, #7
++	add	x2, x2, #4		// log2(line size)
++	ubfx	x3, x1, #3, #10	// ways - 1
++	ubfx	x4, x1, #13, #15	// sets - 1
++	clz	w5, w3
++1:
++	mov	x6, x3
++2:
++	lsl	x7, x6, x5
++	lsl	x8, x4, x2
++	orr	x7, x7, x8
++	dc	cisw, x7
++	subs	x6, x6, #1
++	b.ge	2b
++	subs	x4, x4, #1
++	b.ge	1b
++	dsb	sy
++	ic	iallu
++	dsb	sy
++	isb
++	mov_q	x12, INIT_SCTLR_EL1_MMU_OFF
++	pre_disable_mmu_workaround
++	msr	sctlr_el1, x12
++	isb
++	mov	x0, xzr
++	mov	x1, xzr
++	mov	x2, xzr
++	mov	x3, xzr
++	br	x19
++SYM_FUNC_END(smp_spin_table_exit)
++.popsection
+diff --git a/include/linux/kexec.h b/include/linux/kexec.h
+index 8a22bc9b8c6c8..87d06ec0b4399 100644
+--- a/include/linux/kexec.h
++++ b/include/linux/kexec.h
+@@ -38,6 +38,12 @@ extern note_buf_t __percpu *crash_notes;
+ #include <asm/kexec.h>
+ #include <linux/crash_core.h>
+ 
++struct kimage;
++
++#ifndef arch_kexec_pre_shutdown
++static inline int arch_kexec_pre_shutdown(struct kimage *image) { return 0; }
++#endif
++
+ /* Verify architecture specific macros are defined */
+ 
+ #ifndef KEXEC_SOURCE_MEMORY_LIMIT
+diff --git a/kernel/kexec_core.c b/kernel/kexec_core.c
+index a43d2da0fe3e7..15e743b9fa642 100644
+--- a/kernel/kexec_core.c
++++ b/kernel/kexec_core.c
+@@ -1146,6 +1146,11 @@ int kernel_kexec(void)
+ 		goto Unlock;
+ 	}
+ 
++	/* Revalidate architecture constraints before shutting down devices. */
++	error = arch_kexec_pre_shutdown(kexec_image);
++	if (error)
++		goto Unlock;
++
+ 	error = liveupdate_reboot();
+ 	if (error)
+ 		goto Unlock;
