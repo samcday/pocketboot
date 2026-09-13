@@ -81,5 +81,5 @@ and after three consecutive kexecs, including packaged-preboot reentry. Each
 phase completed 40,000 ring handoffs and 4,000 migrations. The ring took about
 131–137 ms and migration about 85 ms in these runs. Captures are under
 `target/db410c-lab/20260911/coherency-proof/{cold,generation-1,generation-2,generation-3}/coherency.log`.
-See the [experiment record](msm8916-smp-experiments-2026-09-11.md) for provenance,
+See the [validation summary and archive](msm8916-validation.md) for provenance,
 other checks and remaining limitations.

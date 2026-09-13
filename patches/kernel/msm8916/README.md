@@ -56,44 +56,22 @@ These later patches were tested on A5U. They are not part of the earlier DB410c
 hardware run; wider MSM device coverage remains open. The A5 final build passes
 three consecutive handoffs including configured preboot re-entry, with useful
 work on four CPUs and zero display IOMMU faults. One initial display underrun
-remains. See the [A5 experiment record](../../../docs/a5u-smp-experiments-2026-09-11.md)
+remains. See the [validation summary](../../../docs/msm8916-validation.md)
 for the distinction between software checks and physical screen confirmation.
 
-## Validation on 2026-09-11
+## Validation
 
-The patch was developed in an isolated checkout under
-`/tmp/pocketboot-linux-spintable-v1`; the old dirty kernel tree was preserved.
-GCC cross-compilation uses the existing A5 kernel configuration, with the
-embedded initramfs path cleared for object verification:
+The [validation summary](../../../docs/msm8916-validation.md) records the
+hardware matrix, limitations, build/test commands and complete archived evidence.
+All six patches apply to the pristine pinned kernel; the original PR's full
+CI device matrix passed. Changed kernel objects were also compiled with
+parking enabled and disabled during bring-up.
 
-```
-make O=/tmp/pocketboot-linux-spintable-build ARCH=arm64 \
-  CROSS_COMPILE=aarch64-linux-gnu- olddefconfig
-make O=/tmp/pocketboot-linux-spintable-build ARCH=arm64 \
-  CROSS_COMPILE=aarch64-linux-gnu- -j8 \
-  arch/arm64/kernel/smp_spin_table.o \
-  arch/arm64/kernel/smp_spin_table_exit.o \
-  arch/arm64/kernel/machine_kexec.o arch/arm64/kernel/process.o \
-  kernel/kexec_core.o
-```
-
-The exit object has no relocations, no stack accesses, no calls, no data stores,
-and no PSCI/HVC/SMC instructions. Its disassembly contains the set/way clean,
-barriers, MMU/cache disable, zeroing x0-x3, and branch to the resident entry.
-All changed objects were compiled with the feature enabled; all applicable
-changed C objects were also compiled with the feature disabled.
-Object compilation and source/disassembly inspection do not establish hardware
-cache correctness or four-core handoff success. Those require captured boot/parking evidence
-and repeated live kexec cycles, including failure cases.
-
-Subsequent DB410c testing supplied that positive hardware evidence: raw
-SCM/ACC startup and three consecutive kexecs, with CPU1–3 acknowledging epochs
-2, 3 and 4 before relocation. All four CPUs passed measured computation,
-40,000 shared-buffer transfers and 4,000 checked migrations in every kernel.
-The third destination reentered pocketpreboot and safely reused the resident
-page. Load-only CPU-topology and reservation-overlap fixtures were rejected.
-This does not claim hardware testing of a forced parking timeout, crash paths,
-EL2 or other boards. See the [experiment record](../../../docs/msm8916-smp-experiments-2026-09-11.md).
+The exit object's disassembly has no relocations, stack accesses, calls or
+stores, and no PSCI/HVC/SMC instructions. Object inspection cannot establish
+hardware coherency; the recorded four-core workloads and repeated handoffs
+provide that evidence for the tested boards. Forced parking timeout, crash
+paths and EL2 parking have no positive hardware validation.
 
 ## Cache and shutdown review
 

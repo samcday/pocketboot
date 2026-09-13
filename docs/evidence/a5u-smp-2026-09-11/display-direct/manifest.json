@@ -1,5 +1,0 @@
-{
-  "bytes": 11427840,
-  "sha256": "033a8c2e94cb69c89766504a7e94b62f25ad5396b4d48900c72eb78dde73321f",
-  "cmdline": "msm.skip_gpu=1 msm.separate_gpu_kms=1 panic=5 oops=panic printk.time=1 pocketboot.log=info pocketboot.drm_page_flips=16 drm.debug=0x6 pocketboot.lab=a5-display-direct"
-}
