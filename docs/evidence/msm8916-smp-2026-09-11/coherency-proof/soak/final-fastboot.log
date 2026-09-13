@@ -1,8 +1,0 @@
-(bootloader) 257 dmesg records staged (20164 bytes)
-(bootloader) run fastboot get_staged /dev/stdout to view
-OKAY [  0.007s]
-Finished. Total time: 0.007s
-Uploading 'target/db410c-lab/20260911/coherency-proof/soak/final-dmesg.log' OKAY [  0.001s]
-Finished. Total time: 0.001s
-product: pocketboot
-Finished. Total time: 0.000s

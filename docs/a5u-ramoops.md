@@ -65,10 +65,10 @@ contents have been saved.
 
 ## Evidence and limits
 
-[The A5 experiment log](a5u-smp-experiments-2026-09-11.md) records the deliberate
+[The archived A5 experiment log](https://github.com/samcday/pocketboot/blob/bf5d70026af96f97a87c0d300b4bf91e0a0b22e5/docs/a5u-smp-experiments-2026-09-11.md) records the deliberate
 SysRq panic, automatic return to lk2nd, the USB alignment failure, and the
 subsequent display/IOMMU failure. Raw captures are under
-`docs/evidence/a5u-smp-2026-09-11/ramoops/`.
+[the archive’s ramoops directory](https://github.com/samcday/pocketboot/tree/bf5d70026af96f97a87c0d300b4bf91e0a0b22e5/docs/evidence/a5u-smp-2026-09-11/ramoops/).
 
 The deliberate panic was induced through `/proc/sysrq-trigger`; that root-only
 interface bypasses the serial SysRq mask in this kernel. `/proc/sys/kernel`

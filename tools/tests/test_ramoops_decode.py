@@ -1,3 +1,4 @@
+import gzip
 import importlib.util
 from pathlib import Path
 import tempfile
@@ -14,8 +15,8 @@ class RamoopsTests(unittest.TestCase):
     def setUpClass(cls):
         cls.temp = tempfile.TemporaryDirectory()
         cls.codec = ramoops.Codec(ROOT / 'target/kernel/src/msm8916', cls.temp.name)
-        cls.raw = (ROOT / 'docs/evidence/a5u-smp-2026-09-11/ramoops/'
-                   'controlled-panic/ramoops.bin').read_bytes()
+        fixture = Path(__file__).with_name('fixtures') / 'a5u-controlled-panic.bin.gz'
+        cls.raw = gzip.decompress(fixture.read_bytes())
 
     @classmethod
     def tearDownClass(cls):

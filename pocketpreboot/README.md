@@ -3,7 +3,7 @@
 For UART-free lab diagnostics, see the optional
 [triplicated RAM trace](../docs/preboot-ram-trace.md).
 Once Linux starts, [A5 ramoops recovery](../docs/a5u-ramoops.md) preserves
-kernel logs across failures. [A5 hardware validation](../docs/a5u-smp-experiments-2026-09-11.md)
+kernel logs across failures. [A5 hardware validation](../docs/msm8916-validation.md)
 now covers cold startup and three consecutive handoffs, including re-entry.
 
 The packager sets the shim's ARM64 `text_offset` to match its configured load
