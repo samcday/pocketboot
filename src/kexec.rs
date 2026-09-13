@@ -1864,9 +1864,14 @@ mod fdt {
                 size_dt_struct: read_be32(dtb, 36)? as usize,
             };
 
-            if header.totalsize > dtb.len() {
-                return invalid_data("DTB totalsize exceeds payload size");
+            if !(40..=dtb.len()).contains(&header.totalsize) {
+                return invalid_data(
+                    "DTB totalsize is smaller than its header or exceeds payload size",
+                );
             }
+            // Padding or trailing payload bytes are not part of the DTB.
+            // Validate every block against totalsize before following offsets.
+            let dtb = &dtb[..header.totalsize];
             checked_slice(
                 dtb,
                 header.off_dt_struct,
@@ -3166,6 +3171,28 @@ mod fdt {
             let mut target = contract_fixture(false, false, 2);
             fixture_cpu(&mut target, 1).set(b"power-domains", &99u32.to_be_bytes());
             assert!(graft_spin_table(&fixture_dtb(&target), &live).is_err());
+        }
+
+        #[test]
+        fn spin_table_graft_rejects_blocks_outside_declared_dtb() {
+            let live = fixture_dtb(&contract_fixture(true, false, 2));
+            let target = fixture_dtb(&contract_fixture(false, false, 2));
+            for (original, is_live) in [(&live, true), (&target, false)] {
+                let mut malformed = original.clone();
+                // The backing buffer still contains valid strings, but the
+                // header says they are outside the DTB handed to Linux.
+                let total = read_be32(&malformed, 12).unwrap();
+                malformed[4..8].copy_from_slice(&total.to_be_bytes());
+                let result = if is_live {
+                    graft_spin_table(&target, &malformed)
+                } else {
+                    graft_spin_table(&malformed, &live)
+                };
+                assert!(
+                    result.is_err(),
+                    "accepted out-of-bounds strings, live={is_live}"
+                );
+            }
         }
 
         fn test_dtb_with_chosen_child() -> Vec<u8> {
