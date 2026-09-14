@@ -26,6 +26,7 @@ This is a kernel configuration gap, not a UI bug.
 | `IOMMU_SUPPORT`, `QCOM_IOMMU` | IOMMU required by `DRM_MSM` and the display/GEM path |
 | `DRM_MSM`, `DRM_MSM_MDP5`, `DRM_MSM_DSI`, `DRM_MSM_DSI_28NM_PHY` | MDP5 + DSI + 28 nm LP PHY for MSM8916 |
 | `DRM_I2C_ADV7511` | On-board ADV7533 DSI-to-HDMI bridge (`adi,adv7533`) |
+| `DRM_DISPLAY_CONNECTOR` | `/hdmi-out` (`hdmi-connector`) next bridge downstream of the ADV7533; without it `adv7511` probe defers forever and no DRM card appears |
 | `DRM_SIMPLEDRM = false` | Let MSM own `card0` instead of a bootloader framebuffer |
 | `INPUT_PM8941_PWRKEY` | PM8916 power and RESIN (Volume Down) keys |
 

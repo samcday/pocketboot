@@ -20,6 +20,11 @@ DRM_MSM_MDP5 = true
 DRM_MSM_DSI = true
 DRM_MSM_DSI_28NM_PHY = true
 DRM_I2C_ADV7511 = true
+# The ADV7533 is the bridge; its downstream /hdmi-out node is described as an
+# "hdmi-connector" and is bound by the display-connector driver. Without it,
+# adv7511 probe defers forever waiting for its next bridge and no DRM card
+# registers. Built in, like the rest of the display path.
+DRM_DISPLAY_CONNECTOR = true
 
 # Board buttons. Volume Up is a TLMM gpio-keys button; Volume Down is the
 # PM8916 PON RESIN key exposed by the pm8941-pwrkey driver.
