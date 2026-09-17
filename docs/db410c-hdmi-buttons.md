@@ -65,3 +65,40 @@ accepting physical button navigation. The existing spin-table handoff contract
 is unchanged by this configuration, so the handoff acceptance still applies.
 A cold FIT repackage is only needed for a cold boot; do not overwrite the
 occupied parking page of a running instance.
+
+## Hardware results (2026-09-16)
+
+Cold-booting this configuration on a DragonBoard 410c through the lab FIT path
+brought up the MSM DRM card and the `HDMI-A-1` connector, but the ADV7533
+reported hot-plug detect low with an empty EDID from the attached USB HDMI
+capture dongle, so the kernel supplied no modes and the UI exited with
+`no DRM connector with modes found`. Forcing the connector on the kernel
+command line fixed that without any code change:
+
+```
+video=HDMI-A-1:1280x720@60e
+```
+
+The trailing `e` sets `DRM_FORCE_ON`; a bare `video=HDMI-A-1:1280x720@60`
+without it does not help because the disconnected early-exit runs before the
+command-line mode is considered. With the forced mode the Pocketboot boot menu
+rendered on the capture, the ADV7533 reported its TMDS PLL locked, and the
+picture appeared whenever the sink's TMDS termination was sensed (ADV7511
+status register `0x42` bit 5). Sinks that assert HPD and serve an EDID should
+not need the override; sinks that do not, such as some capture dongles, do.
+A follow-up could let the UI tolerate a mode-less connector by forcing it via
+DRM debugfs or by programming a default mode itself.
+
+Other findings from the same trials:
+
+- Both volume-key input devices enumerate (`pm8941_resin` as Volume Down,
+  `gpio-keys` as Volume Up). Physical navigation was not proven because the lab
+  board's Volume Up switch (S3, TLMM gpio107) reads pressed permanently and the
+  boot menu was empty; hardware navigation is a no-op with no boot entries and
+  only the power menu reacts to volume keys.
+- The Adreno `a300_pm4.fw` load errors are harmless here: `CONFIG_FW_LOADER` is
+  off in this kernel, modeset is MDP5/DSI and independent of the GPU, and the UI
+  renders on the CPU.
+- Kexecing a kernel from a running instance of this UI image is unreliable
+  (the destination died early where a cold boot of the same image was clean);
+  that is tracked separately from the display configuration.
