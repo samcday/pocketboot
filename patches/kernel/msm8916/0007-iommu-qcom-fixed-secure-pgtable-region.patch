@@ -1,0 +1,148 @@
+Subject: [PATCH] iommu/qcom: keep the secure page table across kexec
+
+TrustZone owns the secure page table handed over by
+qcom_scm_iommu_secure_ptbl_init(). The first kernel allocates that table with
+dma_alloc_attrs(), so a kernel entered through kexec allocates a different
+buffer and asks TrustZone to initialise a second time. The APQ8016 SBC's TZ
+answers the second attempt with -EINVAL, which qcom_scm only tolerates in its
+-EPERM form, so the IOMMU probe fails with -22, the display controller gets no
+IOMMU group and the MSM DRM error path bails out.
+
+Let the IOMMU node describe a fixed, no-map reserved region for the table. When
+present that physical range is handed to firmware unchanged, so it survives
+kexec, and an already-initialised table (-EINVAL or -EPERM) is treated as
+success instead of a probe failure. Boards without a memory-region keep the
+existing DMA allocation path.
+
+The APQ8016 SBC reserves 124 KiB at 0x854e0000, immediately below the
+Pocketboot spin-table page at 0x854ff000 and inside plain System RAM. TrustZone
+already owns the equivalent table after the first kernel, so reusing the
+physical range is what makes the second (kexec'd) kernel's display come up.
+
+Hardware evidence for the failure: the destination of a hop from a live
+UI-resident Pocketboot logs
+
+  qcom-iommu 1ef0000.iommu: iommu sec: pgtable size: 94208
+  qcom-iommu 1ef0000.iommu: failed to init iommu pgtable (-22)
+
+in 40b-fixed-image-chain/evidence/05-hop1-uart.log.
+---
+ arch/arm64/boot/dts/qcom/apq8016-sbc.dts             | 16 ++++++++++++++++
+ drivers/iommu/arm/arm-smmu/qcom_iommu.c              | 47 +++++++++++++++++++++++++++++++++++++++++------
+ 2 files changed, 57 insertions(+), 6 deletions(-)
+
+--- a/arch/arm64/boot/dts/qcom/apq8016-sbc.dts
++++ b/arch/arm64/boot/dts/qcom/apq8016-sbc.dts
+@@ -43,6 +43,18 @@
+ 			console-size = <0x20000>;
+ 			ftrace-size = <0x20000>;
+ 		};
++
++		/*
++		 * Fixed secure page table for the apps IOMMU. TrustZone owns
++		 * this page table once the first kernel initialises it, and
++		 * rejects a second init with -EINVAL, so the allocation must not
++		 * move across kexec. Sits directly below the Pocketboot
++		 * spin-table page at 0x854ff000.
++		 */
++		iommu_sec_ptbl: iommu-secure-pgtable@854e0000 {
++			reg = <0x0 0x854e0000 0x0 0x1f000>;
++			no-map;
++		};
+ 	};
+ 
+ 	usb2513 {
+@@ -746,3 +758,7 @@
+ 		output-low;
+ 	};
+ };
++
++&apps_iommu {
++	memory-region = <&iommu_sec_ptbl>;
++};
+--- a/drivers/iommu/arm/arm-smmu/qcom_iommu.c
++++ b/drivers/iommu/arm/arm-smmu/qcom_iommu.c
+@@ -23,6 +23,7 @@
+ #include <linux/mutex.h>
+ #include <linux/of.h>
+ #include <linux/of_platform.h>
++#include <linux/of_reserved_mem.h>
+ #include <linux/platform_device.h>
+ #include <linux/pm.h>
+ #include <linux/pm_runtime.h>
+@@ -617,6 +618,9 @@
+ 	void *cpu_addr;
+ 	dma_addr_t paddr;
+ 	unsigned long attrs;
++	struct reserved_mem *rmem = NULL;
++	struct device_node *np;
++	bool fixed_region = false;
+ 	static bool allocated = false;
+ 	int ret;
+ 
+@@ -632,6 +636,33 @@
+ 
+ 	dev_info(dev, "iommu sec: pgtable size: %zu\n", psize);
+ 
++	/*
++	 * A fixed region keeps the firmware-owned page table at the same
++	 * physical address across kexec. The outgoing kernel already handed
++	 * this region to TrustZone, which owns the table once initialised.
++	 * The node is no-map, so only the physical base is needed.
++	 */
++	if (dev->of_node) {
++		np = of_parse_phandle(dev->of_node, "memory-region", 0);
++		if (np) {
++			rmem = of_reserved_mem_lookup(np);
++			of_node_put(np);
++			if (!rmem) {
++				dev_err(dev, "memory-region is not a reserved-memory node\n");
++			} else if (rmem->size < psize) {
++				dev_err(dev, "secure pgtable region too small (%zu < %zu)\n",
++					rmem->size, psize);
++				rmem = NULL;
++			}
++		}
++	}
++
++	if (rmem) {
++		paddr = rmem->base;
++		fixed_region = true;
++		goto init_ptbl;
++	}
++
+ 	attrs = DMA_ATTR_NO_KERNEL_MAPPING;
+ 
+ 	cpu_addr = dma_alloc_attrs(dev, psize, &paddr, GFP_KERNEL, attrs);
+@@ -641,8 +672,21 @@
+ 		return -ENOMEM;
+ 	}
+ 
++init_ptbl:
+ 	ret = qcom_scm_iommu_secure_ptbl_init(paddr, psize, spare);
+ 	if (ret) {
++		/*
++		 * With a fixed region TrustZone may already own a table from
++		 * the kernel we kexec'd from. It answers the second init with
++		 * -EINVAL on this board (-EPERM elsewhere); that means
++		 * "already initialised", not "broken".
++		 */
++		if (fixed_region && (ret == -EINVAL || ret == -EPERM)) {
++			dev_info(dev, "secure pgtable already initialised (%d), reusing fixed region\n",
++				 ret);
++			allocated = true;
++			return 0;
++		}
+ 		dev_err(dev, "failed to init iommu pgtable (%d)\n", ret);
+ 		goto free_mem;
+ 	}
+@@ -651,7 +695,8 @@
+ 	return 0;
+ 
+ free_mem:
+-	dma_free_attrs(dev, psize, cpu_addr, paddr, attrs);
++	if (!fixed_region)
++		dma_free_attrs(dev, psize, cpu_addr, paddr, attrs);
+ 	return ret;
+ }
+ 
