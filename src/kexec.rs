@@ -810,7 +810,6 @@ __pb_tramp_end:
 
             match name {
                 "System RAM" => add_range(&mut ranges, range),
-                "Kernel code" | "Kernel data" | "Kernel bss" => {}
                 _ => subtract_range(&mut ranges, range),
             }
         }
@@ -950,6 +949,32 @@ __pb_tramp_end:
 
     fn invalid_data<T>(message: impl Into<String>) -> io::Result<T> {
         Err(io::Error::new(io::ErrorKind::InvalidData, message.into()))
+    }
+
+    #[cfg(test)]
+    mod tests {
+        use super::*;
+
+        #[test]
+        fn parse_iomem_excludes_resident_kernel_image() {
+            let iomem = "\
+80000000-bfffffff : System RAM
+80200000-808bffff : Kernel code
+808c0000-80b3ffff : reserved
+80b40000-80c5ffff : Kernel data
+80c60000-80dbffff : Kernel bss
+";
+            let ranges = parse_iomem(iomem)
+                .into_iter()
+                .map(|range| (range.start, range.end))
+                .collect::<Vec<_>>();
+
+            assert_eq!(
+                ranges,
+                vec![(0x80000000, 0x80200000), (0x80dc0000, 0xc0000000)],
+                "resident kernel image ranges must not be offered as usable RAM"
+            );
+        }
     }
 }
 
