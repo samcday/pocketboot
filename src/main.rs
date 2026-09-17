@@ -23,6 +23,7 @@ mod pe;
 mod power;
 #[cfg(feature = "qemu")]
 mod qemu;
+mod quiesce;
 mod reaper;
 mod runtime;
 mod settle;

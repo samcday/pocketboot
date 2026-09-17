@@ -2,15 +2,17 @@ use std::{
     fs::{self, File},
     io::{self, Read, Seek, SeekFrom},
     os::fd::{AsRawFd, FromRawFd},
+    path::Path,
     time::Instant,
 };
 
 use flate2::read::{GzDecoder, MultiGzDecoder};
 use ruzstd::decoding::StreamingDecoder;
 
-use crate::{pe, zboot};
+use crate::{cmdline, pe, quiesce, zboot};
 
 const LINUX_REBOOT_CMD_KEXEC: libc::c_int = 0x45584543;
+const NO_KEXEC_QUIESCE_CMDLINE_PARAM: &str = "pocketboot.no_kexec_quiesce";
 const GZIP_MAGIC: [u8; 2] = [0x1f, 0x8b];
 const ARM64_IMAGE_MAGIC_OFFSET: usize = 56;
 const ARM64_IMAGE_MAGIC_BYTES: &[u8; 4] = b"ARM\x64";
@@ -96,6 +98,8 @@ pub(crate) fn prepare_kernel_payload(mut kernel: File) -> io::Result<File> {
 }
 
 pub(crate) fn exec_loaded_image() -> io::Result<()> {
+    quiesce_before_kexec();
+
     let rc = unsafe { libc::reboot(LINUX_REBOOT_CMD_KEXEC) };
     if rc < 0 {
         return Err(io::Error::last_os_error());
@@ -104,6 +108,22 @@ pub(crate) fn exec_loaded_image() -> io::Result<()> {
     Err(io::Error::other(
         "reboot(LINUX_REBOOT_CMD_KEXEC) returned unexpectedly",
     ))
+}
+
+fn quiesce_before_kexec() {
+    let cmdline = cmdline::KernelCommandLine::read("/proc/cmdline").unwrap_or_default();
+    if cmdline.is_set(NO_KEXEC_QUIESCE_CMDLINE_PARAM) {
+        tracing::info!(
+            param = NO_KEXEC_QUIESCE_CMDLINE_PARAM,
+            "skipping pre-kexec display quiesce"
+        );
+        return;
+    }
+
+    match quiesce::quiesce_display(Path::new("/sys"), Path::new("/proc")) {
+        Ok(report) => tracing::info!(report = %report, "pre-kexec display quiesce complete"),
+        Err(err) => tracing::warn!(error = %err, "pre-kexec display quiesce failed; continuing"),
+    }
 }
 
 fn read_payload(file: &File) -> io::Result<Vec<u8>> {
