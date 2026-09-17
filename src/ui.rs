@@ -39,6 +39,7 @@ slint::include_modules!();
 const DRI: &str = "/dev/dri";
 const INPUT: &str = "/dev/input";
 const UI_START_TIMEOUT: Duration = Duration::from_secs(2);
+const UI_STOP_TIMEOUT: Duration = Duration::from_secs(2);
 const IDLE_SLEEP: Duration = Duration::from_millis(16);
 const POWER_KEY_HOLD: Duration = Duration::from_millis(2500);
 const FRAME_RATE_WINDOW: Duration = Duration::from_secs(1);
@@ -79,7 +80,7 @@ pub(crate) enum Action {
 pub(crate) struct Handle {
     commands: async_channel::Sender<Command>,
     actions: async_channel::Receiver<Action>,
-    _thread: thread::JoinHandle<()>,
+    thread: thread::JoinHandle<()>,
 }
 
 impl Handle {
@@ -99,6 +100,29 @@ impl Handle {
     pub(crate) fn action_receiver(&self) -> async_channel::Receiver<Action> {
         self.actions.clone()
     }
+
+    pub(crate) fn stop_and_join(self) {
+        if self.commands.send_blocking(Command::Stop).is_err() {
+            tracing::debug!("UI command channel already disconnected");
+        }
+
+        let deadline = Instant::now() + UI_STOP_TIMEOUT;
+        while !self.thread.is_finished() && Instant::now() < deadline {
+            thread::sleep(Duration::from_millis(10));
+        }
+
+        if self.thread.is_finished() {
+            if self.thread.join().is_err() {
+                tracing::warn!("UI thread panicked while stopping");
+            }
+            tracing::info!("UI thread stopped");
+        } else {
+            tracing::warn!(
+                timeout_ms = UI_STOP_TIMEOUT.as_millis(),
+                "UI thread did not stop within timeout"
+            );
+        }
+    }
 }
 
 enum Command {
@@ -106,6 +130,7 @@ enum Command {
         entries: Vec<BootMenuEntryInfo>,
         scan_complete: bool,
     },
+    Stop,
 }
 
 pub(crate) fn spawn(
@@ -134,7 +159,7 @@ pub(crate) fn spawn(
     Ok(Handle {
         commands: command_tx,
         actions: action_rx,
-        _thread: handle,
+        thread: handle,
     })
 }
 
@@ -232,6 +257,11 @@ fn run(
     loop {
         slint::platform::update_timers_and_animations();
 
+        if commands.poll(&main_window, !ui_animation_lab) {
+            tracing::info!("UI stop requested; releasing display");
+            break Ok(());
+        }
+
         if page_flip_lab.request_next(kms_display.posted, kms_display.completed_page_flips) {
             if page_flip_lab.remaining + 1 == page_flip_lab.requested {
                 tracing::info!(
@@ -246,7 +276,6 @@ fn run(
             if let Some(battery) = &mut battery {
                 battery.poll(&main_window);
             }
-            commands.poll(&main_window);
 
             for report in touch.poll(kms_display.width, kms_display.height) {
                 let position = logical_touch_position(report, window.scale_factor());
@@ -726,19 +755,24 @@ impl UiCommands {
         }
     }
 
-    fn poll(&mut self, window: &MainWindow) {
+    fn poll(&mut self, window: &MainWindow, apply_entries: bool) -> bool {
         if self.disconnected {
-            return;
+            return false;
         }
 
         loop {
             match self.rx.try_recv() {
-                Ok(command) => apply_command(window, command),
-                Err(async_channel::TryRecvError::Empty) => return,
+                Ok(Command::Stop) => return true,
+                Ok(command) => {
+                    if apply_entries {
+                        apply_command(window, command);
+                    }
+                }
+                Err(async_channel::TryRecvError::Empty) => return false,
                 Err(async_channel::TryRecvError::Closed) => {
                     self.disconnected = true;
                     tracing::debug!("UI command channel disconnected");
-                    return;
+                    return false;
                 }
             }
         }
@@ -751,6 +785,7 @@ fn apply_command(window: &MainWindow, command: Command) {
             entries,
             scan_complete,
         } => apply_boot_entries(window, entries, scan_complete),
+        Command::Stop => {}
     }
 }
 
