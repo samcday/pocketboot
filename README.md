@@ -24,3 +24,18 @@ cargo xtask build
 Dev docs will be forthcoming. For now, ask your favourite clanker for an explanation.
 
 [LinuxBoot]: https://www.linuxboot.org/
+
+## A5 boot-image size
+
+Samsung A5U uses `gzip_kernel = true` in its `[bootimg]` configuration. The
+builder first places Pocketpreboot and the uncompressed kernel, including the
+kernel's complete runtime footprint, then gzip-compresses that combined
+payload before writing the Android image. This keeps the boot image within the
+A5's 13 MiB partition without changing the preboot placement contract. The
+option defaults to false for other devices; compression uses no filename or
+timestamp metadata.
+
+The September 21 A5 trial RAM-booted an equivalent compressed resident of
+about 5 MiB and repeated kexec with four CPUs online. That resident disabled
+display probing to isolate a separate blank-panel/USB failure; compression
+alone does not establish that the full A5 display path is ready for installation.

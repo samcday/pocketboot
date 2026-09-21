@@ -5,6 +5,7 @@ use std::{
 };
 
 use abootimg_oxide::{HeaderV0, HeaderV0Versioned, OsVersionPatch};
+use flate2::{Compression, write::GzEncoder};
 use sha1::{Digest, Sha1};
 
 use crate::Result;
@@ -85,6 +86,13 @@ fn bootimg(args: BootImgArgs) -> Result<()> {
     } else {
         payload_image.clone()
     };
+    // Compress only after preboot placement and BSS padding are complete.
+    // The preboot wrapper itself still consumes an uncompressed ARM64 Image.
+    let image = if config.gzip_kernel {
+        gzip_kernel(&image, &out_dir.join("pocketboot-kernel.img.gz"))?
+    } else {
+        image
+    };
     write_bootimg(config, &device_config.device_path, &image, &dtb, &output)?;
 
     println!("wrote {}", output.display());
@@ -95,6 +103,19 @@ fn bootimg(args: BootImgArgs) -> Result<()> {
     println!("dtb {}", dtb.display());
     println!("config {}", device_config.device_path.display());
     Ok(())
+}
+
+fn gzip_kernel(image: &Path, output: &Path) -> Result<PathBuf> {
+    let mut source = File::open(image).map_err(|err| format!("open {}: {err}", image.display()))?;
+    let destination =
+        File::create(output).map_err(|err| format!("create {}: {err}", output.display()))?;
+    let mut encoder = GzEncoder::new(destination, Compression::best());
+    std::io::copy(&mut source, &mut encoder)
+        .map_err(|err| format!("compress {}: {err}", image.display()))?;
+    encoder
+        .finish()
+        .map_err(|err| format!("finish {}: {err}", output.display()))?;
+    Ok(output.to_path_buf())
 }
 
 fn bootimg_kernel_image(
@@ -833,6 +854,32 @@ mod tests {
     }
 
     #[test]
+    fn gzip_preserves_preboot_placement_and_runtime_padding() {
+        use std::io::Read;
+        let dir = unique_test_dir("preboot-gzip");
+        fs::create_dir_all(&dir).unwrap();
+        let mut wrapped = arm64_image(0x1000);
+        let kernel = arm64_image(0x3000);
+        append_preboot_payload(&mut wrapped, &kernel, 0x2000).unwrap();
+        let source = dir.join("Image");
+        let output = dir.join("Image.gz");
+        fs::write(&source, &wrapped).unwrap();
+        gzip_kernel(&source, &output).unwrap();
+        let first = fs::read(&output).unwrap();
+        let mut restored = Vec::new();
+        flate2::read::GzDecoder::new(first.as_slice())
+            .read_to_end(&mut restored)
+            .unwrap();
+        assert_eq!(restored, wrapped);
+        assert_eq!(restored.len(), 0x5000);
+        assert_eq!(&restored[0x2000..0x2000 + kernel.len()], kernel.as_slice());
+        assert_eq!(fs::read(&source).unwrap(), wrapped);
+        gzip_kernel(&source, &output).unwrap();
+        assert_eq!(fs::read(&output).unwrap(), first);
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
     fn samsung_a5u_eur_config_is_legacy_qcdt() {
         let config = device_bootimg_config("qcom/msm8916-samsung-a5u-eur");
 
@@ -841,6 +888,7 @@ mod tests {
         assert_eq!(config.page_size, 2048);
         assert_eq!(config.base, 0x80000000);
         assert_eq!(config.kernel_image, "Image");
+        assert!(config.gzip_kernel);
         assert_eq!(config.ramdisk_size, 1);
         assert!(config.append_seandroid_enforce);
         assert_eq!(qcdt.entries.len(), 1);

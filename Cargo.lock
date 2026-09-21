@@ -5793,6 +5793,7 @@ version = "0.1.0"
 dependencies = [
  "abootimg-oxide",
  "clap",
+ "flate2",
  "serde",
  "serde_json",
  "sha1",
