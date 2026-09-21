@@ -39,3 +39,10 @@ The September 21 A5 trial RAM-booted an equivalent compressed resident of
 about 5 MiB and repeated kexec with four CPUs online. That resident disabled
 display probing to isolate a separate blank-panel/USB failure; compression
 alone does not establish that the full A5 display path is ready for installation.
+
+The first installed trial stopped in Pocketpreboot with `bad payload`, before
+Linux started. The A5 configuration now uses the MSM8916 ARM64 load address
+`0x80080000` consistently in the Android header and preboot padding, rather
+than the ARM32 address `0x80008000`. This placement correction is awaiting
+stock-bootloader validation. Payload failures also report the running preboot
+address, expected kernel address, and observed magic on UART.
