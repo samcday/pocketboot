@@ -44,9 +44,8 @@ INPUT_PWM_VIBRA = true
 [bootimg]
 header_version = 0
 page_size = 2048
-kernel_image = "Image"
 # Compress the complete preboot + kernel payload to fit the boot partition.
-gzip_kernel = true
+kernel_image = "Image.gz"
 base = 0x80000000
 # Stock MSM8916 ABL places ARM64 images at DDR + 0x80000. lk2nd honors
 # text_offset, so keep both loaders and the preboot payload padding aligned.

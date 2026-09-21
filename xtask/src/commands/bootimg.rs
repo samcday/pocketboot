@@ -86,13 +86,7 @@ fn bootimg(args: BootImgArgs) -> Result<()> {
     } else {
         payload_image.clone()
     };
-    // Compress only after preboot placement and BSS padding are complete.
-    // The preboot wrapper itself still consumes an uncompressed ARM64 Image.
-    let image = if config.gzip_kernel {
-        gzip_kernel(&image, &out_dir.join("pocketboot-kernel.img.gz"))?
-    } else {
-        image
-    };
+    let image = finalize_kernel_image(config, &image, &out_dir)?;
     write_bootimg(config, &device_config.device_path, &image, &dtb, &output)?;
 
     println!("wrote {}", output.display());
@@ -103,6 +97,16 @@ fn bootimg(args: BootImgArgs) -> Result<()> {
     println!("dtb {}", dtb.display());
     println!("config {}", device_config.device_path.display());
     Ok(())
+}
+
+/// Apply the requested outer format after preboot placement and runtime padding.
+/// Without preboot, the selected kernel artifact already has its final format.
+fn finalize_kernel_image(config: &BootImgConfig, image: &Path, out_dir: &Path) -> Result<PathBuf> {
+    if config.preboot.is_some() && config.kernel_image == "Image.gz" {
+        gzip_kernel(image, &out_dir.join("pocketpreboot-kernel.img.gz"))
+    } else {
+        Ok(image.to_path_buf())
+    }
 }
 
 fn gzip_kernel(image: &Path, output: &Path) -> Result<PathBuf> {
@@ -126,9 +130,22 @@ fn bootimg_kernel_image(
 ) -> Result<PathBuf> {
     let mut components = Path::new(&config.kernel_image).components();
     match (components.next(), components.next()) {
-        (Some(std::path::Component::Normal(_)), None) => Ok(out_dir
-            .join(format!("arch/{arch}/boot"))
-            .join(&config.kernel_image)),
+        (Some(std::path::Component::Normal(_)), None) => {
+            let payload = if config.preboot.is_some() {
+                match config.kernel_image.as_str() {
+                    "Image" | "Image.gz" => "Image",
+                    _ => {
+                        return Err(format!(
+                            "{}: preboot requires kernel_image = Image or Image.gz",
+                            config_path.display()
+                        ));
+                    }
+                }
+            } else {
+                &config.kernel_image
+            };
+            Ok(out_dir.join(format!("arch/{arch}/boot")).join(payload))
+        }
         _ => Err(format!(
             "{}: kernel_image must be a file name under arch/{arch}/boot",
             config_path.display()
@@ -862,9 +879,16 @@ mod tests {
         let kernel = arm64_image(0x3000);
         append_preboot_payload(&mut wrapped, &kernel, 0x2000).unwrap();
         let source = dir.join("Image");
-        let output = dir.join("Image.gz");
+        let config = BootImgConfig {
+            kernel_image: "Image.gz".into(),
+            preboot: Some(PrebootConfig {
+                load_addr: 0x80080000,
+                payload_align: 0x200000,
+            }),
+            ..Default::default()
+        };
         fs::write(&source, &wrapped).unwrap();
-        gzip_kernel(&source, &output).unwrap();
+        let output = finalize_kernel_image(&config, &source, &dir).unwrap();
         let first = fs::read(&output).unwrap();
         let mut restored = Vec::new();
         flate2::read::GzDecoder::new(first.as_slice())
@@ -874,8 +898,72 @@ mod tests {
         assert_eq!(restored.len(), 0x5000);
         assert_eq!(&restored[0x2000..0x2000 + kernel.len()], kernel.as_slice());
         assert_eq!(fs::read(&source).unwrap(), wrapped);
-        gzip_kernel(&source, &output).unwrap();
+        finalize_kernel_image(&config, &source, &dir).unwrap();
         assert_eq!(fs::read(&output).unwrap(), first);
+
+        let dtb = dir.join("test.dtb");
+        fs::write(&dtb, b"dtb").unwrap();
+        let boot = dir.join("boot.img");
+        write_bootimg_v0(&config, Path::new("test.toml"), &output, &dtb, &boot).unwrap();
+        let android = fs::read(&boot).unwrap();
+        assert_eq!(u32_at(&android, 8) as usize, first.len());
+        let start = config.page_size as usize;
+        assert_eq!(&android[start..start + first.len()], first.as_slice());
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn preboot_always_selects_uncompressed_payload() {
+        let out = Path::new("kernel-output");
+        let mut config = device_bootimg_config("qcom/msm8916-samsung-a5u-eur");
+        for format in ["Image", "Image.gz"] {
+            config.kernel_image = format.into();
+            assert_eq!(
+                bootimg_kernel_image(&config, Path::new("test.toml"), out, "arm64").unwrap(),
+                out.join("arch/arm64/boot/Image")
+            );
+        }
+        for unsupported in ["Image.lz4", "zImage", "../Image", "/Image"] {
+            config.kernel_image = unsupported.into();
+            assert!(bootimg_kernel_image(&config, Path::new("test.toml"), out, "arm64").is_err());
+        }
+    }
+
+    #[test]
+    fn uncompressed_preboot_envelope_is_preserved() {
+        let dir = unique_test_dir("preboot-raw");
+        fs::create_dir_all(&dir).unwrap();
+        let source = dir.join("pocketpreboot-kernel.img");
+        let mut wrapped = arm64_image(0x1000);
+        append_preboot_payload(&mut wrapped, &arm64_image(0x3000), 0x2000).unwrap();
+        fs::write(&source, &wrapped).unwrap();
+        let config = device_bootimg_config("exynos/exynos7870-j7xelte");
+        assert_eq!(
+            finalize_kernel_image(&config, &source, &dir).unwrap(),
+            source
+        );
+        assert_eq!(fs::read(&source).unwrap(), wrapped);
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn non_preboot_kernel_formats_are_passed_through() {
+        let dir = unique_test_dir("kernel-format-passthrough");
+        fs::create_dir_all(dir.join("arch/arm64/boot")).unwrap();
+        for format in ["Image", "Image.gz", "zImage"] {
+            let config = BootImgConfig {
+                kernel_image: format.into(),
+                ..Default::default()
+            };
+            let expected = dir.join("arch/arm64/boot").join(format);
+            let selected =
+                bootimg_kernel_image(&config, Path::new("test.toml"), &dir, "arm64").unwrap();
+            assert_eq!(selected, expected);
+            fs::write(&selected, b"already formatted kernel").unwrap();
+            let finalized = finalize_kernel_image(&config, &selected, &dir).unwrap();
+            assert_eq!(finalized, selected);
+            assert_eq!(fs::read(finalized).unwrap(), b"already formatted kernel");
+        }
         fs::remove_dir_all(dir).unwrap();
     }
 
@@ -896,8 +984,7 @@ mod tests {
             preboot_payload_offset(preboot.load_addr, 0x8f000, preboot.payload_align).unwrap(),
             0x180000
         );
-        assert_eq!(config.kernel_image, "Image");
-        assert!(config.gzip_kernel);
+        assert_eq!(config.kernel_image, "Image.gz");
         assert_eq!(config.ramdisk_size, 1);
         assert!(config.append_seandroid_enforce);
         assert_eq!(qcdt.entries.len(), 1);
