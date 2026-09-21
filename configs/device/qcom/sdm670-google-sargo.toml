@@ -1,5 +1,8 @@
 name = "Google Pixel 3a (sargo)"
 
+[features]
+blob-wrangler = true
+
 [kconfig]
 # Buttons and touchscreen input
 RMI4_CORE = true
