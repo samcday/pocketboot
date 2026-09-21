@@ -78,6 +78,16 @@ pub extern "C" fn pocketpreboot_main(fdt: usize) -> ! {
     let payload = payload_entry();
     if read32(payload + ARM64_IMAGE_MAGIC_OFFSET) != ARM64_IMAGE_MAGIC {
         soc::uart::writeln("\r\npocketpreboot: bad payload\r\n");
+        for (label, value) in [
+            ("preboot base", _start as *const () as usize as u64),
+            ("payload address", payload as u64),
+            (
+                "payload magic",
+                read32(payload + ARM64_IMAGE_MAGIC_OFFSET) as u64,
+            ),
+        ] {
+            log_hex(label, value);
+        }
         halt();
     }
     let payload_size = read64(payload + ARM64_IMAGE_SIZE_OFFSET) as usize;
@@ -103,15 +113,20 @@ fn panic(_info: &PanicInfo<'_>) -> ! {
 pub extern "C" fn pocketpreboot_exception(esr: u64, elr: u64, far: u64, el: u64) -> ! {
     soc::uart::writeln("pocketpreboot: exception");
     for (label, value) in [("CurrentEL", el), ("ESR", esr), ("ELR", elr), ("FAR", far)] {
-        let mut hex = [b'0'; 18];
-        hex[1] = b'x';
-        for index in 0..16 {
-            hex[index + 2] = b"0123456789abcdef"[((value >> ((15 - index) * 4)) & 15) as usize];
-        }
-        soc::uart::writeln(label);
-        soc::uart::writeln(unsafe { core::str::from_utf8_unchecked(&hex) });
+        log_hex(label, value);
     }
     halt()
+}
+
+#[cfg(target_os = "none")]
+fn log_hex(label: &str, value: u64) {
+    let mut hex = [b'0'; 18];
+    hex[1] = b'x';
+    for index in 0..16 {
+        hex[index + 2] = b"0123456789abcdef"[((value >> ((15 - index) * 4)) & 15) as usize];
+    }
+    soc::uart::writeln(label);
+    soc::uart::writeln(unsafe { core::str::from_utf8_unchecked(&hex) });
 }
 
 #[cfg(target_os = "none")]

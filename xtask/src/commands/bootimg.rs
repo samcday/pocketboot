@@ -765,7 +765,7 @@ mod tests {
     fn preboot_header_keeps_payload_at_expected_address_for_arm64_loaders() {
         // lk2nd normalizes to a 2 MiB base before adding the Image text_offset.
         // The A5 previously advertised zero, moving its payload 32 KiB early.
-        for load_addr in [0x8000_8000u64, 0x8000_0000, 0x4008_0000] {
+        for load_addr in [0x8000_8000u64, 0x8008_0000, 0x8000_0000, 0x4008_0000] {
             let mut shim = arm64_image(0x8f000);
             set_preboot_text_offset(&mut shim, load_addr).unwrap();
             let offset = u64::from_le_bytes(shim[8..16].try_into().unwrap());
@@ -887,6 +887,15 @@ mod tests {
         assert_eq!(config.header_version, 0);
         assert_eq!(config.page_size, 2048);
         assert_eq!(config.base, 0x80000000);
+        // Stock MSM8916 ABL forces this address for an ARM64 payload.
+        let stock_arm64_load = 0x80080000;
+        assert_eq!(config.base + config.kernel_offset, stock_arm64_load);
+        let preboot = config.preboot.as_ref().unwrap();
+        assert_eq!(preboot.load_addr, stock_arm64_load);
+        assert_eq!(
+            preboot_payload_offset(preboot.load_addr, 0x8f000, preboot.payload_align).unwrap(),
+            0x180000
+        );
         assert_eq!(config.kernel_image, "Image");
         assert!(config.gzip_kernel);
         assert_eq!(config.ramdisk_size, 1);

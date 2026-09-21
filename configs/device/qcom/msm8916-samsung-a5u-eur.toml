@@ -48,7 +48,9 @@ kernel_image = "Image"
 # Compress the complete preboot + kernel payload to fit the boot partition.
 gzip_kernel = true
 base = 0x80000000
-kernel_offset = 0x00008000
+# Stock MSM8916 ABL places ARM64 images at DDR + 0x80000. lk2nd honors
+# text_offset, so keep both loaders and the preboot payload padding aligned.
+kernel_offset = 0x00080000
 ramdisk_offset = 0x01000000
 second_offset = 0x00f00000
 tags_offset = 0x00000100
@@ -58,7 +60,7 @@ append_seandroid_enforce = true
 cmdline = "msm.skip_gpu=1 msm.separate_gpu_kms=1"
 
 [bootimg.preboot]
-load_addr = 0x80008000
+load_addr = 0x80080000
 payload_align = 0x200000
 
 [bootimg.qcdt]
