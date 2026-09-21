@@ -27,13 +27,15 @@ Dev docs will be forthcoming. For now, ask your favourite clanker for an explana
 
 ## A5 boot-image size
 
-Samsung A5U uses `gzip_kernel = true` in its `[bootimg]` configuration. The
+Samsung A5U uses `kernel_image = "Image.gz"` in its `[bootimg]` configuration. The
 builder first places Pocketpreboot and the uncompressed kernel, including the
 kernel's complete runtime footprint, then gzip-compresses that combined
 payload before writing the Android image. This keeps the boot image within the
 A5's 13 MiB partition without changing the preboot placement contract. The
-option defaults to false for other devices; compression uses no filename or
-timestamp metadata.
+preboot payload is always the uncompressed `Image`; `kernel_image = "Image"`
+keeps the completed envelope uncompressed, while `"Image.gz"` compresses it.
+Without preboot, `kernel_image` continues to select the existing kernel artifact.
+Compression uses no filename or timestamp metadata.
 
 The September 21 A5 trial RAM-booted an equivalent compressed resident of
 about 5 MiB and repeated kexec with four CPUs online. That resident disabled

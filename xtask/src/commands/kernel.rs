@@ -311,7 +311,11 @@ fn write_bootimg_kernel_artifact(
     let Some(config) = config else {
         return Ok(());
     };
-    if config.kernel_image != "Image.gz" || target.image_make_target != "Image" {
+    // Preboot chains Image directly; bootimg compresses the completed envelope.
+    if config.preboot.is_some()
+        || config.kernel_image != "Image.gz"
+        || target.image_make_target != "Image"
+    {
         return Ok(());
     }
 
