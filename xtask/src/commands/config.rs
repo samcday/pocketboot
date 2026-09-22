@@ -756,7 +756,7 @@ mod tests {
     }
 
     #[test]
-    fn a5u_enables_firmware_independent_mdp5_kms() {
+    fn a5u_enables_native_mdp5_kms() {
         let workspace_root = super::super::workspace_root().unwrap();
         let device = KernelDevice::parse("qcom/msm8916-samsung-a5u-eur").unwrap();
         let config = load_device_config(&workspace_root, &device).unwrap();
@@ -783,25 +783,23 @@ mod tests {
     }
 
     #[test]
-    fn a5u_overlay_keeps_display_and_gpu_isolation_boundaries() {
+    fn a5u_overlay_keeps_display_and_gpu_enabled() {
         let workspace_root = super::super::workspace_root().unwrap();
         let overlay = fs::read_to_string(
             workspace_root.join("configs/dt-overlays/qcom/msm8916-samsung-a5u-eur.dtso"),
         )
         .unwrap();
 
-        for enabled_path in ["/soc@0/display-subsystem@1a00000", "/soc@0/iommu@1ef0000"] {
+        for enabled_path in [
+            "/soc@0/display-subsystem@1a00000",
+            "/soc@0/iommu@1ef0000",
+            "/soc@0/iommu@1f08000",
+            "/soc@0/gpu@1c00000",
+        ] {
             // A child secure-context override does not disable the parent IOMMU.
             assert!(
                 !overlay.contains(&format!("&{{{enabled_path}}}")),
                 "display path must no longer be disabled: {enabled_path}"
-            );
-        }
-        for disabled_path in ["/soc@0/iommu@1f08000", "/soc@0/gpu@1c00000"] {
-            let fragment = format!("&{{{disabled_path}}} {{\n\tstatus = \"disabled\";\n}};");
-            assert!(
-                overlay.contains(&fragment),
-                "GPU isolation path must remain disabled: {disabled_path}"
             );
         }
     }

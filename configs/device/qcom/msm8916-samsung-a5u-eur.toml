@@ -4,8 +4,7 @@ name = "Samsung Galaxy A5U (EUR)"
 # Keep the last console available through lk2nd after a failed handoff.
 PSTORE_CONSOLE = true
 
-# Firmware-independent MDP5/DSI display bring-up. Keep the GPU isolated while
-# exercising the KMS path; the panel driver is generated in the MSM8916 tree.
+# Native MDP5/DSI display; the panel driver is generated in the MSM8916 tree.
 DRM_SIMPLEDRM = false
 IOMMU_SUPPORT = true
 QCOM_IOMMU = true
@@ -56,7 +55,6 @@ tags_offset = 0x00000100
 dtb_offset = 0x0
 ramdisk_size = 1
 append_seandroid_enforce = true
-cmdline = "msm.skip_gpu=1 msm.separate_gpu_kms=1"
 
 [bootimg.preboot]
 load_addr = 0x80080000
