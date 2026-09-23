@@ -25,6 +25,14 @@ const SPIN_TABLE_ENTRY_EL_OFFSET: usize = 0x48;
 const SPIN_TABLE_CPUECTLR_OFFSET: usize = 0x50;
 const SPIN_TABLE_DIAG_TAG_OFFSET: usize = 0xb0;
 const SPIN_TABLE_DIAG_TAG: &[u8] = b"PBSDIAG1";
+
+const APCS_CPU_PWR_CTL: usize = 0x04;
+const CORE_PWRD_UP: u32 = 1 << 7;
+const COREPOR_RST: u32 = 1 << 5;
+const CORE_RST: u32 = 1 << 4;
+const CORE_MEM_HS: u32 = 1 << 3;
+const CORE_MEM_CLAMP: u32 = 1 << 1;
+const CLAMP: u32 = 1 << 0;
 const CPUECTLR_SMPEN: u64 = 1 << 6;
 const STARTUP_TIMEOUT_US: u64 = 1_000_000;
 
@@ -192,7 +200,7 @@ fn prepare_fdt_inner(fdt: usize, payload: usize, payload_size: usize) -> Result<
     }
 
     uart::writeln("msm8916: install resident code");
-    init_spin_table(spin_table)?;
+    init_spin_table(spin_table, &cpus)?;
     uart::writeln("msm8916: configure SCM entry");
     scm::set_boot_addr_mc(
         spin_table.code_addr(),
@@ -336,7 +344,7 @@ impl Error {
             Self::Scm => "scm call failed or unsupported convention",
             Self::EntryState => "requires CPU0 at EL1/EL2 with MMU and D-cache off",
             Self::OccupiedSpinTable => {
-                "spin-table already occupied; refusing to overwrite resident code"
+                "spin-table occupied while a secondary is out of reset; refusing to overwrite resident code"
             }
             Self::UnparkedResident => "resident CPUs have not acknowledged a safe handoff",
             Self::Coherency => "firmware did not enable Cortex-A53 SMPEN coherency",
@@ -696,13 +704,43 @@ fn validate_parked_slots(
     Ok(())
 }
 
-fn init_spin_table(spin_table: SpinTable) -> Result<()> {
+/// A secondary held in reset cannot fetch from the resident page, whatever the
+/// page contains. Cores started by an lk2nd trampoline, parked in resident
+/// code or running a kernel all report CORE_PWRD_UP with reset released.
+fn secondaries_held_in_reset(cpus: &[CpuInfo], mut read: impl FnMut(usize) -> u32) -> bool {
+    cpus.iter().filter(|cpu| cpu.reg != 0).all(|cpu| {
+        if cpu.acc_base == 0 {
+            return false;
+        }
+        let ctl = read(cpu.acc_base as usize + APCS_CPU_PWR_CTL);
+        ctl & (CORE_RST | COREPOR_RST) != 0 && ctl & CORE_PWRD_UP == 0
+    })
+}
+
+fn report_secondary_power(cpus: &[CpuInfo]) {
+    for cpu in cpus.iter().filter(|cpu| cpu.reg != 0) {
+        uart::write_str("msm8916: cpu");
+        uart::write_hex64(cpu.reg as u64);
+        uart::write_str(" PWR_CTL=");
+        uart::write_hex64(read32(cpu.acc_base as usize + APCS_CPU_PWR_CTL) as u64);
+        uart::writeln("");
+    }
+}
+
+fn init_spin_table(spin_table: SpinTable, cpus: &CpuList) -> Result<()> {
     let table = spin_table.addr as *mut u8;
-    // lk2nd can already have CPUs executing its own spin-table. Even our own
-    // descriptor may denote live code from an earlier kernel; never replace it.
+    // DRAM largely survives a firmware reset, so this is usually our own page
+    // from the previous boot. The contents cannot show whether it is live, but
+    // ACC can: reclaim only while every secondary is held in reset. This runs
+    // before boot_cortex_a53() asserts reset itself, so a live core is refused
+    // rather than yanked out of whatever it is executing.
     let prefix = unsafe { slice::from_raw_parts(table, 0xb0) };
     if occupied_prefix(prefix) {
-        return Err(Error::OccupiedSpinTable);
+        report_secondary_power(cpus.as_slice());
+        if !secondaries_held_in_reset(cpus.as_slice(), read32) {
+            return Err(Error::OccupiedSpinTable);
+        }
+        uart::writeln("msm8916: reclaiming occupied page; secondaries held in reset");
     }
     let image = resident_image();
     if image.len() < SPIN_TABLE_ENTRY_OFFSET || image.len() > SPIN_TABLE_SLOTS_OFFSET {
@@ -741,14 +779,6 @@ fn resident_image() -> &'static [u8] {
 }
 
 fn boot_cortex_a53(acc_base: usize) {
-    const APCS_CPU_PWR_CTL: usize = 0x04;
-    const CORE_PWRD_UP: u32 = 1 << 7;
-    const COREPOR_RST: u32 = 1 << 5;
-    const CORE_RST: u32 = 1 << 4;
-    const CORE_MEM_HS: u32 = 1 << 3;
-    const CORE_MEM_CLAMP: u32 = 1 << 1;
-    const CLAMP: u32 = 1 << 0;
-
     const APC_PWR_GATE_CTL: usize = 0x14;
     const GDHS_CNT_SHIFT: u32 = 24;
     const GDHS_EN: u32 = 1 << 0;
@@ -1680,6 +1710,73 @@ mod tests {
             patched.prop_str(idle, b"compatible").unwrap(),
             b"arm,idle-state"
         );
+    }
+
+    #[test]
+    fn detects_retained_page_with_rotted_legacy_tag() {
+        // A5U readback after a warm reset: one bit flipped in "spin-tab",
+        // "PBSPIN01" intact. The ABI tag alone still marks the page occupied.
+        let mut prefix = [0u8; 0xb0];
+        prefix[..4].copy_from_slice(&0x14000040u32.to_le_bytes());
+        prefix[0x80..0x88].copy_from_slice(&0x6261742d6e697053u64.to_le_bytes());
+        prefix[0x90..0x98].copy_from_slice(b"PBSPIN01");
+        assert_eq!(&prefix[0x80..0x88], b"Spin-tab");
+        assert!(occupied_prefix(&prefix));
+        assert!(validate_resident_descriptor(&prefix).is_err());
+        assert!(!occupied_prefix(&[0u8; 0xb0]));
+    }
+
+    #[test]
+    fn reclaims_only_while_every_secondary_is_held_in_reset() {
+        let cpus: [CpuInfo; MAX_CPUS] = core::array::from_fn(|reg| CpuInfo {
+            reg: reg as u32,
+            acc_base: 0x0b08_8000 + reg as u64 * 0x10000,
+        });
+        let held = |pwr_ctl: [u32; MAX_CPUS]| {
+            secondaries_held_in_reset(&cpus, |address| {
+                pwr_ctl[(address - 0x0b08_8000 - APCS_CPU_PWR_CTL) / 0x10000]
+            })
+        };
+        let running = CORE_PWRD_UP | CORE_MEM_HS;
+        let firmware_reset = COREPOR_RST | CORE_MEM_CLAMP | CLAMP;
+        let preboot_reset = CORE_RST | COREPOR_RST | CORE_MEM_CLAMP | CLAMP;
+
+        // A5U after a warm reset reads 0x88 for CPU0 and 0x23 for the others.
+        assert_eq!(running, 0x88);
+        assert_eq!(firmware_reset, 0x23);
+        assert!(held([
+            running,
+            firmware_reset,
+            firmware_reset,
+            firmware_reset
+        ]));
+        assert!(held([
+            running,
+            preboot_reset,
+            firmware_reset,
+            preboot_reset
+        ]));
+        // CPU0 is the caller; its own state is irrelevant.
+        assert!(held([0, firmware_reset, firmware_reset, firmware_reset]));
+
+        // Parked in resident code, or released into a kernel.
+        assert!(!held([running, firmware_reset, running, firmware_reset]));
+        // Reset released without power-up is not a reset state.
+        assert!(!held([running, firmware_reset, firmware_reset, 0]));
+        // Inconsistent reset plus power-up is refused.
+        assert!(!held([
+            running,
+            firmware_reset,
+            firmware_reset,
+            firmware_reset | CORE_PWRD_UP
+        ]));
+
+        // Resident-mode entries carry no ACC and can never be reclaimed.
+        let resident: [CpuInfo; MAX_CPUS] = core::array::from_fn(|reg| CpuInfo {
+            reg: reg as u32,
+            acc_base: 0,
+        });
+        assert!(!secondaries_held_in_reset(&resident, |_| unreachable!()));
     }
 
     fn replace_prop(dtb: &mut [u8], path: &[u8], name: &[u8], replacement: &[u8]) {
