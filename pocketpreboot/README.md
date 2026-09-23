@@ -21,9 +21,10 @@ then changes every CPU to `spin-table` before entering Linux.
 The custom input method prevents lk2nd's automatic SMP spin-table setup from
 starting the secondaries first. Local lk2nd checks for `psci` or `spin-table` in
 `lk2nd/smp/spin-table/spin-table.c:check_cpus()`. Do not combine this image with
-`lk2nd.spin-table=force`, which bypasses that check. An occupied page is always
-rejected on the cold startup path. Preboot never overwrites possibly executing
-resident code.
+`lk2nd.spin-table=force`, which bypasses that check. The cold startup path
+rejects an occupied page unless ACC shows every secondary held in reset, as
+after a firmware reset that left DRAM intact. Preboot never overwrites possibly
+executing resident code.
 
 A packaged image entered through kexec can reuse the page. This requires all
 four incoming CPU nodes to use `spin-table` with their exact v1 release slots,

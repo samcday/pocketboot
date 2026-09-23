@@ -75,9 +75,9 @@ interface bypasses the serial SysRq mask in this kernel. `/proc/sys/kernel`
 controls are unavailable in this small config, so the command line is the
 source of the panic timeout.
 
-The resident spin-table page may survive a firmware reset. This does not
-constitute a valid preboot re-entry: the raw-startup guard intentionally rejects
-an intact occupied page. The logged lab restarts retired stale signatures only
-after verifying firmware reset, device identity, the exact owned descriptor,
-and secondary ACC reset/clamp state. Do not treat log collection as authority
-to clear arbitrary resident memory.
+The resident spin-table page may survive a firmware reset, usually with sparse
+bit flips. This is not a valid preboot re-entry. Earlier shims refused any page
+whose `spin-tab` or `PBSPIN` marker survived intact, which left the A5 unable
+to boot until the signatures were retired over lk2nd. Cold startup now
+reclaims such a page once ACC shows every secondary held in reset. Do not
+treat log collection as authority to clear arbitrary resident memory.

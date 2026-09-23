@@ -23,8 +23,9 @@ The later A5 USB/IOMMU patches were not revalidated on DB410c or wider MSM hardw
 
 V1 requires four Cortex-A53 CPUs, EL1 kernel entry, 4 KiB pages, CPU0 for reboot
 and firmware-established SMPEN. Ordinary hotplug, crash kexec and EL2 parking
-are unsupported. A firmware reset with an occupied resident page is not a valid
-preboot re-entry. The uncompressed A5 image exceeds its 13 MiB boot partition;
+are unsupported. A firmware reset is not a valid preboot re-entry; cold startup
+reclaims a retained resident page only while ACC holds every secondary in
+reset. The uncompressed A5 image exceeds its 13 MiB boot partition;
 the recorded tests used temporary boot/kexec.
 
 ## Lessons retained from bring-up
@@ -37,7 +38,8 @@ the recorded tests used temporary boot/kexec.
   and generated memory routines may need FP/SIMD enabled before Rust entry.
 - **CPU ownership:** an online mask is insufficient evidence. Measure useful
   work on each core and shared-memory transfers. Acknowledge parking from the
-  resident code; never overwrite an occupied page to make a retry proceed.
+  resident code; never overwrite an occupied page a secondary could still
+  execute. ACC reset state, not the page contents, decides that.
 - **Coherency:** preserve firmware SMPEN and shared L2 while cleaning the
   departing core's private L1. QEMU exercised refusal when SMPEN was clear;
   the positive coherency evidence comes from hardware.

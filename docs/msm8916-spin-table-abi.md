@@ -53,9 +53,11 @@ are little-endian; FDT integers remain big-endian.
 | slot + `0x50` | Optional u64 raw `CPUECTLR_EL1`, valid only with `PBSDIAG1` |
 
 Request/release and acknowledgement occupy separate 64-byte Cortex-A53 cache
-lines. The legacy marker does not make an occupied lk2nd trampoline safe to
-overwrite. Initially pocketpreboot must refuse an occupied or unrecognized
-legacy table; safe migration/reuse requires its own demonstrated protocol.
+lines. Neither marker makes an occupied page safe to overwrite: an lk2nd
+trampoline or parked resident CPUs may be executing it. Cold startup reclaims
+an occupied page only while every secondary's `APCS_CPU_PWR_CTL` shows reset
+asserted and `CORE_PWRD_UP` clear, and refuses otherwise. Page contents are
+not trusted either way; reuse without reset requires the handoff below.
 Neither an outgoing nor incoming kernel writes the resident code.
 
 `PBSDIAG1` is an optional extension in previously unused space; the v1 geometry
@@ -107,5 +109,6 @@ unknown descriptors, active release slots and stale acknowledgments are errors.
 
 This path validates and rewrites the destination FDT but leaves the resident
 page untouched and does not call SCM or access ACC. A raw-start input following
-a bootloader reset is not equivalent to this explicit acknowledged handoff;
-an occupied page still causes cold startup to stop.
+a bootloader reset is not equivalent to this explicit acknowledged handoff.
+DRAM largely survives such a reset, so cold startup often finds its previous
+page intact and reclaims it under the ACC rule above.
