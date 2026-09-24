@@ -51,6 +51,7 @@ on Samsung A5U:
 | `0004` | Ignore disabled secure IOMMU contexts when deciding whether to allocate a firmware-owned page table. The A5 overlay disables unused camera/video contexts and retains non-secure display. |
 | `0005` | Correct the inverted fault-handler result check so unhandled IOMMU faults are logged. |
 | `0006` | Invalidate the newly programmed IOMMU context and synchronize completion, discarding translations retained across kexec. |
+| `0007` | Hand the apps IOMMU a fixed, no-map secure page-table region so the firmware-owned table keeps its physical address across kexec; a second init rejected with `-EINVAL`/`-EPERM` is treated as already initialised. APQ8016 SBC reserves 124 KiB at `0x854e0000`. |
 
 These later patches were tested on A5U. They are not part of the earlier DB410c
 hardware run; wider MSM device coverage remains open. The A5 final build passes
@@ -63,7 +64,7 @@ for the distinction between software checks and physical screen confirmation.
 
 The [validation summary](../../../docs/msm8916-validation.md) records the
 hardware matrix, limitations, build/test commands and complete archived evidence.
-All six patches apply to the pristine pinned kernel; the original PR's full
+All seven patches apply to the pristine pinned kernel; the original PR's full
 CI device matrix passed. Changed kernel objects were also compiled with
 parking enabled and disabled during bring-up.
 

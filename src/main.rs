@@ -23,6 +23,7 @@ mod pe;
 mod power;
 #[cfg(feature = "qemu")]
 mod qemu;
+mod quiesce;
 mod reaper;
 mod runtime;
 mod settle;
@@ -129,7 +130,7 @@ async fn run() -> Result<()> {
     spawn_boot_discovery(event_tx.clone());
     drop(event_tx);
 
-    run_boot_coordinator(ui.as_ref(), event_rx).await?;
+    run_boot_coordinator(ui, event_rx).await?;
     Ok(())
 }
 
@@ -205,7 +206,7 @@ fn spawn_boot_discovery(event_tx: async_channel::Sender<CoordinatorEvent>) {
 }
 
 async fn run_boot_coordinator(
-    ui: Option<&ui::Handle>,
+    mut ui: Option<ui::Handle>,
     events: async_channel::Receiver<CoordinatorEvent>,
 ) -> Result<()> {
     let mut boot_entries: Vec<bootflow::BootEntry> = Vec::new();
@@ -231,18 +232,21 @@ async fn run_boot_coordinator(
                     source = %entry.source.display(),
                     "booting UI-selected entry"
                 );
+                stop_ui(&mut ui);
                 return boot_discovered_entry(entry);
             }
             CoordinatorEvent::Fastboot(result) => {
                 let action = result?;
                 if let Some(action) = action {
                     tracing::info!("running fastboot post-response action");
+                    stop_ui(&mut ui);
                     action()
                         .map_err(|err| format!("fastboot post-response action failed: {err}"))?;
                     return Ok(());
                 }
 
                 if discovery_complete {
+                    stop_ui(&mut ui);
                     boot_default_entry(&boot_entries)?;
                     return Ok(());
                 }
@@ -252,7 +256,7 @@ async fn run_boot_coordinator(
             }
             CoordinatorEvent::DiscoveryUpdate(entries) => {
                 apply_boot_entries_update(
-                    ui,
+                    ui.as_ref(),
                     &mut boot_entries,
                     &mut bootable_entry_indices,
                     entries,
@@ -262,19 +266,26 @@ async fn run_boot_coordinator(
             CoordinatorEvent::DiscoveryComplete(entries) => {
                 discovery_complete = true;
                 apply_boot_entries_update(
-                    ui,
+                    ui.as_ref(),
                     &mut boot_entries,
                     &mut bootable_entry_indices,
                     entries,
                     true,
                 );
                 if fastboot_requested_default {
+                    stop_ui(&mut ui);
                     boot_default_entry(&boot_entries)?;
                     return Ok(());
                 }
                 tracing::info!("boot discovery complete; holding for fastboot or UI selection");
             }
         }
+    }
+}
+
+fn stop_ui(ui: &mut Option<ui::Handle>) {
+    if let Some(handle) = ui.take() {
+        handle.stop_and_join();
     }
 }
 
