@@ -751,6 +751,10 @@ mod tests {
             if device_id == "qemu/aarch64-virt" {
                 assert!(config.features.contains("qemu"));
                 assert!(kconfig.contains("CONFIG_USBIP_VUDC=y"));
+                // merge_config.sh -s aborts on KEYBOARD_GPIO without GPIOLIB.
+                assert!(!kconfig.contains("CONFIG_KEYBOARD_GPIO"));
+            } else {
+                assert!(kconfig.contains("CONFIG_KEYBOARD_GPIO=y\n"));
             }
         }
     }
