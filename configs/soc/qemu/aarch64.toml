@@ -9,3 +9,6 @@ SERIAL_AMBA_PL011_CONSOLE = true
 # Virtio MMIO transport used by the arm64 `virt` machine.
 VIRTIO_MENU = true
 VIRTIO_MMIO = true
+
+# The baseline's gpio-keys driver depends on GPIOLIB, which this machine never enables.
+KEYBOARD_GPIO = "omit"
