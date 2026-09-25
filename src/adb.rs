@@ -20,7 +20,7 @@ use std::{
         mpsc,
     },
     thread,
-    time::Duration,
+    time::{Duration, Instant},
 };
 
 use gadgetry_most_foul::{
@@ -52,6 +52,10 @@ const SYNC_CHUNK: usize = 64 * 1024;
 const READ_TIMEOUT: Duration = Duration::from_millis(500);
 const TRANSFER_TIMEOUT: Duration = Duration::from_secs(30);
 const DISCONNECT_RETRY_DELAY: Duration = Duration::from_millis(250);
+const EXEC_CLOSE_POLL: Duration = Duration::from_millis(100);
+const DETACHED_OUTPUT_LIMIT: usize = 4 * 1024 * 1024;
+const DETACHED_OUTPUT_TIME: Duration = Duration::from_secs(60);
+const DETACHED_EXIT_GRACE: Duration = Duration::from_secs(10);
 const SHELL: &str = "/bin/sh";
 const SHELL_SERVICE: &str = "shell:";
 const EXEC_SERVICE: &str = "exec:";
@@ -171,7 +175,14 @@ pub(crate) struct AdbServer {
     writer: PacketWriter,
     stop: Arc<AtomicBool>,
     sessions: HashMap<u32, AdbSession>,
+    detached: Vec<DetachedCommand>,
     next_local_id: u32,
+}
+
+/// An exec command the host closed, left to run on until it exits.
+struct DetachedCommand {
+    pid: u32,
+    running: Arc<AtomicBool>,
 }
 
 impl AdbServer {
@@ -181,6 +192,7 @@ impl AdbServer {
             writer: PacketWriter::new(tx),
             stop: Arc::new(AtomicBool::new(false)),
             sessions: HashMap::new(),
+            detached: Vec::new(),
             next_local_id: 1,
         }
     }
@@ -233,8 +245,44 @@ impl AdbServer {
         }
 
         self.sessions.clear();
+        self.wait_for_detached_commands();
         tracing::info!("adb server stopped");
         Ok(())
+    }
+
+    /// The server stops ahead of a fastboot reboot or boot, so give commands
+    /// the host already closed (dd still writing the tail of an image) a
+    /// bounded time to finish first.
+    fn wait_for_detached_commands(&mut self) {
+        self.prune_detached_commands();
+        if self.detached.is_empty() {
+            return;
+        }
+        tracing::info!(
+            pids = ?self.detached_pids(),
+            "waiting for adb exec commands closed by the host"
+        );
+        let deadline = Instant::now() + DETACHED_EXIT_GRACE;
+        while Instant::now() < deadline {
+            thread::sleep(EXEC_CLOSE_POLL);
+            self.prune_detached_commands();
+            if self.detached.is_empty() {
+                return;
+            }
+        }
+        tracing::warn!(
+            pids = ?self.detached_pids(),
+            "continuing with adb exec commands closed by the host still running"
+        );
+    }
+
+    fn prune_detached_commands(&mut self) {
+        self.detached
+            .retain(|command| command.running.load(Ordering::Acquire));
+    }
+
+    fn detached_pids(&self) -> Vec<u32> {
+        self.detached.iter().map(|command| command.pid).collect()
     }
 
     fn read_packet(&mut self) -> io::Result<Packet> {
@@ -404,6 +452,13 @@ impl AdbServer {
                 kind = session.kind(),
                 "adb stream closed by host"
             );
+            if let AdbSession::Exec(exec) = &session {
+                self.prune_detached_commands();
+                self.detached.push(DetachedCommand {
+                    pid: exec.child_pid,
+                    running: exec.child_running.clone(),
+                });
+            }
             session.close_from_host(&self.writer)?;
         }
         Ok(())
@@ -418,14 +473,24 @@ impl AdbServer {
 
 #[derive(Clone)]
 struct PacketWriter {
-    tx: Arc<Mutex<EndpointIn>>,
+    tx: Arc<Mutex<PacketSink>>,
     max_payload: Arc<AtomicU32>,
+}
+
+enum PacketSink {
+    Usb(EndpointIn),
+    #[cfg(test)]
+    Recorded(Vec<Packet>),
 }
 
 impl PacketWriter {
     fn new(tx: EndpointIn) -> Self {
+        Self::with_sink(PacketSink::Usb(tx))
+    }
+
+    fn with_sink(sink: PacketSink) -> Self {
         Self {
-            tx: Arc::new(Mutex::new(tx)),
+            tx: Arc::new(Mutex::new(sink)),
             max_payload: Arc::new(AtomicU32::new(MAX_PAYLOAD)),
         }
     }
@@ -452,13 +517,19 @@ impl PacketWriter {
 
         let packet = Packet::new(command, arg0, arg1, payload)?;
         let header = packet.message.encode();
-        let mut tx = self
+        let mut sink = self
             .tx
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner());
-        tx.write_all_timeout(&header, TRANSFER_TIMEOUT)?;
-        if !packet.payload.is_empty() {
-            tx.write_all_timeout(&packet.payload, TRANSFER_TIMEOUT)?;
+        match &mut *sink {
+            PacketSink::Usb(tx) => {
+                tx.write_all_timeout(&header, TRANSFER_TIMEOUT)?;
+                if !packet.payload.is_empty() {
+                    tx.write_all_timeout(&packet.payload, TRANSFER_TIMEOUT)?;
+                }
+            }
+            #[cfg(test)]
+            PacketSink::Recorded(packets) => packets.push(packet),
         }
         tracing::debug!(
             command = command_name(command),
@@ -704,8 +775,16 @@ impl RawCommandSession {
     }
 
     fn close_from_host(&mut self, writer: &PacketWriter) -> io::Result<()> {
-        let send_close = self.close();
-        if send_close {
+        // Like adbd's raw exec service, a host close only ends the input:
+        // `adb exec-in` closes right after its last write, while the tail can
+        // still sit in the stdin pipe. The detached output thread discards
+        // further output and reaps the command when it exits. Like adbd, there
+        // is no kill deadline: a slow tail (dd conv=fsync onto eMMC) could
+        // outlast any timeout.
+        self.stdin.take();
+        self.output_thread.take();
+        tracing::debug!(pid = self.child_pid, "adb exec input closed by host");
+        if self.output.detach() {
             writer.send(A_CLSE, self.local_id, self.remote_id, &[])?;
         }
         Ok(())
@@ -730,11 +809,13 @@ impl RawCommandSession {
 
 impl Drop for RawCommandSession {
     fn drop(&mut self) {
+        // close_from_host already detached the command; leave it running.
+        let Some(thread) = self.output_thread.take() else {
+            return;
+        };
         self.close();
-        if let Some(thread) = self.output_thread.take() {
-            if thread.join().is_err() {
-                tracing::warn!(pid = self.child_pid, "adb exec output thread panicked");
-            }
+        if thread.join().is_err() {
+            tracing::warn!(pid = self.child_pid, "adb exec output thread panicked");
         }
     }
 }
@@ -1091,6 +1172,7 @@ struct OutputFlow {
 struct OutputState {
     can_write: bool,
     closed: bool,
+    detached: bool,
 }
 
 impl OutputFlow {
@@ -1099,6 +1181,7 @@ impl OutputFlow {
             state: Mutex::new(OutputState {
                 can_write: false,
                 closed: false,
+                detached: false,
             }),
             ready: Condvar::new(),
         }
@@ -1133,7 +1216,30 @@ impl OutputFlow {
         true
     }
 
+    fn is_closed(&self) -> bool {
+        self.state
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .closed
+    }
+
+    fn is_detached(&self) -> bool {
+        self.state
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .detached
+    }
+
     fn close(&self) -> bool {
+        self.close_with(false)
+    }
+
+    /// Closes the stream while its command keeps running.
+    fn detach(&self) -> bool {
+        self.close_with(true)
+    }
+
+    fn close_with(&self, detached: bool) -> bool {
         let mut state = self
             .state
             .lock()
@@ -1142,6 +1248,7 @@ impl OutputFlow {
             return false;
         }
         state.closed = true;
+        state.detached = detached;
         self.ready.notify_all();
         true
     }
@@ -1196,11 +1303,17 @@ fn run_raw_command_output(
 
     loop {
         if !output.wait_for_write_credit() {
-            let _ = child.wait();
-            child_running.store(false, Ordering::Release);
-            return;
+            break;
         }
 
+        match wait_for_output(&output_reader, &output) {
+            Ok(true) => {}
+            Ok(false) => break,
+            Err(err) => {
+                tracing::debug!(local_id, remote_id, error = ?err, "adb exec output poll failed");
+                break;
+            }
+        }
         let read = match read_fd(&mut output_reader, &mut buffer) {
             Ok(0) => break,
             Ok(read) => read,
@@ -1209,6 +1322,9 @@ fn run_raw_command_output(
                 break;
             }
         };
+        if output.is_closed() {
+            break;
+        }
 
         if let Err(err) = writer.send(A_WRTE, local_id, remote_id, &buffer[..read]) {
             tracing::debug!(local_id, remote_id, error = ?err, "adb exec output send failed");
@@ -1216,14 +1332,74 @@ fn run_raw_command_output(
         }
     }
 
-    if let Err(err) = child.wait() {
-        tracing::debug!(local_id, remote_id, error = ?err, "adb exec wait failed");
+    let detached = output.is_detached();
+    if detached {
+        discard_detached_output(&mut output_reader, &mut child, &mut buffer);
+    }
+    drop(output_reader);
+    let pid = child.id();
+    match child.wait() {
+        Ok(status) if detached => {
+            tracing::info!(pid, %status, "adb exec command closed by the host exited");
+        }
+        Ok(_) => {}
+        // The PID 1 reaper can reap the command first.
+        Err(err) if detached => {
+            tracing::info!(pid, error = ?err, "adb exec command closed by the host exited");
+        }
+        Err(err) => {
+            tracing::debug!(local_id, remote_id, error = ?err, "adb exec wait failed");
+        }
     }
     child_running.store(false, Ordering::Release);
 
     if output.close() {
         if let Err(err) = writer.send(A_CLSE, local_id, remote_id, &[]) {
             tracing::debug!(local_id, remote_id, error = ?err, "adb exec close send failed");
+        }
+    }
+}
+
+/// Waits for the command's output to become readable, polling so that a
+/// close is noticed while the command is quiet. Returns false once closed.
+fn wait_for_output(reader: &File, output: &OutputFlow) -> io::Result<bool> {
+    loop {
+        if output.is_closed() {
+            return Ok(false);
+        }
+        if poll_readable(reader, EXEC_CLOSE_POLL)? {
+            return Ok(true);
+        }
+    }
+}
+
+/// Keeps reading, and discarding, the output of a command the host closed, so
+/// that a command reporting progress as it consumes the rest of its input
+/// (`dd status=progress`, `tar xv`) does not die of SIGPIPE with input unread.
+/// Stops once the command exits, even if a background process still holds the
+/// output, or after a byte and a time limit, so `yes` or a `dmesg -w` left
+/// behind by Ctrl-C still end: their next write then fails with EPIPE, as
+/// against adbd's closed socket.
+fn discard_detached_output(reader: &mut File, child: &mut Child, buffer: &mut [u8]) {
+    let deadline = Instant::now() + DETACHED_OUTPUT_TIME;
+    let mut discarded = 0;
+    while discarded < DETACHED_OUTPUT_LIMIT {
+        // try_wait fails with ECHILD once the PID 1 reaper has reaped the command.
+        if !matches!(child.try_wait(), Ok(None)) {
+            return;
+        }
+        let left = deadline.saturating_duration_since(Instant::now());
+        if left.is_zero() {
+            return;
+        }
+        match poll_readable(reader, left.min(EXEC_CLOSE_POLL)) {
+            Ok(true) => {}
+            Ok(false) => continue,
+            Err(_) => return,
+        }
+        match read_fd(reader, buffer) {
+            Ok(0) | Err(_) => return,
+            Ok(read) => discarded += read,
         }
     }
 }
@@ -1716,6 +1892,23 @@ fn read_fd(file: &mut File, buffer: &mut [u8]) -> io::Result<usize> {
     }
 }
 
+fn poll_readable(file: &File, timeout: Duration) -> io::Result<bool> {
+    let mut poll_fd = libc::pollfd {
+        fd: file.as_raw_fd(),
+        events: libc::POLLIN,
+        revents: 0,
+    };
+    let timeout = libc::c_int::try_from(timeout.as_millis()).unwrap_or(libc::c_int::MAX);
+    if unsafe { libc::poll(&mut poll_fd, 1, timeout) } >= 0 {
+        return Ok(poll_fd.revents != 0);
+    }
+    let err = io::Error::last_os_error();
+    if err.kind() == io::ErrorKind::Interrupted {
+        return Ok(false);
+    }
+    Err(err)
+}
+
 fn read_pty(master: &mut File, buffer: &mut [u8]) -> io::Result<usize> {
     loop {
         match master.read(buffer) {
@@ -1871,5 +2064,222 @@ mod tests {
             sync_stat_packet(0o100644, 123, 456),
             b"STAT\xA4\x81\x00\x00{\x00\x00\x00\xC8\x01\x00\x00".to_vec()
         );
+    }
+
+    fn recording_writer() -> PacketWriter {
+        PacketWriter::with_sink(PacketSink::Recorded(Vec::new()))
+    }
+
+    fn recorded(writer: &PacketWriter) -> Vec<(u32, Vec<u8>)> {
+        let sink = writer.tx.lock().unwrap();
+        let PacketSink::Recorded(packets) = &*sink else {
+            panic!("expected a recording writer");
+        };
+        packets
+            .iter()
+            .map(|packet| (packet.message.command, packet.payload.clone()))
+            .collect()
+    }
+
+    fn exec_session(session: &AdbSession) -> &RawCommandSession {
+        let AdbSession::Exec(session) = session else {
+            panic!("expected an exec session");
+        };
+        session
+    }
+
+    fn wait_until(timeout: Duration, mut done: impl FnMut() -> bool) -> bool {
+        let deadline = Instant::now() + timeout;
+        while !done() {
+            if Instant::now() >= deadline {
+                return false;
+            }
+            thread::sleep(Duration::from_millis(10));
+        }
+        true
+    }
+
+    struct ScratchFile(PathBuf);
+
+    impl ScratchFile {
+        fn new(name: &str) -> Self {
+            let path =
+                std::env::temp_dir().join(format!("pocketboot-adb-{name}-{}", std::process::id()));
+            let _ = fs::remove_file(&path);
+            Self(path)
+        }
+    }
+
+    impl Drop for ScratchFile {
+        fn drop(&mut self) {
+            let _ = fs::remove_file(&self.0);
+        }
+    }
+
+    fn exec_input() -> Vec<u8> {
+        (0..80 * 1024u32)
+            .map(|i| (i ^ (i >> 8) ^ (i >> 16)) as u8)
+            .collect()
+    }
+
+    /// Streams `input` into an exec session the way `adb exec-in` does, closes
+    /// it from the host and checks the command outlives the close.
+    fn exec_in(session: &mut AdbSession, writer: &PacketWriter, input: &[u8]) -> Arc<AtomicBool> {
+        let child_running = exec_session(session).child_running.clone();
+        for chunk in input.chunks(16 * 1024) {
+            session.write_input(chunk).expect("write exec input");
+        }
+        session.close_from_host(writer).expect("close exec session");
+        assert!(
+            child_running.load(Ordering::Acquire),
+            "exec command finished before the host closed the stream"
+        );
+        child_running
+    }
+
+    #[test]
+    fn exec_host_close_lets_command_consume_buffered_input() {
+        let file = ScratchFile::new("exec-close");
+        // dd frees room for the last chunk, then the command sleeps with the
+        // tail still in the stdin pipe when the host closes the stream.
+        let command = format!(
+            "exec >'{}' 2>/dev/null; sleep 0.2; dd bs=16384 count=1; sleep 0.3; cat",
+            file.0.display()
+        );
+        let writer = recording_writer();
+        let mut session = AdbSession::spawn(1, 1, AdbService::Exec(command), writer.clone())
+            .expect("spawn exec session");
+        let input = exec_input();
+
+        let child_running = exec_in(&mut session, &writer, &input);
+        drop(session);
+        assert!(
+            child_running.load(Ordering::Acquire),
+            "dropping a host-closed exec session stopped the command"
+        );
+
+        let exited = wait_until(Duration::from_secs(10), || {
+            !child_running.load(Ordering::Acquire)
+        });
+        let written = fs::read(&file.0).unwrap_or_default();
+        assert!(exited, "exec command did not exit");
+        assert_eq!(written.len(), input.len());
+        assert!(written == input, "exec input was corrupted");
+        assert_eq!(recorded(&writer), [(A_CLSE, Vec::new())]);
+    }
+
+    #[test]
+    fn exec_host_close_keeps_draining_output_of_a_reading_command() {
+        let file = ScratchFile::new("exec-close-progress");
+        // As after handle_open, the output thread holds write credit and waits
+        // for output when the host closes; the command then reports progress
+        // between the chunks it still has to read, like dd status=progress.
+        let command = format!(
+            "exec 3>'{}' 2>/dev/null; sleep 0.2; dd bs=16384 count=1 iflag=fullblock >&3; \
+             sleep 0.3; for i in 1 2 3 4; do echo progress $i; \
+             dd bs=16384 count=1 iflag=fullblock >&3; done",
+            file.0.display()
+        );
+        let writer = recording_writer();
+        let mut session = AdbSession::spawn(1, 1, AdbService::Exec(command), writer.clone())
+            .expect("spawn exec session");
+        session.allow_output();
+        let input = exec_input();
+
+        let child_running = exec_in(&mut session, &writer, &input);
+        drop(session);
+
+        let exited = wait_until(Duration::from_secs(10), || {
+            !child_running.load(Ordering::Acquire)
+        });
+        let written = fs::read(&file.0).unwrap_or_default();
+        assert!(exited, "exec command did not exit");
+        assert_eq!(written.len(), input.len());
+        assert!(written == input, "exec input was corrupted");
+        // Output produced after the host closed is discarded, not forwarded.
+        assert_eq!(recorded(&writer), [(A_CLSE, Vec::new())]);
+    }
+
+    #[test]
+    fn exec_host_close_does_not_wait_on_background_output_holders() {
+        let writer = recording_writer();
+        let mut session = AdbSession::spawn(
+            1,
+            1,
+            AdbService::Exec("sleep 3 &".to_string()),
+            writer.clone(),
+        )
+        .expect("spawn exec session");
+        session.allow_output();
+        let child_pid = exec_session(&session).child_pid;
+        let child_running = exec_session(&session).child_running.clone();
+
+        thread::sleep(Duration::from_millis(100));
+        session
+            .close_from_host(&writer)
+            .expect("close exec session");
+        drop(session);
+
+        let finished = wait_until(Duration::from_secs(2), || {
+            !child_running.load(Ordering::Acquire)
+        });
+        terminate_process_group(child_pid);
+        assert!(
+            finished,
+            "exec output thread waited for a background process holding its output"
+        );
+    }
+
+    #[test]
+    fn exec_output_is_forwarded_until_command_exits() {
+        let writer = recording_writer();
+        let session = AdbSession::spawn(
+            1,
+            2,
+            AdbService::Exec("printf hello".to_string()),
+            writer.clone(),
+        )
+        .expect("spawn exec session");
+        let child_running = exec_session(&session).child_running.clone();
+
+        session.allow_output();
+        assert!(
+            wait_until(Duration::from_secs(10), || !recorded(&writer).is_empty()),
+            "exec output was not forwarded"
+        );
+        session.acknowledge_output();
+        assert!(
+            wait_until(Duration::from_secs(10), || recorded(&writer).len() == 2),
+            "exec stream was not closed after the command exited"
+        );
+        assert!(!child_running.load(Ordering::Acquire));
+        assert_eq!(
+            recorded(&writer),
+            [(A_WRTE, b"hello".to_vec()), (A_CLSE, Vec::new())]
+        );
+        drop(session);
+        assert_eq!(recorded(&writer).len(), 2);
+    }
+
+    #[test]
+    fn exec_host_close_stops_command_writing_output() {
+        let writer = recording_writer();
+        let mut session =
+            AdbSession::spawn(1, 1, AdbService::Exec("yes".to_string()), writer.clone())
+                .expect("spawn exec session");
+        let child_running = exec_session(&session).child_running.clone();
+
+        session
+            .close_from_host(&writer)
+            .expect("close exec session");
+        drop(session);
+
+        assert!(
+            wait_until(Duration::from_secs(10), || {
+                !child_running.load(Ordering::Acquire)
+            }),
+            "exec command did not exit"
+        );
+        assert_eq!(recorded(&writer), [(A_CLSE, Vec::new())]);
     }
 }

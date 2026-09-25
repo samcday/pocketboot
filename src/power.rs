@@ -21,7 +21,16 @@ pub(crate) fn bootloader_reboot_action() -> io::Result<fn() -> io::Result<()>> {
     Ok(reboot_to_bootloader)
 }
 
+/// reboot(2) and kexec discard the page cache, so flush it first, as busybox
+/// reboot and kexec-tools do. Otherwise data written just before, such as an
+/// image dd'd in through adb exec, can lose its tail.
+pub(crate) fn sync_filesystems() {
+    tracing::info!("syncing filesystems");
+    unsafe { libc::sync() };
+}
+
 fn reboot_command(command: libc::c_int, message: &str) -> io::Result<()> {
+    sync_filesystems();
     tracing::info!("{message}");
     let rc = unsafe { libc::reboot(command) };
     if rc < 0 {
@@ -46,6 +55,7 @@ fn reboot_command_with_argument(
 ) -> io::Result<()> {
     let argument = CString::new(argument)
         .map_err(|_| io::Error::new(io::ErrorKind::InvalidInput, "reboot argument contains NUL"))?;
+    sync_filesystems();
     tracing::info!(reboot_argument = %argument.to_string_lossy(), "{message}");
     let rc = unsafe {
         libc::syscall(
