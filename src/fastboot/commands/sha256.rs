@@ -34,6 +34,8 @@ use super::partitions;
 
 const COMMAND_PREFIX: &str = "oem sha256:";
 const READ_CHUNK: usize = 1024 * 1024;
+/// `_IO(0x12, 97)`: flush and drop a block device's buffer cache.
+const BLKFLSBUF: libc::Ioctl = 0x1261;
 const PROGRESS_BYTES: u64 = 256 * 1024 * 1024;
 const PROGRESS_INTERVAL: Duration = Duration::from_secs(5);
 const MIB: u64 = 1024 * 1024;
@@ -183,12 +185,33 @@ fn open_uncached(path: &Path) -> io::Result<File> {
     unsafe { libc::sync() };
     file.sync_all()
         .map_err(|err| device_error("flush", path, err))?;
-    fadvise(&file, libc::POSIX_FADV_DONTNEED)
-        .map_err(|err| device_error("drop cache of", path, err))?;
-    if let Err(err) = fadvise(&file, libc::POSIX_FADV_SEQUENTIAL) {
-        tracing::debug!(error = %err, dev = %path.display(), "sequential readahead hint failed");
-    }
+    drop_block_cache(&file, path)?;
     Ok(file)
+}
+
+/// Drop a block device node's clean page cache the way `blockdev --flushbufs`
+/// does (BLKFLSBUF). Pocketboot's kernels are built without
+/// CONFIG_ADVISE_SYSCALLS, so posix_fadvise(DONTNEED) is only a fallback for
+/// regular files (tests) and is best effort there.
+fn drop_block_cache(file: &File, path: &Path) -> io::Result<()> {
+    match block_flush_buffers(file) {
+        Ok(()) => return Ok(()),
+        Err(err) if err.raw_os_error() == Some(libc::ENOTTY) => {}
+        Err(err) => return Err(device_error("drop cache of", path, err)),
+    }
+    if let Err(err) = fadvise(file, libc::POSIX_FADV_DONTNEED) {
+        tracing::debug!(error = %err, path = %path.display(), "fadvise DONTNEED unavailable");
+    }
+    Ok(())
+}
+
+fn block_flush_buffers(file: &File) -> io::Result<()> {
+    let rc = unsafe { libc::ioctl(file.as_raw_fd(), BLKFLSBUF) };
+    if rc < 0 {
+        Err(io::Error::last_os_error())
+    } else {
+        Ok(())
+    }
 }
 
 /// Wrap a device error with its action and path. The dispatcher classifies a
