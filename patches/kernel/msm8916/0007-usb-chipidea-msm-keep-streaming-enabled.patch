@@ -1,0 +1,31 @@
+Subject: [PATCH] usb: chipidea: msm: keep streaming mode enabled
+
+The MSM glue has forced stream-disable mode (USBMODE.SDIS) since the
+original ci13xxx_msm driver. On MSM8916/APQ8016 this caps every
+host-to-device bulk transfer at about 12.5 MiB/s: with streaming
+disabled the controller only accepts a few OUT packets per microframe,
+while device-to-host traffic reaches the usual ~30 MB/s.
+
+Measured on a DragonBoard 410c (2026-09-27): fastboot download and adb
+exec-in through FunctionFS, and the kernel's own f_mass_storage, all
+top out at 12.5-12.8 MB/s with SDIS set; with streaming enabled the
+same transfers reach 29-31 MiB/s, matching U-Boot's ci_udc and LK's
+hsusb driver, which both run this controller with USBMODE=device only
+and never set SDIS. A 256 MiB random fastboot download + upload
+round trip verified byte-identical with streaming enabled.
+
+This is a Pocketboot bring-up patch; the upstream question is whether
+any MSM chipidea integration still needs SDIS.
+
+diff --git a/drivers/usb/chipidea/ci_hdrc_msm.c b/drivers/usb/chipidea/ci_hdrc_msm.c
+--- a/drivers/usb/chipidea/ci_hdrc_msm.c
++++ b/drivers/usb/chipidea/ci_hdrc_msm.c
+@@ -187,7 +187,7 @@ static int ci_hdrc_msm_probe(struct platform_device *pdev)
+ 
+ 	ci->pdata.name = "ci_hdrc_msm";
+ 	ci->pdata.capoffset = DEF_CAPOFFSET;
+-	ci->pdata.flags	= CI_HDRC_REGS_SHARED | CI_HDRC_DISABLE_STREAMING |
++	ci->pdata.flags	= CI_HDRC_REGS_SHARED |
+ 			  CI_HDRC_OVERRIDE_AHB_BURST |
+ 			  CI_HDRC_OVERRIDE_PHY_CONTROL |
+ 			  CI_HDRC_HAS_SHORT_PKT_LIMIT;
