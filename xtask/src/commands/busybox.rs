@@ -20,7 +20,7 @@ use super::{
 };
 
 pub(super) const BUSYBOX_VERSION: &str = "1.38.0";
-const BUSYBOX_RECIPE_VERSION: u32 = 5;
+const BUSYBOX_RECIPE_VERSION: u32 = 6;
 const BUSYBOX_EDITING_MAX_LEN: u32 = 4096;
 const BUSYBOX_ARCHIVE_SHA256: &str =
     "34f9ea6ff8636f2c9241153b9114eefa9e65674a45318ae1ef95bb5f31c53bb2";
@@ -509,6 +509,7 @@ fn configure_busybox(config: &Path, features: &FeatureSet) -> Result<()> {
         "RMDIR",
         "SED",
         "SETSID",
+        "SHA256SUM",
         "SLEEP",
         "SORT",
         "STAT",
@@ -888,6 +889,30 @@ mod tests {
             [format!(
                 "CONFIG_FEATURE_EDITING_MAX_LEN={BUSYBOX_EDITING_MAX_LEN}"
             )]
+        );
+    }
+
+    #[test]
+    fn recipe_enables_sha256sum_for_on_device_flash_verification() {
+        let nonce = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let config = std::env::temp_dir().join(format!(
+            "pocketboot-busybox-sha256sum-{}-{nonce}",
+            std::process::id()
+        ));
+        fs::write(&config, "# CONFIG_SHA256SUM is not set\n").unwrap();
+
+        configure_busybox(&config, &FeatureSet::default()).unwrap();
+        let contents = fs::read_to_string(&config).unwrap();
+        fs::remove_file(&config).unwrap();
+
+        assert!(contents.lines().any(|line| line == "CONFIG_SHA256SUM=y"));
+        assert!(
+            !contents
+                .lines()
+                .any(|line| line == "# CONFIG_SHA256SUM is not set")
         );
     }
 }
