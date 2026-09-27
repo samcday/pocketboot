@@ -18,7 +18,7 @@ use gadgetry_most_foul::{
     },
 };
 
-use crate::kexec;
+use crate::{bootflow, kexec};
 
 pub(crate) mod commands;
 
@@ -34,6 +34,7 @@ const TRANSFER_TIMEOUT: Duration = Duration::from_secs(30);
 const DISCONNECT_RETRY_DELAY: Duration = Duration::from_millis(250);
 const FASTBOOT_SUBCLASS: u8 = 0x42;
 const FASTBOOT_PROTOCOL: u8 = 0x03;
+const STALE_BOOT_ENTRIES: &[u8] = b"boot entries stale after flash; use reboot";
 
 pub(crate) type PostResponseAction = Box<dyn FnOnce() -> io::Result<()> + Send + 'static>;
 pub(crate) trait CommandHandler: Send + Sync {
@@ -268,6 +269,17 @@ impl FastbootServer {
         tracing::info!(command, "fastboot command received");
 
         if command == "continue" {
+            if bootflow::boot_mounts_released() {
+                // Leaving fastboot would boot a discovered entry, which may
+                // now point into a boot-scan mount released for flashing;
+                // a failed load there takes PID 1 down with it.
+                tracing::warn!(
+                    command,
+                    "refusing continue: boot-scan mounts were released for flashing"
+                );
+                FastbootResponder::new(&mut self.tx).fail(STALE_BOOT_ENTRIES)?;
+                return Ok(ServerStep::Continue);
+            }
             match FastbootResponder::new(&mut self.tx).okay_best_effort(b"") {
                 Ok(()) => tracing::debug!(command, "fastboot OKAY sent"),
                 Err(err) => {
