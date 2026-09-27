@@ -262,7 +262,9 @@ impl FastbootServer {
     fn run_once(&mut self) -> io::Result<ServerStep> {
         let command = self.read_command()?;
         let Ok(command) = std::str::from_utf8(&command) else {
-            FastbootResponder::new(&mut self.tx).fail(b"unrecognized command")?;
+            FastbootResponder::new(&mut self.tx)
+                .fail(b"unrecognized command")
+                .map_err(host_stopped_reading)?;
             return Ok(ServerStep::Continue);
         };
         tracing::info!(command, "fastboot command received");
@@ -278,7 +280,7 @@ impl FastbootServer {
         }
 
         if matches!(command, "upload" | "get_staged") {
-            self.upload_staged()?;
+            self.upload_staged().map_err(host_stopped_reading)?;
             return Ok(ServerStep::Continue);
         }
 
@@ -292,11 +294,15 @@ impl FastbootServer {
                             return Err(err);
                         }
                         tracing::warn!(command, error = ?err, "fastboot download failed");
-                        FastbootResponder::new(&mut self.tx).fail(format!("{err}"))?;
+                        FastbootResponder::new(&mut self.tx)
+                            .fail(format!("{err}"))
+                            .map_err(host_stopped_reading)?;
                     }
                 }
                 Ok(None) => unreachable!("download prefix was checked"),
-                Err(err) => FastbootResponder::new(&mut self.tx).fail(format!("{err}"))?,
+                Err(err) => FastbootResponder::new(&mut self.tx)
+                    .fail(format!("{err}"))
+                    .map_err(host_stopped_reading)?,
             }
             return Ok(ServerStep::Continue);
         }
@@ -311,10 +317,14 @@ impl FastbootServer {
                         return Err(err);
                     }
                     tracing::warn!(command, error = ?err, "fastboot command failed");
-                    context.fail(format!("{err}"))?;
+                    context
+                        .fail(format!("{err}"))
+                        .map_err(host_stopped_reading)?;
                 }
             },
-            None => context.fail(b"unsupported command")?,
+            None => context
+                .fail(b"unsupported command")
+                .map_err(host_stopped_reading)?,
         }
 
         Ok(ServerStep::Continue)
@@ -709,6 +719,25 @@ fn is_usb_disconnect(err: &io::Error) -> bool {
     )
 }
 
+/// Reclassify a response that timed out as a disconnect.
+///
+/// A host that stops reading mid-command (Ctrl-C, a host-side timeout) releases
+/// the interface without resetting the endpoints, so the next response write
+/// waits out its timeout and returns `TimedOut`, not a disconnect errno. When
+/// even the FAIL for that error cannot be delivered, the host is gone: go back
+/// to waiting for a command instead of ending the server, which unbinds the
+/// gadget and, as PID 1, panics the kernel.
+fn host_stopped_reading(err: io::Error) -> io::Error {
+    if err.kind() == io::ErrorKind::TimedOut {
+        io::Error::new(
+            io::ErrorKind::ConnectionAborted,
+            format!("host stopped reading responses: {err}"),
+        )
+    } else {
+        err
+    }
+}
+
 fn clear_staged_for_download(staged: &mut Option<StagedData>) {
     *staged = None;
 }
@@ -827,6 +856,27 @@ mod tests {
             let err = io::Error::new(kind, "transport closed");
             assert!(is_usb_disconnect(&err), "kind {kind:?} was not recognized");
         }
+    }
+
+    #[test]
+    fn undeliverable_responses_are_treated_as_disconnects() {
+        let err = host_stopped_reading(io::Error::new(
+            io::ErrorKind::TimedOut,
+            "timeout waiting for exact AIO transfer",
+        ));
+
+        assert!(is_usb_disconnect(&err), "{err}");
+        assert!(err.to_string().contains("host stopped reading"), "{err}");
+    }
+
+    #[test]
+    fn other_response_errors_keep_their_classification() {
+        let eio = host_stopped_reading(io::Error::from_raw_os_error(libc::EIO));
+        assert_eq!(eio.raw_os_error(), Some(libc::EIO));
+
+        let invalid = host_stopped_reading(io::Error::new(io::ErrorKind::InvalidInput, "bad"));
+        assert_eq!(invalid.kind(), io::ErrorKind::InvalidInput);
+        assert!(!is_usb_disconnect(&invalid), "{invalid}");
     }
 
     #[test]
