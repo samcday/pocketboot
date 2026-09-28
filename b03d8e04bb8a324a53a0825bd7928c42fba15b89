@@ -1,0 +1,20 @@
+Recovery lifecycle verification
+Repository: https://github.com/samcday/pocketboot
+Commit: b03d8e04bb8a324a53a0825bd7928c42fba15b89
+Includes emergency-log change 130b061. Baseline: 506169312fbed27d2700c5c71ac1202fdcc8ac08.
+Environment: Sam's x86_64 Linux development machine; no phone, configfs mount, /dev/kmsg write, or real pstore mount exercised.
+
+Commands and results:
+- cargo fmt --all -- --check; git diff --check: passed.
+- cargo test --locked --offline --workspace --features pocketpreboot/soc-msm8916: 223 pocketboot, 18 preboot, 54 xtask tests passed.
+- CARGO_TARGET_AARCH64_UNKNOWN_LINUX_MUSL_RUNNER=qemu-aarch64 cargo test --locked --offline -p pocketboot --target aarch64-unknown-linux-musl: all 223 tests passed under user-mode QEMU.
+- cargo check --locked --offline -p pocketboot --target armv7-unknown-linux-musleabihf: passed. Existing libc::time_t deprecation and continue_then dead-code warnings remain.
+- cargo test --locked --offline -p pocketpreboot --features soc-msm8939: all 18 tests passed.
+
+Evidence covered:
+- Seven pstore tests preserve opaque bytes, originals and existing snapshots; failed copies do not publish partial snapshots.
+- Bounded emergency writer tests cover prefix/newline, exact fit, overflow marker, UTF-8 boundaries, streamed formatting failure and failed/short writes. Implementation bypasses tracing filter; tests do not modify a process panic hook or open /dev/kmsg.
+- Coordinator tests cover returned UI/default/fastboot actions, retries, no usable defaults, invalid UI selections and retained sender lifetime. Headless Slint test proves failed boot resets busy selection and permits another request.
+- Gadget fault injection covers startup failure after 0, 1, 2, 3 workers, stop-before-unbind, unbind-before-join, simulated registration reuse, and preserving original startup error even with cleanup failure. Worker threads are real; USB registration and endpoint release are simulated.
+
+Limits: no evidence yet for actual USB re-enumeration, previous-boot ADB retrieval, Ferrari CPU parking or postmarketOS handoff. The earlier Ferrari log proves extlinux discovery/decompression and then PID1 exit, but lacks the exact load error. The missing owned resident contract is a source-supported explanation, not an error string observed in that capture. This recovery change does not graft ramoops into a target DTB or activate preboot on Ferrari.
