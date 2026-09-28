@@ -18,3 +18,11 @@ Evidence covered:
 - Gadget fault injection covers startup failure after 0, 1, 2, 3 workers, stop-before-unbind, unbind-before-join, simulated registration reuse, and preserving original startup error even with cleanup failure. Worker threads are real; USB registration and endpoint release are simulated.
 
 Limits: no evidence yet for actual USB re-enumeration, previous-boot ADB retrieval, Ferrari CPU parking or postmarketOS handoff. The earlier Ferrari log proves extlinux discovery/decompression and then PID1 exit, but lacks the exact load error. The missing owned resident contract is a source-supported explanation, not an error string observed in that capture. This recovery change does not graft ramoops into a target DTB or activate preboot on Ferrari.
+
+Published recovery artifact verification
+Commit: b03d8e04bb8a324a53a0825bd7928c42fba15b89
+CI: https://github.com/samcday/pocketboot/actions/runs/36487433851
+Overall CI and Ferrari job completed successfully. Artifact ID11000765298, name bootimg-qcom-msm8939-xiaomi-ferrari. Downloaded with gh run download 36487433851 --repo samcday/pocketboot --name bootimg-qcom-msm8939-xiaomi-ferrari into temporary scratch. Extracted boot.img SHA-256 (not archive digest):
+5025586d48aa55f056ef0072711868a5e39618be9ecf6e4f343cbe118950cd76  boot.img
+
+This is the no-preboot recovery baseline, not the parking experiment. No device operations or hardware recovery result.
