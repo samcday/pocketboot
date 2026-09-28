@@ -141,3 +141,27 @@ fn sanitize(value: &str) -> String {
         })
         .collect()
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn instantnoodle_is_a_pinned_boot_image_job() {
+        let root = workspace_root().unwrap();
+        let device = KernelDevice::parse("qcom/sm8250-oneplus-instantnoodle").unwrap();
+        let config = config::load_device_config(&root, &device).unwrap();
+        let matrix = ci_matrix(&root).unwrap();
+        let jobs: Vec<_> = matrix
+            .include
+            .iter()
+            .filter(|entry| entry.device == device.id())
+            .collect();
+        assert_eq!(jobs.len(), 1);
+        let job = jobs[0];
+        assert!(job.bootimg);
+        assert_eq!(job.artifact, "bootimg-qcom-sm8250-oneplus-instantnoodle");
+        assert_eq!(job.rust_targets, DEFAULT_TARGET);
+        assert_eq!(job.sha, config.kernel_source.unwrap().sha);
+    }
+}
