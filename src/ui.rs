@@ -2677,8 +2677,10 @@ fn choose_mode(connector: &connector::Info) -> Result<control::Mode, String> {
         .iter()
         .max_by_key(|mode| {
             let (width, height) = mode.size();
+            let flags = mode.mode_type();
             (
-                mode.mode_type().contains(ModeTypeFlags::PREFERRED),
+                flags.contains(ModeTypeFlags::USERDEF),
+                flags.contains(ModeTypeFlags::PREFERRED),
                 width as u32 * height as u32,
             )
         })
