@@ -1,0 +1,286 @@
+# Evidence: qcom_iommu stale-TLB-across-kexec A/B on the DragonBoard 410c (2026-09-28)
+
+For `refs/notes/evidence` on linux commit 390b5df1e6a879d9a7c26b3d598a76c902fee99e
+("iommu/qcom: Invalidate the TLB when initialising a context", ~/tmp/linux-qcom-iommu-clean-contexts) and on
+Pocketboot lab commit c90012f51fb90d608bccd1b6772cea4308d6d8e0 (branch `claude/qcom-iommu-kexec-lab`).
+Everything below is under `L=/var/home/sam/tmp/qcom-iommu-kexec-20260928`; UART line numbers are absolute
+in `L/uart/db410c-uart.log` (10113 lines at the end of the phase, 10183 after the 12:19 relay pulse that returned
+the board to U-Boot; one capture unit for the whole phase, never restarted).
+Board phase: 2026-09-28 11:40:07 to 11:59:04 AEST (+10:00), ledger `L/runs/attempts.jsonl` (30 lines, 15 runs).
+
+## 1. Result in one paragraph
+
+kexec from a Pocketboot resident whose MDP5 pipeline is scanning out over HDMI into a second Pocketboot kernel,
+same MSM8916 apps SMMU context bank cb=4 (`1e24000.iommu-ctx`, fixed ASID 4). Without any invalidate (BASE),
+every hop faulted: 3/3 smaller-to-larger-mode hops with the first fault at exactly the IOVA where the source's
+mapped extent ended (0x386000), plus the same-mode hop (S1) that the model had predicted to be silent, which
+faulted inside the source map instead. With the patch under test (NEW, invalidate inside the per-context loop
+before programming TTBR0) 3/3 hops were clean; with the shipped placement (OLD, invalidate after the loop) 3/3
+were clean; a chained NEW->NEW generation-2 hop was clean. No OOPS, no hang, no TLB SYNC timeout, adb back 4 s
+after every destination banner. 161 `Unhandled context fault` lines in the whole capture, all `cb=4`, all produced by
+the four BASE destinations (a BASE resident's storm continues while it idles until the next relay pulse, so a few
+lines sit just past the next row's start mark, e.g. 4528-4532 after P05's).
+
+## 2. What was run and on what
+
+Board: DragonBoard 410c (APQ8016 = MSM8916), U-Boot fastboot serial `bc72e60`, HDMI via ADV7533, no sink/EDID
+(mode forced with `video=HDMI-A-1:<mode>e`), UART FT232R clone at
+`/dev/serial/by-path/pci-0000:6a:00.0-usb-0:1.1:1.0-port0`, power via the lab USB relay channel 1 (`pulse 1 4`).
+Preflight (`L/notes/board.md` section 0): capture unit `qiommu-uart` active, `uart-quiet-check.sh 5` = +0 B,
+`verify-inputs.sh` OK (49 digests), `check-inputs.sh --matrix harness/matrix-final.tsv` all passed, relay
+`1:off` (powered), `fastboot getvar product` = `sbc`.
+
+Kernel: samcday/linux `pocketboot/msm8916` head d87323486b79a31b9b25eb6fe30f1b503f142ff2 (Linux 7.1.0-rc6+),
+built `#2 SMP PREEMPT Mon Sep 28` with aarch64-linux-gnu-gcc 16.2.1, one `.config` and one DTB for all three arms
+(`.config` sha256 85fca913475a118c66d9e26b948acc0a968be2520105758ed5d12d7246179c3e, `apq8016-sbc.dtb`
+d76ac57ccabc59b1fed0bd24657901ca0aae5774964438f5c66c341b6282e130), display stack built in (DRM_MSM, MDP5, DSI,
+ADV7511, QCOM_IOMMU, IOMMU_DEFAULT_DMA_STRICT). Patch series from `L/patches/` (`L/build/MANIFEST-kernels.txt`):
+
+| arm | patches on d87323486 | Image sha256 | qcom_iommu.o sha256 |
+|---|---|---|---|
+| BASE (no invalidate) | 0001 spin-table kexec, 0002 chipidea sg bounce, 0003 ffs reset work, 0004 ignore disabled secure ctx, 0005 report unhandled faults, 0007 fixed secure pgtable region | a3caf8820a8b054ae18c35529da6a07ce904b4ae7ea46ff6ec04a18d70733d0a | 600a197d5c5fa2179b9aba8cb7b288e62c067647e2c71db6bbd381f00e5060ab |
+| OLD (shipped: TLBIASID after the loop, M=1) | BASE + 0006 invalidate-new-context | ebc7abd8ff51abf7cf52f99f13334a38ad9767a2a86a30571ea12a5457e8047c | ff8ce9f648238b573bf49f11260b2459056f03c4c84e247948db352b10ea96f3 |
+| NEW (390b5df1: TLBIASID+sync in the loop, before TTBR0, M=0) | BASE + 0008 invalidate-in-loop | 0ffc007a91f54602bc0ffd6bee9321cf5dba4c147e9f41aaee338f38f9b6c343 | 7f20c134ff01455709af5890a9ad33d2e8941d1b06736d3091b1cc0f064e9b57 |
+
+0007 (Pocketboot PR #24's fixed no-map secure page table at 0x854e0000) is in every arm because without it the
+kexec'd kernel's qcom-iommu probe fails with -22 and msm DRM bails; it does no TLB maintenance. Disassembly
+confirmation of the three arms is in `L/build/k-*-init_domain.txt` (readiness.md section 1).
+
+Initramfs: Pocketboot c90012f (`ui: prefer a user-defined mode over the largest one`, on top of be001af/f096f95/
+f56bc92/5a97c4a/79cdf78), cpio sha256 50fb48314e9a2ccb5a1b5023622ab4917292f08ad0cb70a90ad4a8dab890e307, embedded
+identically in all Images. No display quiesce commits (a quiesce frees the domain and flushes the TLB, masking the
+bug). Pocketboot's kmsg level defaults to WARN, so its INFO UI lines are absent (section 6).
+
+Images (`L/images/MANIFEST.txt`, every row's exact digests also in `runs/RUN/inputs.sha256`):
+- source FIT (cold boot via U-Boot `stage` + `bootm 93400000`, BASE kernel):
+  `fit-src-640x480/image.itb` b19dba26843c2493a3b503764dafdd71f76cfa91815e399ba8d6e0e9b70aeba7,
+  bootargs `console=ttyMSM0,115200n8 earlycon loglevel=8 sysrq_always_enabled=1 androidboot.serialno=bc72e60
+  video=HDMI-A-1:640x480@60e pocketboot.drm_page_flips=16 panic=5 oops=panic pocketboot.ui=src-640x480
+  pocketboot.lab=src-640x480`;
+  `fit-src-1280x720/image.itb` 0a56a57085ff103500b5ab09ea4f5017f48232ccb50e4bc2f056b90b19141b03 (same bootargs
+  with `1280x720@60e` / `src-1280x720`); `fit-src-1920x1080/image.itb`
+  f631aeb9b145c051979879e8fad9e60b2317fceaa49ae244f0e2b99e7f784a16 (`1920x1080@30e`, control only).
+- destination Android v2 boot images (`fastboot -s bc72e60 boot` on the Pocketboot gadget = Pocketboot loader +
+  `reboot(LINUX_REBOOT_CMD_KEXEC)`), cmdline
+  `console=ttyMSM0,115200n8 earlycon loglevel=8 sysrq_always_enabled=1 androidboot.serialno=bc72e60
+  video=HDMI-A-1:1280x720@60e pocketboot.drm_page_flips=16 pocketboot.ui=dest-<arm>-1280x720 panic=5 oops=panic
+  pocketboot.lab=kexec-generation-<1|2>`:
+  base gen1 687da4131f3ff3b43af935d97a88d2897f2e90c45017057b31622ac93631346d,
+  base gen2 109295d1772df287460fce93f0997ccee8cb2353ebb3680110cb4f2c13a80352,
+  new gen1 225ba1c883d00eb71e93c81f3d8dd93c8ddf6e66a792ae7d6ee03dd17ffaec3d,
+  new gen2 c9f3ea7c38c04041e746bc53917b3825b94950103e44405f05a823b682574dc5,
+  old gen1 d52b42bfc8a321eecfd3a468585201ccb92476704caa06fb2174688d957fed0f,
+  old gen2 ccd0680b1bc189f87502a4b8838d7c850e34d2f1c8696a01c7511861e68ff763.
+  The `dest-*-1920x1080` images exist but were never used (C5, section 4).
+
+Harness (`L/harness/`, offline-tested 76/76 after the rebuild re-run, RUNBOOK.md): per row `hop.sh RUN SRC_FIT DEST_IMG [EXPECT]` =
+ledger start -> relay pulse -> U-Boot stage/bootm of the source FIT -> wait for adb + `getvar product=pocketboot`
+-> 25 s settle -> `probe.sh pre` over adb (cmdline, dri/0/gem, dri/0/state, dmesg, ...) -> UART mark ->
+`fastboot boot DEST` -> wait for `Starting new kernel` + new banner -> adb -> `probe.sh post` -> `classify.py`
+on the UART slice + post-dmesg (verdict keys on `cb=4` faults after the destination banner; `iovas_vs_source_map`
+compares fault IOVAs with the source's mapped GEM vmas from `pre-iovas.json`). Controls use `cold-control.sh`
+(no hop; mode read from `dri/0/state`). S3 used `warm-start.sh` (no relay pulse, resident verified over adb).
+No harness script was edited during the phase; no usbreset, adb_recover, hang-diag or manual relay pulse was
+needed. Every hop took ~55 s wall time (`seconds` in the ledger `done` lines).
+
+## 3. Mechanism under test (from `L/notes/predict.md` section 0)
+
+cb=4 keeps ASID 4 in both kernels, and the destination programs a new TTBR0 and re-enables the context without any
+TLBI, so the SMMU's ASID-tagged leaf TLB and intermediate walk-cache entries from the source survive (TTBR/TCR/SCTLR
+writes never invalidate; only TLBIALL/TLBIASID/TLBIVA do, and the global space belongs to TZ). Stale leaf entries
+translate silently to the source's old physical pages, while stale intermediate entries send the walk into the
+source's old table pages, whose entries beyond what the source ever mapped are zero, so the destination faults
+(FSR.TF) exactly on IOVAs at or beyond the source's mapped extent = `0x2000 + k_S * size(S)` (a 4 KiB `tx_gem`
+sits at 0x1000 and the dumb buffers pack from 0x2000; measured 0x386000 for 640x480 and 0xa8e000 for 1280x720 in
+`runs/*/pre-iovas.txt`).
+
+Discriminating arm: source in a SMALLER mode than the destination. Pocketboot maps a 4 KiB `tx_gem` at 0x1000
+then three dumb buffers packed from 0x2000: 640x480 = 3 x 1228800 B -> extent end 0x386000; 1280x720 =
+3 x 3686400 B at 0x2000/0x386000/0x70a000 -> extent end 0xa8e000. S=640x480 -> D=1280x720 therefore puts the
+destination's second and third buffers beyond the source extent, first fault predicted at 0x386000.
+
+## 4. Cold controls (BASE kernel, no hop; `runs/C*/result.json` `.cold_control`, `cold-state.txt`, `cold-iovas.txt`)
+
+| run | FIT | pass | mode (`dri/0/state` crtc-0) | mapped vmas | cb=4 faults | UART lines |
+|---|---|---|---|---|---|---|
+| C1-cold-1280x720 | fit-src-1280x720 | true | `"1280x720": 60 74440 ... 0x20 0x6` (USERDEF CVT), active=1 | 6 (tx_gem + 3 x 3686400 B + 2 gpu) | 0 | 2..437: banner 149, cmdline 185, `Brought up 1 node, 4 CPUs` 220, `iommu sec: pgtable size: 94208` 325, display `Adding to iommu group 3` 329, `forcing HDMI-A-1 connector on` 422, `Initialized msm 1.13.0` 428 |
+| C2-cold-640x480 | fit-src-640x480 | true | `"640x480": 60 25175 ... 0x60 0xa`, active=1 | 6 (tx_gem + 3 x 1228800 B at 0x2000/0x12e000/0x25a000 + 2 gpu) | 0 | 437..872: banner 584, cmdline 620, 4 CPUs 655, iommu sec 760, group 3 764, forcing 863, Initialized msm 867 |
+| C5-cold-1920x1080 | fit-src-1920x1080 | FALSE | `"1280x720": 60 74250 ... 0x40 0x5` (DRIVER, 1080p30 not honoured) | 6 (3 x 3686400 B) | 0 | 872..1306: banner 1019, cmdline 1055, 4 CPUs 1090, iommu sec 1195, group 3 1199, forcing 1299, Initialized msm 1301 |
+
+Each control printed exactly one `[drm:mdp5_irq_error_handler] *ERROR* errors: 04000000` at modeset (the
+"W5 baseline", one INTF1 underrun ~2.2 s after the banner); this baseline appears in every clean row below and is
+not a fault signal. Gate A: SRC = `fit-src-640x480` (its own control passed at the requested mode; readiness W1's
+prediction that Pocketboot would pick 1024x768 was made moot by c90012f), DEST_MODE = 1280x720 (C5 failed, task
+rule). The 3-buffer allocation in every control shows the `pocketboot.drm_page_flips=16` lab flipped through all
+three buffers even though its kmsg lines are absent (section 6).
+
+## 5. Hop rows (`runs/RUN/{result.json,uart-hop.log,pre-iovas.json,post-iovas.json,post-dmesg.txt,hop.log}`)
+
+Common to all 12 hops: `fastboot boot` OK in ~1.5 s (`fastboot-boot.txt`), `kexec_core: Starting new kernel`
+2-3 s later, destination banner ~16 UART lines after it, `smp: Brought up 1 node, 4 CPUs`, `qcom-iommu
+1ef0000.iommu: secure pgtable already initialised (-22), reusing fixed region` (0007 path), display in iommu
+group 3, `[drm] Initialized msm 1.13.0`, adb answering 4 s after the banner, destination `/proc/cmdline` verbatim
+with both markers (`destination.cmdline_matches=true`), `k_pre=6`/`k_post=6` mapped vmas, 0 crash markers, 0
+`TLB SYNC` timeouts (0 in the whole capture). Post-hop allocation was identical in every row: 3 x 3686400 B at
+0x2000/0x386000/0x70a000 (`post-iovas.txt`).
+
+### 5.1 Primary matrix: S=640x480 (extent end 0x386000) -> D=1280x720
+
+| run | arm | dest image | verdict (expect) | cb=4 faults UART/dmesg | first iova | fault IOVAs vs source map | underruns | UART lines: Starting / banner / 4 CPUs / -22 reuse / Initialized msm / first fault / slice end |
+|---|---|---|---|---|---|---|---|---|
+| P01-base-r1 | BASE | base gen1 | FAULTS (FAULTS) | 10/10 | 0x386000 | 9 unique, 0x386000..0x386400 step 0x80, 10 outside / 0 inside | 10 sustained | 1745 / 1761 / 1832 / 1938 / 2033 / 2049 / 2068 |
+| P02-new-r1 | NEW | new gen1 | CLEAN (CLEAN) | 0/0 | - | - | 1 (baseline) | 2682 / 2698 / 2769 / 2875 / 2979 / - / 2984 |
+| P03-old-r1 | OLD | old gen1 | CLEAN (CLEAN) | 0/0 | - | - | 1 | 3422 / 3438 / 3509 / 3615 / 3722 / - / 3725 |
+| P04-base-r2 | BASE | base gen2 | FAULTS (FAULTS) | 10/10 | 0x386000 | 9 unique, same band, 10 outside / 0 inside | 10 sustained | 4163 / 4179 / 4250 / 4356 / 4437 / 4463 / 4483 |
+| P05-new-r2 | NEW | new gen2 | CLEAN (CLEAN) | 0/0 | - | - | 1 | 4971 / 4987 / 5058 / 5164 / 5261 / - / 5272 |
+| P06-old-r2 | OLD | old gen2 | CLEAN (CLEAN) | 0/0 | - | - | 1 | 5714 / 5730 / 5801 / 5907 / 6013 / - / 6016 |
+| P07-base-r3 | BASE | base gen1 | FAULTS (FAULTS) | 10/10 | 0x386000 | 9 unique, same band, 10 outside / 0 inside | 10 sustained, +1 `vblank time out, crtc=0` (line 6765) | 6455 / 6471 / 6542 / 6648 / 6754 / 6758 / 6778 |
+| P08-new-r3 | NEW | new gen1 | CLEAN (CLEAN) | 0/0 | - | - | 1 | 7260 / 7276 / 7347 / 7453 / 7558 / - / 7562 |
+| P09-old-r3 | OLD | old gen1 | CLEAN (CLEAN) | 0/0 | - | - | 1 | 8004 / 8020 / 8091 / 8197 / 8303 / - / 8306 |
+
+Source side of every P row (`pre-iovas.txt`): tx_gem 0x1000/4096, dumb 0x2000/1228800, 0x12e000/1228800,
+0x25a000/1228800 (end 0x386000), gpu 0x1000000/4096 and 0x1001000/32768; source banner/Initialized msm for P01 at
+lines 1453/1725. All fault lines carry `fsr=0x40000202` (SS, TF, FORMAT=1: stalled translation fault in the
+AArch32-LPAE context) and `fsynr=0x23` (PLVL=3 = leaf level, PNU, read), i.e. the walk reached a level-3 table
+whose entry for the IOVA is invalid.
+
+P01-base-r1, UART lines 2047..2062 (`[11:45:13]`, destination uptime), verbatim:
+```
+2047 [    2.169618]  WARN pocketboot: no boot entries discovered
+2048 [    2.239968] [drm:mdp5_irq_error_handler] *ERROR* errors: 04000000
+2049 [    2.289451] qcom-iommu-ctx 1e24000.iommu-ctx: Unhandled context fault: fsr=0x40000202, iova=0x0000000000386000, fsynr=0x23, cb=4
+2050 [    2.289509] qcom-iommu-ctx 1e24000.iommu-ctx: Unhandled context fault: fsr=0x40000202, iova=0x0000000000386080, fsynr=0x23, cb=4
+2051 [    2.300119] qcom-iommu-ctx 1e24000.iommu-ctx: Unhandled context fault: fsr=0x40000202, iova=0x0000000000386100, fsynr=0x23, cb=4
+...  (0x386180, 0x386200, 0x386280, 0x386300, 0x386380 at 11.5 ms intervals, lines 2052..2056)
+2057 [    2.369381] qcom-iommu-ctx 1e24000.iommu-ctx: Unhandled context fault: fsr=0x40000202, iova=0x0000000000386400, fsynr=0x23, cb=4
+2058 [    2.380934] [drm:mdp5_irq_error_handler] *ERROR* errors: 04000000
+2059 [    2.392485] qcom-iommu-ctx 1e24000.iommu-ctx: Unhandled context fault: fsr=0x40000202, iova=0x0000000000386000, fsynr=0x23, cb=4
+2060 [    2.398479] [drm:mdp5_irq_error_handler] *ERROR* errors: 04000000
+```
+Then the rate limiter: lines 2069..2226 (`[    7.259627]` to `[   42.345491]`, every 5 s while the BASE resident
+idled before P02's relay pulse) read `mdp5_irq_error_handler: 274..286 callbacks suppressed` and
+`qcom_iommu_fault: 67043..69913 callbacks suppressed`, i.e. ~14k context faults per second, every frame, for as
+long as the destination scans out; adb stayed responsive throughout (no HUNG). P04 shows the same storm at lines
+4484..4531 and P07 at 6779..6805. First-fault lines of the repeats, verbatim:
+```
+4463 [11:49:40] [    2.129431] qcom-iommu-ctx 1e24000.iommu-ctx: Unhandled context fault: fsr=0x40000202, iova=0x0000000000386000, fsynr=0x23, cb=4
+6758 [11:52:53] [    2.429459] qcom-iommu-ctx 1e24000.iommu-ctx: Unhandled context fault: fsr=0x40000202, iova=0x0000000000386000, fsynr=0x23, cb=4
+```
+
+P02-new-r1 (representative NEW; P03/P05/P06/P08/P09 identical in shape), UART lines:
+```
+2682 [11:46:44] [   35.060740] kexec_core: Starting new kernel
+2698 [11:46:44] [    0.000000] Linux version 7.1.0-rc6+ (sam@sam-desktop) ... #2 SMP PREEMPT Mon Sep 28 ...
+2769 [11:46:44] [    0.076747] smp: Brought up 1 node, 4 CPUs
+2875 [11:46:45] [    0.926949] qcom-iommu 1ef0000.iommu: secure pgtable already initialised (-22), reusing fixed region
+2979 [11:46:46] [    1.829033] [drm] Initialized msm 1.13.0 for 1a01000.display-controller on minor 0
+2983 [11:46:46] [    2.288330] [drm:mdp5_irq_error_handler] *ERROR* errors: 04000000
+```
+and nothing else of note through the slice end (2984) and the post-probe dmesg: 0 `Unhandled context fault`,
+exactly the one modeset underrun. The destination allocation (3 x 3686400 B at 0x2000/0x386000/0x70a000) is the
+same set of IOVAs that faulted under BASE in the row before.
+
+### 5.2 Secondary rows: S=1280x720 (extent end 0xa8e000) -> D=1280x720, and the chained hop
+
+| run | arm | source | dest | verdict (expect) | cb=4 faults | first iova | vs source map | UART lines: Starting / banner / 4 CPUs / -22 reuse / Initialized msm / first fault / end |
+|---|---|---|---|---|---|---|---|---|
+| S1-base-720-720 | BASE | fit-src-1280x720 | base gen1 | FAULTS (none; informational) | 10/10 | 0x70b000 | 9 unique 0x70b000..0x70b400 step 0x80, 0 outside / 10 INSIDE (source buffer 3 at 0x70a000+3686400) | 8746 / 8762 / 8833 / 8939 / 9038 / 9049 / 9064 (6 underruns, `vblank time out, crtc=0` at 9056) |
+| S2-new-720-720 | NEW | fit-src-1280x720 | new gen1 | CLEAN (CLEAN) | 0/0 | - | - | 9502 / 9518 / 9589 / 9695 / 9797 / - / 9804 |
+| S3-new-chain-gen2 | NEW | the S2 resident (NEW gen1; `pre-cmdline.txt` = `... pocketboot.ui=dest-new-1280x720 ... pocketboot.lab=kexec-generation-1`; the FIT argument in the ledger is recorded only, readiness W9) | new gen2 | CLEAN (CLEAN) | 0/0 | - | - | 9809 / 9825 / 9896 / 10002 / 10091 / - / 10112 |
+
+S1-base-720-720, UART lines 9047..9058 verbatim (source and destination had the identical allocation, `pre-iovas.txt`
+== `post-iovas.txt`):
+```
+9047 [11:56:10] [    2.147962] [drm:mdp5_irq_error_handler] *ERROR* errors: 04000000
+9048 [11:56:10] [    2.170354]  WARN pocketboot: no boot entries discovered
+9049 [11:56:10] [    2.214110] qcom-iommu-ctx 1e24000.iommu-ctx: Unhandled context fault: fsr=0x40000202, iova=0x000000000070b000, fsynr=0x23, cb=4
+9050 [11:56:10] [    2.214166] qcom-iommu-ctx 1e24000.iommu-ctx: Unhandled context fault: fsr=0x40000202, iova=0x000000000070b080, fsynr=0x23, cb=4
+9051 [11:56:10] [    2.224788] qcom-iommu-ctx 1e24000.iommu-ctx: Unhandled context fault: fsr=0x40000202, iova=0x000000000070b100, fsynr=0x23, cb=4
+...  (0x70b180 .. 0x70b300, lines 9052..9055)
+9056 [11:56:10] [    2.271385] msm_mdp 1a01000.display-controller: vblank time out, crtc=0
+9057 [11:56:10] [    2.282491] qcom-iommu-ctx 1e24000.iommu-ctx: Unhandled context fault: fsr=0x40000202, iova=0x000000000070b380, fsynr=0x23, cb=4
+9058 [11:56:10] [    2.300380] qcom-iommu-ctx 1e24000.iommu-ctx: Unhandled context fault: fsr=0x40000202, iova=0x000000000070b400, fsynr=0x23, cb=4
+```
+
+S3-new-chain-gen2: `cold-boot.log` shows `warm-start: reusing the running resident (no relay pulse, no U-Boot)`,
+both markers verified over adb, `resident up 18.86 s`; UART:
+```
+ 9809 [11:58:40] [   50.140304] kexec_core: Starting new kernel
+ 9825 [11:58:40] [    0.000000] Linux version 7.1.0-rc6+ ...
+10001 [11:58:41] [    0.926545] qcom-iommu 1ef0000.iommu: iommu sec: pgtable size: 94208
+10002 [11:58:41] [    0.930898] qcom-iommu 1ef0000.iommu: secure pgtable already initialised (-22), reusing fixed region
+10091 [11:58:42] [    1.629968] [drm] Initialized msm 1.13.0 for 1a01000.display-controller on minor 0
+```
+`post-cmdline.txt` ends in `pocketboot.lab=kexec-generation-2`. The board was left running this generation-2 NEW
+resident (`fastboot getvar product` = pocketboot, relay `1:off`) until 12:19, when a relay pulse returned it to
+U-Boot resident fastboot (`product: sbc`) and the UART capture was stopped for handover to another session.
+
+## 6. What it shows, and where it disagrees with the prediction
+
+1. The stale-TLB hazard is real on this SMMU across kexec and reproduces deterministically: 3/3 BASE hops faulted
+   on cb=4 with the first fault at 0x386000, the exact end of the source's mapped extent as the code model
+   predicted (predict.md section 5 row 1, "pattern A": no fault IOVA below the extent, `faults_outside_source_map=10,
+   inside=0`). The fault signature (fsr 0x40000202, fsynr 0x23 PLVL=3, cb=4) is the same encoding as the A5 line
+   in the commit message. The fault set is the rate limiter's 10 samples per 5 s; the suppressed counts show
+   ~14k faults/s sustained for as long as the destination scans out, with continuous INTF1 underruns.
+2. 390b5df1 (NEW) removes the faults: 3/3 hops clean at the identical destination allocation, 4 CPUs, msm
+   initialised, adb back, one modeset underrun each (baseline), no TLB SYNC timeout (so the reviewers' inherited-
+   stalled-transaction concern, readiness W6a, did not manifest on this board). The shipped OLD placement is
+   equally clean here (3/3): this board cannot distinguish the two placements because no master is fetching
+   between programming and the invalidate (predict.md section 5.2); the in-loop placement's argument (a master
+   already live, e.g. a bootloader-lit panel) is not exercised by this A/B.
+3. The chained NEW->NEW generation-2 hop is clean with the `-22 reusing fixed region` path exercised a second time.
+4. CONTRADICTION of the model: the same-mode BASE control S1 was predicted to be silent (predict.md section 0
+   "S == D with equal k: NO fault expected", readiness W3) but faulted 10/10 at 0x70b000..0x70b400, all inside
+   the source map (third buffer), still PLVL=3. Unlike the S<D storms these faults were transient: 10 lines within
+   ~120 ms (2.214-2.331 s, UART 9049-9060), no `callbacks suppressed` line anywhere in the S1 window and nothing
+   after 2.48 s, and they hit only buffer 3 (0x70a000, not the active scanout buffer after the hop) while the active
+   buffer 0x386000 never faulted. A leaf-level translation fault on an IOVA the source had mapped
+   means the walk went through a stale cached L2->L3 pointer into the OLD L3 table page whose memory the
+   destination kernel had already recycled (predict.md section 5.1 "pattern B"). Consequence: BASE is unsafe
+   even when the destination maps exactly the source's IOVAs; the "silent stale picture" case was not observed
+   on this board and the hazard is not limited to S<D. Interpretation, not a measurement: the fault line does not
+   say which level's cache was stale; the leaf-level PLVL on a mapped IOVA is the inference. S1 carried no EXPECT
+   and its `expect_match` is null in `result.json`.
+5. Other prediction misses, all harmless to the A/B: readiness W1 (Pocketboot would pick 1024x768 for the
+   640x480 FIT) was moot after c90012f (C2 ran at 640x480); C5 showed the kernel does not honour
+   `video=HDMI-A-1:1920x1080@30e` on this bridge (`runs/C5-cold-1920x1080/cold-dmesg.txt:282`: `msm_mdp
+   1a01000.display-controller: [drm] User-defined mode not supported: "1920x1080": 30 80192 ...`, i.e. mode_valid
+   rejected the 80.192 MHz CVT mode and the crtc fell back to a DRIVER 1280x720 mode), so
+   the 1920x1080 destinations were unused; W4 (BASE storm stalls adb -> HUNG) did not happen.
+
+## 7. Anomalies and caveats
+
+- A1: Pocketboot's kmsg tracing level defaults to WARN (`pocketboot/src/kmsg.rs:19`), no cmdline carries
+  `pocketboot.log=info`, so `starting frankenSlint UI ... width= height=`, `POCKETBOOT_DRM_READY` and the
+  `POCKETBOOT_DRM_PAGE_FLIP_TEST_*` lines never appeared; mode and flip completion were taken from
+  `dri/0/state` (crtc mode, active=1) and `dri/0/gem` (3 dumb buffers mapped) instead. Only `WARN pocketboot: no
+  boot entries discovered` is Pocketboot's.
+- A2: the destination's 1280x720 mode type varied between rows (P01 `0x20` USERDEF CVT 74440 kHz; P02..S3 `0x60`
+  DRIVER|USERDEF CEA 74250 kHz; C5 `0x40` DRIVER only): the ADV7533 sink sense flaps and sometimes supplies a
+  driver mode list. Same geometry and identical GEM allocation in every case.
+- `vblank time out, crtc=0` once on P07 and once on S1 (both BASE, during the storm); never on NEW/OLD.
+- No HDMI sink or capture dongle was attached: picture content (stale/garbage bands) was not observed, only
+  faults and underruns. No EDID, so all modes were forced.
+- Not tested here: the Samsung A5 (the commit message's original report) was not re-run with 390b5df1; HUNG/
+  hang-diag/usbreset recovery paths were never exercised; the harness timing constants were never tuned (every
+  timeout had slack); only one board, one SoC (MSM8916 apps SMMU, `qcom,msm-iommu-v1`), one TZ; the kernel is
+  Pocketboot's 7.1-rc6+ base with out-of-tree 0001-0005 and 0007, not mainline; 0007 (fixed secure page table
+  region) is required for any kexec'd qcom-iommu probe on this board and is not upstream.
+- Host-side only, no board effect: `notes/rowfields.sh` (read-only jq/grep summariser) was added during the
+  phase; two blank `rc=` annotations in board.md section 0 (zsh has no PIPESTATUS; the OK lines are the evidence).
+- The board result JSON reports S1 `expect_match=false` because its schema needs a boolean; the file of record
+  (`runs/S1-base-720-720/result.json`) has null.
+
+## 8. File map
+
+- Ledger: `L/runs/attempts.jsonl` (start/done per run, sha256s, UART line marks, seconds).
+- Per run: `L/runs/<RUN>/` with `result.json` (classify), `uart-hop.log` (the slice), `hop.log`, `cold-boot.log`,
+  `cold-boot-milestones.txt`, `fastboot-boot.txt`, `inputs.sha256`, `dest-cmdline.txt`, `pre-*`/`post-*` probes
+  (`cmdline uptime iomem dri drm iommu gem state fb dmesg cpus kexec_loaded`, `iovas.{txt,json}`); controls use
+  `cold-*`. Console transcripts: `L/runs/<RUN>.console.log`.
+- Full UART capture: `L/uart/db410c-uart.log` (host-timestamped, all line numbers above).
+- Narrative: `L/notes/board.md` (board agent, timestamped), `predict.md` (model), `readiness.md` (gates/warnings),
+  `build.md`/`rebuild.md`/`package.md` (build recipes), `review-*.md` (code/message reviews).
+- Inputs: `L/build/MANIFEST-kernels.txt`, `L/images/MANIFEST.txt`, `L/patches/000{1..8}-*.patch`,
+  `L/harness/matrix-final.tsv`.
