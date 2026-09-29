@@ -1,0 +1,34 @@
+Ferrari catch-up: distinguish hardware reports from inferred implementation paths
+Artifact commit: samcday/pocketboot ccad54103dea2405701caf338ee92527b3881b1b
+CI run36504432549, artifact bootimg-qcom-msm8939-xiaomi-ferrari
+boot.img SHA256:56cee5ca098c4ed66e3f845899cf7683ed7e738f991fdcfc051294723344caf0
+Bootloader kernel source: pem120/linux45add32603ee4aa28979ad6ec70c10b14af4ac29 plus configured patches; destination reported as an older7.0 tree, exact target commit not supplied.
+
+Device-owner reports in the shared conversation (not independent device access by this check):
+- postmarketOS loads from pocketboot; supplied local boot.img hash matches the above artifact.
+- destination boot log lists CPU1..CPU7 MPIDRs0x101,0x102,0x103,0,1,2,3; "smp: Brought up 1 node, 8 CPUs", "SMP: Total of 8 processors activated.", "CPU: All CPU(s) started at EL1".
+- destination nproc outputs8.
+- reboot and boot again succeeds.
+- stress-ng saturates all CPUs without reported problems; exact command/duration/output not supplied.
+- destination display is absent after pocketboot handoff, but works when booted without pocketboot via lk2nd.
+
+Limits/corrections:
+- Eight-CPU bring-up and reported load/reboot success are real positive evidence. They do not prove a shared-memory coherency soak, repeated kexec generations, a particular park-ack sequence from a trace, or retention/reclamation of the same RAM page over reset.
+- In particular, repeat boot does NOT prove the occupied-page reclaim branch executed: firmware could have cleared/replaced the RAM. That source fix already merged in PR29 on2026-09-24 as4e5bb73858e666b322803b6a8b8866dca7fc2dfb, immediate parent of current main79cdf784c476be70f7f58cd73b37dfaeb0bf1c6f.
+- Exact successful installation/entry route (OEM bootloader directly versus lk2nd chaining) is not established by the image hash. Do not silently assume it from prior assistant descriptions.
+
+Panel source verification, lk2nd8b46487c4c76776c4f2f61468d44a74c69e6b9ea:
+- lk2nd/device/2nd/parse-cmdline.c79-109 parses incoming mdss_mdp.panel= and mdss_mdp3.panel=; parse_panel29-60 extracts panel.name. This is not evidence of a separate GCDB partition being read, as previously claimed.
+- lk2nd/device/panel.c92-110 finds the placeholder compatible in the outgoing OS DT and changes that compatible property. Detection21-90 builds new+old string lists unless replace-compatible is set.
+- lk2nd/device/dts/msm8916/msm8939-mtp.dts Ferrari entry maps the Sharp/JDI OEM panel names to xiaomi,sharp-rsp61322 and xiaomi,jdi-nt35595. xiaomi,ferrari-panel is an intentional placeholder, not an accidentally missing driver.
+- app/aboot/aboot.c1086-1096 keeps normal non-Android OS command lines unchanged under GENERATE_CMDLINE_ONLY_FOR_ANDROID. Generic Android display-commandline assembly is not proof that the original OEM commandline reaches pocketboot through lk2nd.
+- Ordinary compatible fallback lists do not prove an lk2nd rewrite. A global node-basename/suffix-compatible graft would be overbroad; no such production fix is approved by this audit.
+
+Host reproduction of pocketboot-to-pocketboot fastboot boot failure:
+Downloaded the exact CI artifact again and verified the full SHA256 above. Read Androidv0 kernel_size at file+8 and page_size atfile+36; extracted kernel section at page_size for kernel_size bytes (5083892 bytes). Compiled a scratch Rust program with flate2=1.1.9 using cargo generate-lockfile --offline and cargo run --locked --offline. No firmware or target code executed.
+- flate2::read::MultiGzDecoder::new(section).read_to_end reports InvalidInput "invalid gzip header" after producing12779520 bytes.
+- flate2::bufread::GzDecoder reads the first member successfully; ARM64 header magic is present at output+56.
+- into_inner() returns48897 bytes beginning d00dfeed; FDT totalsize at trailer+4 is48897.
+This directly reproduces the reported error with the advertised image: it is a gzip member followed by an FDT, not a corrupt first gzip member. A proper fix must preserve/validate/select the FDT, not merely ignore trailing bytes or retry without CRC checks.
+
+Scope of this catch-up: public-source reads, artifact inspection and host decompression only. No phone operations, flashing, code/branch edits or hardware acceptance beyond the attributed reports above.
