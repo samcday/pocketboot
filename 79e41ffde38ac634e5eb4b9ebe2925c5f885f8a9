@@ -1,0 +1,32 @@
+# expressltexx independent build with ARM32 loader
+Repository: https://github.com/samcday/pocketboot
+Commit: 79e41ffde38ac634e5eb4b9ebe2925c5f885f8a9
+Base: 49fa74522b93de44bc1c80d526b540a715cb6cf1 (ARM32 implementation)
+UTC: 2026-09-29T22:17:10.330032+00:00
+
+Ran on this branch in the project CI container
+  ghcr.io/samcday/pocketboot-ci:df-308fa9a36a632a0c6407cd5e8b241765ff35490924769332169de1459bbf82e8
+  cargo test -p xtask
+  cargo xtask build qcom/msm8930-samsung-expressltexx
+Both exited 0; 54 xtask tests passed. Full boot image built with the ARM32
+userspace loader included. Device source pin/boot layout match the original
+recipe evidenced on commit 8e4973308b9df68b8cf086a31ce6e34affde8c44 in this repo.
+
+Artifact: target/kernel/qcom/msm8930-samsung-expressltexx/boot.img
+Bytes: 4388864
+SHA256: 4561f5fa4e39db9bfc32203e5356d64d22c1e4bec898e485d3bb16f928bd8633
+
+Post-build checks: Python struct decoder verified ANDROID! v0 header, 2048
+page size, configured kernel/ramdisk/second/tags addresses and ramdisk size;
+kernel payload byte-for-byte equals built zImage + the correct processed DTB.
+fdtget verifies compatible samsung,expressltexx qcom,msm8930.
+check-decompressor.py on arch/arm/boot/compressed/vmlinux passed: BSS/gap=24,
+stack=4096 bytes, relocation code within file. Thus the rebuilt image's
+compression configuration remains within the base loader's documented bound.
+
+Git diff against astra/arm32-kexec contains only this device's configuration,
+README/guide and xtask regression. The other device's changes are not a
+prerequisite. Base updates were merged without rewriting published history.
+
+No phone was connected, booted or flashed. Base commit's evidence records
+real QEMU handoffs; that is not Qualcomm hardware validation.
