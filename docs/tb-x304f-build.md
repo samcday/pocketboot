@@ -156,6 +156,11 @@ unchanged DTB: 4,784,128 bytes, SHA-256
 `c707c18b92da380fdc2bfe9158c7c10e33cc09acda09957da186a52fdd03124b`.
 The generated config confirms fbdev emulation, the fbdev default DRM client,
 fbcon, and their fbdev-core dependency are built in. Gzip/Image/DTB inspection
-and the 54 build-tool tests passed again. This candidate has not been
-hardware-tested and is an observability improvement, not a demonstrated USB
-fix.
+and the 54 build-tool tests passed again. LK2nd accepted this second candidate,
+but no USB appeared within 45 seconds and the screen was black when checked
+later. This is not a demonstrated USB fix.
+
+`PSTORE_CONSOLE` is now enabled for the next retained-log trial. Its successful
+rebuild does not verify kernel entry, RAM retention, or the retrieval path.
+The latest observed hardware state and logging-region checks belong in the
+linked bring-up record.

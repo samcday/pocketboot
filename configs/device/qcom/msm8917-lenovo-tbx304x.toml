@@ -21,6 +21,9 @@ DRM_FBDEV_EMULATION = true
 DRM_CLIENT_DEFAULT_FBDEV = true
 FRAMEBUFFER_CONSOLE = true
 
+# Retain printk output once the RAM-backed pstore console registers.
+PSTORE_CONSOLE = true
+
 # First boot needs no native display/GPU, remoteproc firmware or charger policy.
 # simpledrm consumes the framebuffer created by LK2nd, not the native DSI panel.
 # Use =n for hidden symbols: this tree's strict merge script distinguishes it

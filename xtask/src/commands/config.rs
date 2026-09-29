@@ -801,6 +801,8 @@ mod tests {
             "DRM_FBDEV_EMULATION",
             "DRM_CLIENT_DEFAULT_FBDEV",
             "FRAMEBUFFER_CONSOLE",
+            "PSTORE_RAM",
+            "PSTORE_CONSOLE",
         ] {
             assert!(
                 kconfig.contains(&format!("CONFIG_{symbol}=y\n")),

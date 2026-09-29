@@ -13,14 +13,14 @@ record, not a claim that PocketBoot supports this tablet yet.
   capture working. Nothing was installed into `boot` or `aboot`.
 - Stock Android now asks for its startup/decryption password. No factory
   reset has been issued; Android is not needed for the transient boot path.
-- Returning from lk2nd with `fastboot reboot bootloader` landed in Android,
-  not stock fastboot. Physical fastboot entry is still needed; unattended
-  reset recovery is not established.
-- A quieter lk2nd build with an experimental IMEM restart setting also
-  booted. That setting's return-to-fastboot behavior is not yet tested.
-- The first 4.7 MB PocketBoot image was accepted by lk2nd, but no tablet USB
-  interface appeared within 45 seconds. Linux entry and userspace are not
-  confirmed; screen evidence is still needed.
+- The original PON-mode lk2nd returned to Android instead of stock fastboot.
+  The device-scoped IMEM build now returns to stock fastboot in 2.08 seconds.
+  This is a working soft-reboot path from lk2nd, not recovery from a hung
+  Linux kernel; button recovery is still needed for the latter.
+- Both the initial PocketBoot image and its framebuffer-console follow-up
+  were accepted by lk2nd, but neither produced tablet USB within 45 seconds.
+  Both screens were black when checked later. Linux entry and userspace are
+  unconfirmed; retained diagnostics are the next step.
 
 ## Verified starting state
 
@@ -366,16 +366,26 @@ and panel in 0.849 seconds from the host's boot invocation. Its screenshot
 shows a readable menu without debug text drawn over it.
 
 LK2nd reported `MPIDR=0x80000100` and `MIDR=0x410fd034`, consistent with
-the board port's boot CPU. The new restart protocol has **not** yet been
-tested by rebooting this build; the next action was the kernel trial below.
+the board port's boot CPU. A later controlled `fastboot reboot bootloader`
+test returned to stock `product=MSM8917` in **2.08 seconds**, with unlocked
+state preserved. The same lk2nd image then RAM-booted again successfully.
+This verifies the requested mode transition from a running lk2nd, not Linux
+panic handling or recovery from an arbitrary hang.
+
+A preceding `oem debug readl 0x8ee00000` probe reset lk2nd and returned to
+stock fastboot without capturing any RAM-log data. Do not repeat it: that
+command directly dereferences an lk2nd virtual address; a Linux DT physical
+reservation does not establish an lk2nd mapping. The reset alone is not
+evidence that the Linux reserved region is protected or invalid. Use the
+supported `oem ramoops` path with a matching handoff instead.
 
 ## Kernel and boot-image prerequisites
 
 The lk2nd addition is a bootloader port, not a Linux board port. Upstream Linux
 has [MSM8917 SoC support][linux-msm8917], but this audit did not find a
 TB-X304F board DT in upstream Linux or a TB-X304F-specific postmarketOS device
-profile. PocketBoot has neither an MSM8917/APQ8017 SoC configuration nor a
-TB-X304 device configuration.
+profile. PocketBoot now has experimental SoC/device configurations using
+the separate board-port source below.
 
 An existing mainline-oriented board port was subsequently found in
 [`pem120/linux-msm89x7`][pem120-dts], branch `lenovo-tbx304`, commit
@@ -404,8 +414,9 @@ for download (0.148 s) and boot (0.230 s), total 0.381 s. Afterward no USB
 device appeared on the tablet's physical port within 45 seconds. There was
 no PocketBoot fastboot/ADB/ACM identity to query. A host boot acknowledgement
 does not establish Linux entry or userspace startup; neither is confirmed.
-The screen/panic state remains to be inspected before resetting the device.
-No image was flashed and no factory reset was performed.
+The owner observed a black screen later, without watching the handoff, and
+returned it to fastboot with the buttons. No image was flashed and no factory
+reset was performed.
 
 Static comparison against the stock image found no proven CPU/PSCI, GIC,
 packaging, or USB-config defect. It did identify a diagnostic gap: the first
@@ -415,9 +426,16 @@ unchanged screen would therefore not prove that Linux never ran.
 The next candidate enables the fbdev DRM client and framebuffer console
 without changing the DTB or initramfs. It is 4,784,128 bytes, SHA-256
 `c707c18b92da380fdc2bfe9158c7c10e33cc09acda09957da186a52fdd03124b`.
-Build, generated-config, and image-layout checks passed; it has not been
-booted. This should expose normal kernel text once simpledrm probes, not
-pre-framebuffer failures. It is not yet a fix for the missing USB interface.
+Build, generated-config, and image-layout checks passed. Its second trial
+was accepted by lk2nd in 0.383 seconds but again produced no tablet USB
+within 45 seconds; the owner again saw a black screen later and returned it
+to fastboot. The enabled console only helps after simpledrm probes, so this
+does not locate the failure before or after Linux entry.
+
+Instead of depending on a live view of the screen, the next logging profile
+enables `PSTORE_CONSOLE`. The rebuilt config and kernel include that frontend.
+Its region must be shared with lk2nd's supported ramoops exporter; RAM-log
+retention through the actual button-reset sequence is not yet verified.
 
 ## First-boot milestones
 
