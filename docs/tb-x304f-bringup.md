@@ -115,7 +115,8 @@ fuses; do not attempt fuse changes.
 Source audit on 2026-09-29 found a useful distinction between the local
 checkout, the latest release, and upstream development:
 
-- The inspected local `~/src/lk2nd` checkout has no TB-X304 device definition.
+- The inspected local `~/src/lk2nd` checkout at `4a88d4cc9` has no TB-X304
+  device definition.
 - Upstream [commit 517bb38][lk2nd-tbx304x] adds **Lenovo Tab 4 10x (TB-X304x)**
   in `lk2nd/device/dts/msm8952/msm8917-qrd-sku5.dts`, built by the
   `lk2nd-msm8952` target. Its root uses `qcom,msm-id = <QCOM_ID_MSM8917 0>`
@@ -135,6 +136,26 @@ with that definition, record the exact source revision, and build a matching
 candidate. Do not use the older generic release just because its SoC-family
 name looks plausible. Neither an lk2nd boot nor a PocketBoot boot has been
 tested on this unit.
+
+## Kernel and boot-image prerequisites
+
+The lk2nd addition is a bootloader port, not a Linux board port. Upstream Linux
+has [MSM8917 SoC support][linux-msm8917], but this audit did not find a
+TB-X304F board DT in upstream Linux or a TB-X304F-specific postmarketOS device
+profile. PocketBoot has neither an MSM8917/APQ8017 SoC configuration nor a
+TB-X304 device configuration.
+
+The [downstream TBX304 kernel DTS][downstream-dts] and its panel definitions
+are useful reference material. They describe MSM8917/PMI8937 QRD SKU5 with
+`qcom,board-id = <0x1000b 0>`; they are not a ready-to-use mainline DT or proof
+of this Wi-Fi unit's IDs. A matching mainline board DT still needs to be
+located or developed and validated.
+
+Also distinguish [lk2nd's 512 KiB partition offset][lk2nd-boot] from an Android
+boot-header kernel load offset: the former reserves the start of `boot` for
+lk2nd when it is installed persistently. It is not a PocketBoot kernel load
+address. Derive this tablet's image layout from verified sources, not another
+Qualcomm device's configuration.
 
 ## First-boot milestones
 
@@ -189,4 +210,7 @@ contract has actually been tested.
 [lk2nd-tbx304x]: https://github.com/msm8916-mainline/lk2nd/commit/517bb38a409d4ac982f09e83a046e4dc71be5029
 [lk2nd-release]: https://github.com/msm8916-mainline/lk2nd/releases/tag/23.1
 [lk2nd-pr]: https://github.com/msm8916-mainline/lk2nd/pull/664
+[lk2nd-boot]: https://github.com/msm8916-mainline/lk2nd/blob/main/Documentation/boot.md
+[linux-msm8917]: https://github.com/torvalds/linux/blob/master/arch/arm64/boot/dts/qcom/msm8917.dtsi
+[downstream-dts]: https://github.com/lenovo-devs/android_kernel_lenovo_msm8953/blob/lineage-16.0-tbx304/arch/arm/boot/dts/qcom/tbx304-msm8917-pmi8937-qrd-sku5.dts
 [lab-relay]: https://github.com/samcday/skills/pull/1
