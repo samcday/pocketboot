@@ -1,0 +1,72 @@
+From: PocketBoot developers <noreply@pocketboot.org>
+Subject: [PATCH 2/2] arm64: dts: qcom: tbx304x: minimal LK2nd handoff
+
+PocketBoot-only boot policy, not a general-purpose board-port change:
+
+Request the firmware framebuffer via lk2nd.pass-simplefb. LK2nd creates
+the simple-framebuffer node and its no-map reservation using the actual
+display geometry and format. Remove the static framebuffer and reservation
+to avoid overlapping reservations and dependencies on native DSI PLL
+drivers. The experimental command line preserves unused clocks, power
+domains and regulators instead of taking native display ownership.
+
+Use USB only as a peripheral for initial diagnostics. Drop the charger
+extcon and host VBUS dependencies so gadget probing does not need the
+SMBCHG driver or its battery/charging policy.
+
+Keep the board port's remaining memory reservations and PSCI CPU method.
+No RAM size, CPU parking protocol or native panel assumptions are added.
+
+diff --git a/arch/arm64/boot/dts/qcom/msm8917-lenovo-tbx304x.dts b/arch/arm64/boot/dts/qcom/msm8917-lenovo-tbx304x.dts
+--- a/arch/arm64/boot/dts/qcom/msm8917-lenovo-tbx304x.dts
++++ b/arch/arm64/boot/dts/qcom/msm8917-lenovo-tbx304x.dts
+@@ -43,25 +43,7 @@
+ 		#size-cells = <2>;
+ 		ranges;
+ 
+-		stdout-path = "framebuffer0";
+-
+-		framebuffer0: framebuffer@90001000 {
+-			compatible = "simple-framebuffer";
+-			reg = <0x0 0x90001000 0x0 (800 * 1280 * 3)>;
+-			width = <800>;
+-			height = <1280>;
+-			stride = <(800 * 3)>;
+-			format = "r8g8b8";
+-			clocks = <&gcc GCC_MDSS_AHB_CLK>,
+-				 <&gcc GCC_MDSS_AXI_CLK>,
+-				 <&gcc GCC_MDSS_VSYNC_CLK>,
+-				 <&gcc GCC_MDSS_MDP_CLK>,
+-				 <&gcc GCC_MDSS_BYTE0_CLK>,
+-				 <&gcc GCC_MDSS_PCLK0_CLK>,
+-				 <&gcc GCC_MDSS_ESC0_CLK>;
+-			power-domains = <&gcc MDSS_GDSC>;
+-			status = "disabled";
+-		};
++		/* LK2nd supplies simple-framebuffer and its memory reservation. */
+ 	};
+ 
+ 	gpio-keys {
+@@ -99,11 +81,6 @@
+ 	};
+ 
+ 	reserved-memory {
+-		framebuffer_mem: framebuffer@90001000 {
+-			reg = <0x0 0x90001000 0x0 (1280 * 800 * 3)>;
+-			no-map;
+-		};
+-
+ 		ramoops_mem: ramoops@8ee00000 {
+ 			compatible = "ramoops";
+ 			reg = <0x0 0x8ee00000 0x0 0x80000>;
+@@ -448,9 +425,7 @@
+ };
+ 
+ &usb {
+-	dr_mode = "otg";
+-	extcon = <&pmi8950_smbcharger>, <&pmi8950_smbcharger>;
+-	vbus-supply = <&otg_vbus>;
++	dr_mode = "peripheral";
+ 	status = "okay";
+ };
+ 

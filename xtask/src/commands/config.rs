@@ -732,6 +732,7 @@ mod tests {
             "qcom/msm8930-samsung-expressltexx",
             "qcom/msm8916-samsung-a5u-eur",
             "qcom/msm8916-samsung-gt510",
+            "qcom/msm8917-lenovo-tbx304x",
             "qcom/msm8953-xiaomi-daisy",
             "qcom/sdm670-google-sargo",
             "qcom/sdm845-google-crosshatch",
@@ -757,6 +758,77 @@ mod tests {
                 assert!(kconfig.contains("CONFIG_KEYBOARD_GPIO=y\n"));
             }
         }
+    }
+
+    #[test]
+    fn tbx304x_is_a_minimal_lk2nd_arm64_target() {
+        let workspace_root = super::super::workspace_root().unwrap();
+        let device = KernelDevice::parse("qcom/msm8917-lenovo-tbx304x").unwrap();
+        let config = load_device_config(&workspace_root, &device).unwrap();
+        let source = config.kernel_source.as_ref().unwrap();
+        assert_eq!(source.scope, KernelSourceScope::Device);
+        assert_eq!(source.remote, "https://github.com/pem120/linux-msm89x7.git");
+        assert_eq!(source.sha, "a51b91b503307d35902447dd1f90db765372cf3b");
+        assert_eq!(source.patches.len(), 2);
+        for patch in &source.patches {
+            assert!(workspace_root.join(patch).is_file());
+        }
+        assert_eq!(
+            super::super::kernel::kernel_dtb_stem(&config.kernel, &device).unwrap(),
+            device.stem
+        );
+        assert_eq!(
+            super::super::kernel::kernel_arch(&config.kernel).unwrap(),
+            "arm64"
+        );
+        assert!(config.features.contains("busybox"));
+
+        let kconfig = config.kconfig_contents().unwrap();
+        for symbol in [
+            "MSM_GCC_8917",
+            "PINCTRL_MSM8917",
+            "QCOM_SMD_RPM",
+            "QCOM_RPMPD",
+            "REGULATOR_QCOM_SMD_RPM",
+            "MMC_SDHCI_MSM",
+            "USB_CHIPIDEA",
+            "USB_CHIPIDEA_UDC",
+            "USB_CHIPIDEA_MSM",
+            "PHY_QCOM_USB_HS_28NM",
+            "USB_CONFIGFS_ACM",
+            "USB_CONFIGFS_F_FS",
+            "DRM_SIMPLEDRM",
+        ] {
+            assert!(
+                kconfig.contains(&format!("CONFIG_{symbol}=y\n")),
+                "{symbol}"
+            );
+        }
+        assert!(kconfig.contains("CONFIG_NR_CPUS=4\n"));
+        assert!(!kconfig.contains("CONFIG_ARM64_SPIN_TABLE_KEXEC=y"));
+        assert!(!kconfig.contains("CONFIG_USB_DWC3=y"));
+        assert!(!kconfig.contains("CONFIG_DRM_MSM=y"));
+        assert!(!kconfig.contains("CONFIG_RUST=y"));
+
+        let bootimg = config.bootimg.unwrap();
+        assert_eq!(bootimg.header_version, 0);
+        assert_eq!(bootimg.page_size, 2048);
+        assert_eq!(bootimg.kernel_image, "Image.gz");
+        assert_eq!(bootimg.base, 0x80000000);
+        assert_eq!(bootimg.kernel_offset, 0x80000);
+        assert_eq!(bootimg.ramdisk_offset, 0x3600000);
+        assert_eq!(bootimg.tags_offset, 0x3400000);
+        assert_eq!(bootimg.ramdisk_size, 0);
+        assert!(bootimg.append_dtb);
+        assert!(bootimg.preboot.is_none());
+        assert!(bootimg.qcdt.is_none());
+        assert!(bootimg.dtbh.is_none());
+        assert!(
+            bootimg
+                .cmdline
+                .split_whitespace()
+                .any(|arg| arg == "lk2nd.pass-simplefb")
+        );
     }
 
     #[test]
