@@ -99,6 +99,16 @@ impl Handle {
     pub(crate) fn action_receiver(&self) -> async_channel::Receiver<Action> {
         self.actions.clone()
     }
+
+    pub(crate) fn boot_failed(&self, message: String) {
+        if self
+            .commands
+            .try_send(Command::BootFailed(message))
+            .is_err()
+        {
+            tracing::debug!("UI command channel disconnected");
+        }
+    }
 }
 
 enum Command {
@@ -106,6 +116,7 @@ enum Command {
         entries: Vec<BootMenuEntryInfo>,
         scan_complete: bool,
     },
+    BootFailed(String),
 }
 
 pub(crate) fn spawn(
@@ -192,12 +203,16 @@ fn run(
             tracing::error!(action = ?action, error = %err, "power action failed");
         }
     });
+    let boot_window = main_window.as_weak();
     main_window.on_boot_entry_selected(move |index| {
         let Ok(index) = usize::try_from(index) else {
             return;
         };
         if actions.try_send(Action::BootEntry(index)).is_err() {
             tracing::debug!("UI action receiver disconnected");
+            if let Some(window) = boot_window.upgrade() {
+                window.invoke_report_boot_failure("Boot coordinator is unavailable".into());
+            }
         }
     });
     main_window
@@ -751,6 +766,7 @@ fn apply_command(window: &MainWindow, command: Command) {
             entries,
             scan_complete,
         } => apply_boot_entries(window, entries, scan_complete),
+        Command::BootFailed(message) => window.invoke_report_boot_failure(message.into()),
     }
 }
 
@@ -771,6 +787,52 @@ fn apply_boot_entries(window: &MainWindow, entries: Vec<BootMenuEntryInfo>, scan
     window.set_boot_scan_complete(scan_complete);
     window.set_booting_index(-1);
     window.invoke_refresh_boot_selection();
+}
+
+#[cfg(test)]
+mod boot_recovery_tests {
+    use super::*;
+
+    #[test]
+    fn failed_boot_restores_selection_and_allows_retry() {
+        let adapter = MinimalSoftwareWindow::new(RepaintBufferType::NewBuffer);
+        slint::platform::set_platform(Box::new(PocketPlatform::new(adapter))).unwrap();
+        let window = MainWindow::new().unwrap();
+        window.window().set_size(PhysicalSize::new(540, 960));
+        apply_boot_entries(
+            &window,
+            vec![BootMenuEntryInfo {
+                title: "postmarketOS".into(),
+                subtitle: "test".into(),
+                detail: String::new(),
+                badge: String::new(),
+            }],
+            true,
+        );
+        let attempts = Rc::new(std::cell::Cell::new(0));
+        let attempts_callback = attempts.clone();
+        window.on_boot_entry_selected(move |index| {
+            assert_eq!(index, 0);
+            attempts_callback.set(attempts_callback.get() + 1);
+        });
+        window.invoke_hardware_power_short_press();
+        assert_eq!(window.get_booting_index(), 0);
+        assert_eq!(attempts.get(), 1);
+        window.invoke_hardware_power_short_press();
+        assert_eq!(attempts.get(), 1, "do not queue a second in-flight boot");
+
+        apply_command(
+            &window,
+            Command::BootFailed("missing parking contract".into()),
+        );
+        assert_eq!(window.get_booting_index(), -1);
+        assert_eq!(window.get_hardware_selected_index(), 0);
+        assert_eq!(window.get_boot_error(), "missing parking contract");
+        window.invoke_hardware_power_short_press();
+        assert_eq!(window.get_booting_index(), 0);
+        assert_eq!(window.get_boot_error(), "");
+        assert_eq!(attempts.get(), 2);
+    }
 }
 
 struct BatteryUpdates {

@@ -21,6 +21,7 @@ export component MainWindow inherits Window {
     in-out property <int> boot-entry-count: 0;
     in-out property <bool> boot-scan-complete: false;
     in-out property <int> booting-index: -1;
+    in-out property <string> boot-error: "";
     in-out property <int> hardware-selected-index: -1;
     in-out property <bool> battery-known: false;
     in-out property <int> battery-percent: 0;
@@ -107,6 +108,22 @@ export component MainWindow inherits Window {
         root.clamp-boot-selection();
     }
 
+    public function report-boot-failure(message: string) {
+        root.booting-index = -1;
+        root.boot-error = message;
+        root.clamp-boot-selection();
+    }
+
+    function request-boot(index: int) {
+        if (root.booting-index >= 0 || index < 0 || index >= root.boot-entry-count) {
+            return;
+        }
+        root.boot-error = "";
+        root.hardware-selected-index = index;
+        root.booting-index = index;
+        root.boot-entry-selected(index);
+    }
+
     function activate-boot-selection() {
         if (root.booting-index >= 0 || root.boot-entry-count <= 0) {
             return;
@@ -114,8 +131,7 @@ export component MainWindow inherits Window {
 
         root.clamp-boot-selection();
         if (root.hardware-selected-index >= 0) {
-            root.booting-index = root.hardware-selected-index;
-            root.boot-entry-selected(root.hardware-selected-index);
+            root.request-boot(root.hardware-selected-index);
         }
     }
 
@@ -389,14 +405,16 @@ export component MainWindow inherits Window {
             vertical-alignment: center;
         }
 
-        Text {
+        boot_status := Text {
             width: parent.width - 48px;
-            height: 32px;
+            height: root.boot-error != "" ? 96px : 32px;
             x: 24px;
             y: 68px;
-            text: root.booting-index >= 0 ? "Loading kernel and preparing kexec" : root.boot-scan-complete ? "Tap an entry or use volume + power" : "Scanning continues in the background";
-            color: #94a3b8;
+            text: root.boot-error != "" ? root.boot-error : root.booting-index >= 0 ? "Loading kernel and preparing kexec" : root.boot-scan-complete ? "Tap an entry or use volume + power" : "Scanning continues in the background";
+            color: root.boot-error != "" ? #fca5a5 : #94a3b8;
             font-size: 22px;
+            wrap: word-wrap;
+            overflow: elide;
             horizontal-alignment: left;
             vertical-alignment: center;
         }
@@ -406,7 +424,7 @@ export component MainWindow inherits Window {
             width: parent.width - 48px;
             height: 80px;
             x: 24px;
-            y: 138px;
+            y: boot_status.y + boot_status.height + 38px;
             text: "Scanning local boot media...";
             color: #cbd5e1;
             font-size: 26px;
@@ -419,7 +437,7 @@ export component MainWindow inherits Window {
             width: parent.width - 48px;
             height: 112px;
             x: 24px;
-            y: 128px;
+            y: boot_status.y + boot_status.height + 28px;
             text: "No directly bootable entries found";
             color: #cbd5e1;
             font-size: 26px;
@@ -432,7 +450,7 @@ export component MainWindow inherits Window {
             width: parent.width - 48px;
             height: parent.height - self.y - 24px;
             x: 24px;
-            y: 116px;
+            y: boot_status.y + boot_status.height + 16px;
             viewport-width: self.width;
             viewport-height: root.boot-entry-count * 126px;
 
@@ -508,10 +526,7 @@ export component MainWindow inherits Window {
                     height: parent.height;
 
                     clicked => {
-                        if (root.booting-index < 0) {
-                            root.booting-index = index;
-                            root.boot-entry-selected(index);
-                        }
+                        root.request-boot(index);
                     }
                 }
             }

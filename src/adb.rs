@@ -112,6 +112,11 @@ pub(crate) struct EventLoop {
 }
 
 impl EventLoop {
+    #[cfg(test)]
+    pub(crate) fn from_test_thread(stop: Arc<AtomicBool>, thread: thread::JoinHandle<()>) -> Self {
+        Self { stop, thread }
+    }
+
     fn spawn(mut custom: Custom) -> io::Result<Self> {
         let stop = Arc::new(AtomicBool::new(false));
         let thread_stop = stop.clone();
@@ -154,6 +159,14 @@ pub(crate) struct ServerHandle {
 }
 
 impl ServerHandle {
+    #[cfg(test)]
+    pub(crate) fn from_test_thread(
+        stop: Arc<AtomicBool>,
+        thread: thread::JoinHandle<io::Result<()>>,
+    ) -> Self {
+        Self { stop, thread }
+    }
+
     pub(crate) fn stop(&self) {
         self.stop.store(true, Ordering::Relaxed);
     }

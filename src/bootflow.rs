@@ -122,6 +122,26 @@ impl BootEntry {
         let image = KexecImage::new(kernel, initrd, dtb, &self.cmdline())?;
         image.load()
     }
+
+    #[cfg(test)]
+    pub(crate) fn test_entry(id: &str, options: &str) -> Self {
+        Self {
+            id: id.to_string(),
+            title: None,
+            version: None,
+            architecture: None,
+            source: PathBuf::from("/boot/extlinux/extlinux.conf"),
+            role: BootPartitionRole::Nested,
+            disk: "sda".to_string(),
+            partition: "sda28p1".to_string(),
+            preferred: false,
+            linux: PathBuf::from("/boot/vmlinuz"),
+            initrds: Vec::new(),
+            dtb: None,
+            options: vec![options.to_string()],
+            boot_order: 0,
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -3003,22 +3023,9 @@ mod tests {
     }
 
     fn boot_entry_for_order(id: &str, boot_order: u32) -> BootEntry {
-        BootEntry {
-            id: id.to_string(),
-            title: None,
-            version: None,
-            architecture: None,
-            source: PathBuf::from("/boot/extlinux/extlinux.conf"),
-            role: BootPartitionRole::Nested,
-            disk: "sda".to_string(),
-            partition: "sda28p1".to_string(),
-            preferred: false,
-            linux: PathBuf::from("/boot/vmlinuz"),
-            initrds: Vec::new(),
-            dtb: None,
-            options: Vec::new(),
-            boot_order,
-        }
+        let mut entry = BootEntry::test_entry(id, "");
+        entry.boot_order = boot_order;
+        entry
     }
 
     fn mbr_entry(boot: u8, sys: u8, starting_lba: u32, sectors: u32) -> mbrman::MBRPartitionEntry {

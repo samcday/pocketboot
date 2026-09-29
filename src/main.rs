@@ -21,6 +21,7 @@ mod kmsg;
 mod kmsg_forwarder;
 mod pe;
 mod power;
+mod pstore;
 #[cfg(feature = "qemu")]
 mod qemu;
 mod reaper;
@@ -49,6 +50,9 @@ const DEFAULT_DEVICE_DETAIL: &str = "LinuxBoot environment";
 
 fn main() {
     if let Err(err) = runtime::block_on(run()) {
+        // PID 1 exiting is an unrecoverable kernel panic. Keep the reason in the
+        // kernel log so a UART-free capture (ramoops/pstore) still has it.
+        kmsg::emergency_log(format_args!("unrecoverable error: {err}"));
         println!("pocketboot error: {}", err);
         thread::sleep(Duration::from_secs(1));
     }
@@ -68,6 +72,7 @@ async fn run() -> Result<()> {
 
     kmsg::init_tracing(&cmdline);
     tracing::info!("starting up");
+    pstore::capture();
     reaper::spawn();
     getty::spawn(&cmdline);
 
@@ -105,12 +110,6 @@ async fn run() -> Result<()> {
     };
     let gadget = gadget::Gadget::new(serialno.clone());
     let acm = cmdline.is_set(ACM_CMDLINE_PARAM);
-    let fastboot_thread = gadget
-        .spawn(gadget::Mode::Fastboot {
-            commands: fastboot_commands(gadget.clone(), serialno, cmdline.clone()),
-            acm,
-        })
-        .map_err(|err| format!("spawn fastboot gadget thread: {err}"))?;
     #[cfg(feature = "qemu")]
     if let Err(err) = qemu::spawn() {
         tracing::warn!(error = ?err, "failed to spawn QEMU USB/IP service");
@@ -125,11 +124,29 @@ async fn run() -> Result<()> {
     if let Some(ui) = &ui {
         spawn_ui_action_forwarder(ui, event_tx.clone());
     }
-    spawn_fastboot_joiner(fastboot_thread, event_tx.clone());
+    spawn_fastboot_service(
+        gadget.clone(),
+        serialno.clone(),
+        cmdline.clone(),
+        acm,
+        event_tx.clone(),
+        Duration::ZERO,
+    );
     spawn_boot_discovery(event_tx.clone());
-    drop(event_tx);
 
-    run_boot_coordinator(ui.as_ref(), event_rx).await?;
+    // Retain a sender even when no UI or gadget is running. Losing recovery
+    // interfaces must not close the coordinator channel and terminate PID 1.
+    run_boot_coordinator(ui.as_ref(), event_rx, || {
+        spawn_fastboot_service(
+            gadget.clone(),
+            serialno.clone(),
+            cmdline.clone(),
+            acm,
+            event_tx.clone(),
+            Duration::from_secs(1),
+        );
+    })
+    .await?;
     Ok(())
 }
 
@@ -156,12 +173,27 @@ fn spawn_ui_action_forwarder(ui: &ui::Handle, event_tx: async_channel::Sender<Co
     });
 }
 
-fn spawn_fastboot_joiner(
-    fastboot_thread: thread::JoinHandle<gadget::ThreadResult>,
+fn spawn_fastboot_service(
+    gadget: gadget::Gadget,
+    serialno: String,
+    cmdline: cmdline::KernelCommandLine,
+    acm: bool,
     event_tx: async_channel::Sender<CoordinatorEvent>,
+    delay: Duration,
 ) {
     runtime::detach(async move {
-        let result = runtime::unblock(move || join_fastboot_thread(fastboot_thread)).await;
+        // Back off on persistent UDC/thread-creation failures without blocking
+        // the coordinator (the UI must remain usable during recovery).
+        if !delay.is_zero() {
+            async_io::Timer::after(delay).await;
+        }
+        let result = match gadget.spawn(gadget::Mode::Fastboot {
+            commands: fastboot_commands(gadget.clone(), serialno, cmdline),
+            acm,
+        }) {
+            Ok(thread) => runtime::unblock(move || join_fastboot_thread(thread)).await,
+            Err(err) => Err(format!("spawn fastboot gadget thread: {err}")),
+        };
         let _ = event_tx.send(CoordinatorEvent::Fastboot(result)).await;
     });
 }
@@ -207,6 +239,24 @@ fn spawn_boot_discovery(event_tx: async_channel::Sender<CoordinatorEvent>) {
 async fn run_boot_coordinator(
     ui: Option<&ui::Handle>,
     events: async_channel::Receiver<CoordinatorEvent>,
+    restart_fastboot: impl FnMut(),
+) -> Result<()> {
+    run_boot_coordinator_with(
+        ui,
+        events,
+        boot_discovered_entry,
+        |err| report_boot_failure(ui, err),
+        restart_fastboot,
+    )
+    .await
+}
+
+async fn run_boot_coordinator_with(
+    ui: Option<&ui::Handle>,
+    events: async_channel::Receiver<CoordinatorEvent>,
+    mut boot: impl FnMut(&bootflow::BootEntry) -> Result<()>,
+    mut failed: impl FnMut(String),
+    mut restart_fastboot: impl FnMut(),
 ) -> Result<()> {
     let mut boot_entries: Vec<bootflow::BootEntry> = Vec::new();
     let mut bootable_entry_indices: Vec<usize> = Vec::new();
@@ -223,6 +273,7 @@ async fn run_boot_coordinator(
             CoordinatorEvent::UiAction(ui::Action::BootEntry(menu_index)) => {
                 let Some(entry_index) = bootable_entry_indices.get(menu_index).copied() else {
                     tracing::warn!(menu_index, "UI requested unknown boot entry");
+                    failed("The selected boot entry is no longer available".to_string());
                     continue;
                 };
                 let entry = &boot_entries[entry_index];
@@ -231,24 +282,29 @@ async fn run_boot_coordinator(
                     source = %entry.source.display(),
                     "booting UI-selected entry"
                 );
-                return boot_discovered_entry(entry);
+                failed(returned_boot_error(boot(entry)));
             }
             CoordinatorEvent::Fastboot(result) => {
-                let action = result?;
-                if let Some(action) = action {
-                    tracing::info!("running fastboot post-response action");
-                    action()
-                        .map_err(|err| format!("fastboot post-response action failed: {err}"))?;
-                    return Ok(());
-                }
-
-                if discovery_complete {
-                    boot_default_entry(&boot_entries)?;
-                    return Ok(());
-                }
-
-                tracing::info!("fastboot exited; waiting for boot discovery before default boot");
-                fastboot_requested_default = true;
+                // The old gadget has been joined and unbound before this event.
+                // Anything that returns must restore both fastboot and ADB.
+                let result = match result {
+                    Ok(Some(action)) => {
+                        tracing::info!("running fastboot post-response action");
+                        action()
+                            .map_err(|err| format!("fastboot post-response action failed: {err}"))
+                    }
+                    Ok(None) if discovery_complete => boot_default_entry(&boot_entries, &mut boot),
+                    Ok(None) => {
+                        tracing::info!(
+                            "fastboot exited; waiting for boot discovery before default boot"
+                        );
+                        fastboot_requested_default = true;
+                        continue;
+                    }
+                    Err(err) => Err(format!("fastboot service failed: {err}")),
+                };
+                failed(returned_boot_error(result));
+                restart_fastboot();
             }
             CoordinatorEvent::DiscoveryUpdate(entries) => {
                 apply_boot_entries_update(
@@ -269,10 +325,15 @@ async fn run_boot_coordinator(
                     true,
                 );
                 if fastboot_requested_default {
-                    boot_default_entry(&boot_entries)?;
-                    return Ok(());
+                    fastboot_requested_default = false;
+                    failed(returned_boot_error(boot_default_entry(
+                        &boot_entries,
+                        &mut boot,
+                    )));
+                    restart_fastboot();
+                } else {
+                    tracing::info!("boot discovery complete; holding for fastboot or UI selection");
                 }
-                tracing::info!("boot discovery complete; holding for fastboot or UI selection");
             }
         }
     }
@@ -355,17 +416,33 @@ fn log_boot_entries(entries: &[bootflow::BootEntry]) {
     }
 }
 
-fn boot_default_entry(boot_entries: &[bootflow::BootEntry]) -> Result<()> {
-    if let Some(entry) = boot_entries
+/// A failed handoff must leave pocketboot running: PID 1 exiting panics the
+/// kernel and reboots the device before anyone can read the reason.
+fn report_boot_failure(ui: Option<&ui::Handle>, err: String) {
+    tracing::error!(error = %err, "boot attempt failed; returning to the boot menu");
+    if let Some(ui) = ui {
+        ui.boot_failed(err);
+    }
+}
+
+// A successful reboot/kexec never returns. Treat even an unexpected Ok as a
+// failed handoff, not permission to return from main and kill PID 1.
+fn returned_boot_error(result: Result<()>) -> String {
+    result
+        .err()
+        .unwrap_or_else(|| "Boot operation returned without rebooting".to_string())
+}
+
+fn boot_default_entry(
+    boot_entries: &[bootflow::BootEntry],
+    boot: &mut impl FnMut(&bootflow::BootEntry) -> Result<()>,
+) -> Result<()> {
+    let entry = boot_entries
         .iter()
         .find(|entry| entry.is_directly_bootable())
-    {
-        tracing::info!(id = %entry.id, source = %entry.source.display(), "booting discovered entry");
-        boot_discovered_entry(entry)?;
-    } else if !boot_entries.is_empty() {
-        tracing::warn!("boot entries were discovered, but none are directly bootable yet");
-    }
-    Ok(())
+        .ok_or_else(|| "No directly bootable entries found".to_string())?;
+    tracing::info!(id = %entry.id, source = %entry.source.display(), "booting discovered entry");
+    boot(entry)
 }
 
 fn boot_discovered_entry(entry: &bootflow::BootEntry) -> Result<()> {
@@ -756,6 +833,180 @@ fn format_size(sectors: u64) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[derive(Default)]
+    struct RecoveryReport {
+        booted: Vec<String>,
+        failures: Vec<String>,
+        restarts: usize,
+    }
+
+    fn run_recovery_events(
+        events: Vec<CoordinatorEvent>,
+        boot_result: Result<()>,
+    ) -> RecoveryReport {
+        let (tx, rx) = async_channel::unbounded();
+        for event in events {
+            tx.try_send(event).unwrap();
+        }
+        // Closing this test input ends the otherwise permanent coordinator.
+        drop(tx);
+        let mut report = RecoveryReport::default();
+        let error = runtime::block_on(run_boot_coordinator_with(
+            None,
+            rx,
+            |entry| {
+                report.booted.push(entry.id.clone());
+                boot_result.clone()
+            },
+            |error| report.failures.push(error),
+            || report.restarts += 1,
+        ))
+        .unwrap_err();
+        assert_eq!(error, "boot coordinator event channel closed");
+        report
+    }
+
+    #[test]
+    fn failed_ui_boot_can_be_retried_without_restarting_a_live_gadget() {
+        let report = run_recovery_events(
+            vec![
+                CoordinatorEvent::DiscoveryComplete(vec![bootflow::BootEntry::test_entry(
+                    "pmos", "",
+                )]),
+                CoordinatorEvent::UiAction(ui::Action::BootEntry(0)),
+                CoordinatorEvent::UiAction(ui::Action::BootEntry(0)),
+            ],
+            Err("missing parking contract".into()),
+        );
+        assert_eq!(report.booted, ["pmos", "pmos"]);
+        assert_eq!(report.failures, ["missing parking contract"; 2]);
+        assert_eq!(report.restarts, 0);
+    }
+
+    #[test]
+    fn invalid_menu_selection_is_reported_and_does_not_block_the_next_attempt() {
+        let report = run_recovery_events(
+            vec![
+                CoordinatorEvent::DiscoveryUpdate(vec![bootflow::BootEntry::test_entry(
+                    "pmos", "",
+                )]),
+                CoordinatorEvent::UiAction(ui::Action::BootEntry(7)),
+                CoordinatorEvent::UiAction(ui::Action::BootEntry(0)),
+            ],
+            Err("load failed".into()),
+        );
+        assert_eq!(report.booted, ["pmos"]);
+        assert!(report.failures[0].contains("no longer available"));
+        assert_eq!(report.failures[1], "load failed");
+    }
+
+    #[test]
+    fn failed_default_boot_restarts_usb_before_and_after_discovery() {
+        for discovery_first in [false, true] {
+            let discovery = CoordinatorEvent::DiscoveryComplete(vec![
+                bootflow::BootEntry::test_entry("unresolved", "$missing"),
+                bootflow::BootEntry::test_entry("pmos", ""),
+            ]);
+            let request = CoordinatorEvent::Fastboot(Ok(None));
+            let events = if discovery_first {
+                vec![discovery, request]
+            } else {
+                vec![request, discovery]
+            };
+            let report = run_recovery_events(events, Err("load failed".into()));
+            assert_eq!(report.booted, ["pmos"]);
+            assert_eq!(report.failures, ["load failed"]);
+            assert_eq!(report.restarts, 1);
+        }
+    }
+
+    #[test]
+    fn default_boot_with_no_usable_entries_restores_recovery_instead_of_exiting() {
+        for entries in [
+            vec![],
+            vec![bootflow::BootEntry::test_entry("unresolved", "$missing")],
+        ] {
+            let report = run_recovery_events(
+                vec![
+                    CoordinatorEvent::Fastboot(Ok(None)),
+                    CoordinatorEvent::DiscoveryComplete(entries),
+                    CoordinatorEvent::Fastboot(Ok(None)),
+                ],
+                Ok(()),
+            );
+            assert!(report.booted.is_empty());
+            assert_eq!(report.failures, ["No directly bootable entries found"; 2]);
+            assert_eq!(report.restarts, 2);
+        }
+    }
+
+    #[test]
+    fn returned_fastboot_actions_and_service_failures_restart_usb() {
+        let report = run_recovery_events(
+            vec![
+                CoordinatorEvent::Fastboot(Ok(Some(Box::new(|| {
+                    Err(io::Error::other("action failed"))
+                })))),
+                CoordinatorEvent::Fastboot(Err("UDC unavailable".into())),
+                CoordinatorEvent::Fastboot(Ok(Some(Box::new(|| Ok(()))))),
+            ],
+            Ok(()),
+        );
+        assert!(report.booted.is_empty());
+        assert_eq!(report.restarts, 3);
+        assert!(report.failures[0].contains("action failed"));
+        assert!(report.failures[1].contains("UDC unavailable"));
+        assert!(report.failures[2].contains("returned without rebooting"));
+    }
+
+    #[test]
+    fn unexpectedly_returning_boot_operations_do_not_exit_the_coordinator() {
+        let report = run_recovery_events(
+            vec![
+                CoordinatorEvent::DiscoveryComplete(vec![bootflow::BootEntry::test_entry(
+                    "pmos", "",
+                )]),
+                CoordinatorEvent::UiAction(ui::Action::BootEntry(0)),
+                CoordinatorEvent::Fastboot(Ok(None)),
+            ],
+            Ok(()),
+        );
+        assert_eq!(report.booted, ["pmos", "pmos"]);
+        assert_eq!(
+            report.failures,
+            ["Boot operation returned without rebooting"; 2]
+        );
+        assert_eq!(report.restarts, 1);
+    }
+
+    #[test]
+    fn recovery_sender_keeps_pid1_waiting_when_ui_and_gadget_are_absent() {
+        use std::{cell::Cell, rc::Rc};
+
+        let (tx, rx) = async_channel::unbounded();
+        tx.try_send(CoordinatorEvent::Fastboot(Err("no gadget".into())))
+            .unwrap();
+        let recovery_tx = tx.clone();
+        let restarted = Rc::new(Cell::new(0));
+        let restarted_callback = restarted.clone();
+        let mut coordinator = Box::pin(run_boot_coordinator_with(
+            None,
+            rx,
+            |_| panic!("no boot requested"),
+            |_| {},
+            move || {
+                // Same lifetime contract as run(): recovery retains a sender
+                // even if spawning a replacement gadget fails.
+                let _keep_open = &recovery_tx;
+                restarted_callback.set(restarted_callback.get() + 1);
+            },
+        ));
+        drop(tx);
+        assert!(runtime::block_on(futures_lite::future::poll_once(coordinator.as_mut())).is_none());
+        assert_eq!(restarted.get(), 1);
+        assert!(runtime::block_on(futures_lite::future::poll_once(coordinator.as_mut())).is_none());
+    }
 
     #[test]
     fn parses_androidboot_serialno() {

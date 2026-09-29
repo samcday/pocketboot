@@ -213,34 +213,17 @@ impl Gadget {
         };
         self.register_and_bind(config, true)?;
 
-        let (server, event_loop) = fastboot_function.start()?;
-        let (adb_server, adb_event_loop) = adb_function.start()?;
-        let adb_handle = adb_server.spawn()?;
-        let server_result = server.run();
-        match &server_result {
-            Ok(action) => tracing::info!(
-                has_action = action.is_some(),
-                "fastboot server exited normally"
-            ),
-            Err(err) => tracing::warn!(error = ?err, "fastboot server exited with error"),
-        }
-
-        adb_handle.stop();
-        event_loop.stop();
-        adb_event_loop.stop();
-        let unbind_result = self.unbind_and_remove();
-        match &unbind_result {
-            Ok(()) => tracing::info!("USB gadget unbound"),
-            Err(err) => tracing::warn!(error = ?err, "USB gadget unbind failed"),
-        }
-
-        if let Err(err) = adb_handle.join() {
-            tracing::warn!(error = ?err, "adb server exited with error");
-        }
-        event_loop.join();
-        adb_event_loop.join();
-
-        resolve_fastboot_result(server_result, unbind_result)
+        run_bound_fastboot(
+            |workers| {
+                let (server, event_loop) = fastboot_function.start()?;
+                workers.fastboot_events = Some(event_loop);
+                let (adb_server, adb_event_loop) = adb_function.start()?;
+                workers.adb_events = Some(adb_event_loop);
+                workers.adb_server = Some(adb_server.spawn()?);
+                server.run()
+            },
+            || self.unbind_and_remove(),
+        )
     }
 
     fn register_and_bind(&self, config: Config, include_mass_storage: bool) -> io::Result<()> {
@@ -299,6 +282,59 @@ impl Gadget {
         drop(reg);
         Ok(())
     }
+}
+
+#[derive(Default)]
+struct FastbootWorkers {
+    fastboot_events: Option<fastboot::EventLoop>,
+    adb_events: Option<adb::EventLoop>,
+    adb_server: Option<adb::ServerHandle>,
+}
+
+// Once bound, setup errors and normal server exits must take the same cleanup
+// path. Record each worker before the next fallible step so none are detached.
+fn run_bound_fastboot(
+    run: impl FnOnce(&mut FastbootWorkers) -> ThreadResult,
+    unbind: impl FnOnce() -> io::Result<()>,
+) -> ThreadResult {
+    let mut workers = FastbootWorkers::default();
+    let server_result = run(&mut workers);
+    match &server_result {
+        Ok(action) => tracing::info!(
+            has_action = action.is_some(),
+            "fastboot server exited normally"
+        ),
+        Err(err) => tracing::warn!(error = ?err, "fastboot startup or server failed"),
+    }
+
+    if let Some(worker) = &workers.adb_server {
+        worker.stop();
+    }
+    if let Some(worker) = &workers.fastboot_events {
+        worker.stop();
+    }
+    if let Some(worker) = &workers.adb_events {
+        worker.stop();
+    }
+    // Unbind before joining: disconnecting the endpoints releases USB I/O.
+    let unbind_result = unbind();
+    match &unbind_result {
+        Ok(()) => tracing::info!("USB gadget unbound"),
+        Err(err) => tracing::warn!(error = ?err, "USB gadget unbind failed"),
+    }
+
+    if let Some(worker) = workers.adb_server {
+        if let Err(err) = worker.join() {
+            tracing::warn!(error = ?err, "adb server exited with error");
+        }
+    }
+    if let Some(worker) = workers.fastboot_events {
+        worker.join();
+    }
+    if let Some(worker) = workers.adb_events {
+        worker.join();
+    }
+    resolve_fastboot_result(server_result, unbind_result)
 }
 
 fn resolve_fastboot_result(
@@ -525,6 +561,111 @@ mod tests {
         Arc,
         atomic::{AtomicBool, Ordering},
     };
+
+    fn test_worker<T: Send + 'static>(
+        result: T,
+        stops: &mut Vec<Arc<AtomicBool>>,
+        exits: &mut Vec<Arc<AtomicBool>>,
+        releases: &mut Vec<std::sync::mpsc::Sender<()>>,
+    ) -> (Arc<AtomicBool>, thread::JoinHandle<T>) {
+        let stop = Arc::new(AtomicBool::new(false));
+        let exited = Arc::new(AtomicBool::new(false));
+        stops.push(stop.clone());
+        exits.push(exited.clone());
+        let (release, released) = std::sync::mpsc::channel();
+        releases.push(release);
+        let thread_stop = stop.clone();
+        let thread = thread::spawn(move || {
+            // Stand in for USB I/O released by unbind. A timeout keeps a broken
+            // join-before-unbind implementation from hanging the test suite.
+            released.recv_timeout(Duration::from_secs(5)).unwrap();
+            assert!(thread_stop.load(Ordering::Relaxed));
+            exited.store(true, Ordering::Relaxed);
+            result
+        });
+        (stop, thread)
+    }
+
+    #[test]
+    fn post_bind_failures_join_workers_and_allow_retry() {
+        // Fail at each setup step, and after all workers have started. Repeat
+        // with an unbind error to ensure cleanup still joins and preserves the
+        // original failure. Registration is simulated; no configfs/USB needed.
+        for fail_after in 0..=3 {
+            for unbind_fails in [false, true] {
+                let registered = AtomicBool::new(false);
+                for failing_attempt in [true, false] {
+                    assert!(!registered.swap(true, Ordering::Relaxed));
+                    let mut stops = Vec::new();
+                    let mut exits = Vec::new();
+                    let mut releases = Vec::new();
+                    // Both closures need the recorded workers, but execute
+                    // sequentially. Keep the fake transport state in a cell.
+                    let transport =
+                        std::cell::RefCell::new((&mut stops, &mut exits, &mut releases));
+                    let result = run_bound_fastboot(
+                        |workers| {
+                            let mut transport = transport.borrow_mut();
+                            let (stops, exits, releases) = &mut *transport;
+                            for step in 0..=3 {
+                                if failing_attempt && step == fail_after {
+                                    return Err(io::Error::other("injected startup failure"));
+                                }
+                                match step {
+                                    0 => {
+                                        let (stop, thread) =
+                                            test_worker((), stops, exits, releases);
+                                        workers.fastboot_events = Some(
+                                            fastboot::EventLoop::from_test_thread(stop, thread),
+                                        );
+                                    }
+                                    1 => {
+                                        let (stop, thread) =
+                                            test_worker((), stops, exits, releases);
+                                        workers.adb_events =
+                                            Some(adb::EventLoop::from_test_thread(stop, thread));
+                                    }
+                                    2 => {
+                                        let (stop, thread) =
+                                            test_worker(Ok(()), stops, exits, releases);
+                                        workers.adb_server =
+                                            Some(adb::ServerHandle::from_test_thread(stop, thread));
+                                    }
+                                    _ => {}
+                                }
+                            }
+                            Ok(None)
+                        },
+                        || {
+                            let transport = transport.borrow();
+                            assert!(transport.0.iter().all(|s| s.load(Ordering::Relaxed)));
+                            assert!(registered.swap(false, Ordering::Relaxed));
+                            for release in transport.2.iter() {
+                                release.send(()).unwrap();
+                            }
+                            if failing_attempt && unbind_fails {
+                                Err(io::Error::other("injected unbind failure"))
+                            } else {
+                                Ok(())
+                            }
+                        },
+                    );
+                    drop(transport);
+                    assert!(!registered.load(Ordering::Relaxed));
+                    assert_eq!(exits.len(), if failing_attempt { fail_after } else { 3 });
+                    assert!(exits.iter().all(|e| e.load(Ordering::Relaxed)));
+                    if failing_attempt {
+                        assert_eq!(
+                            result.err().unwrap().to_string(),
+                            "injected startup failure"
+                        );
+                    } else {
+                        assert!(result.unwrap().is_none());
+                    }
+                }
+            }
+        }
+    }
 
     #[test]
     fn acknowledged_action_takes_precedence_over_unbind_failure() {

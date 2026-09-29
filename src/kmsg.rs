@@ -1,4 +1,5 @@
 use std::{
+    fmt,
     fs::File,
     io::{self, Write},
     os::fd::AsRawFd,
@@ -35,7 +36,74 @@ pub(crate) fn init_tracing(cmdline: &KernelCommandLine) {
             .with(level)
             .with(layer)
             .try_init();
+
+        // A panic would otherwise only reach stderr, which a UART-free capture
+        // does not retain. Route it through the kernel log as well.
+        let previous = std::panic::take_hook();
+        std::panic::set_hook(Box::new(move |info| {
+            emergency_log(info);
+            previous(info);
+        }));
     });
+}
+
+// Stay below old kernels' record limits, including priority, prefix and newline.
+const EMERGENCY_RECORD_BYTES: usize = 512;
+const EMERGENCY_PREFIX: &str = "<3>pocketboot: ";
+const TRUNCATED: &str = " [truncated]";
+
+/// Best-effort diagnostics even when tracing is disabled or unavailable.
+pub(crate) fn emergency_log(message: impl fmt::Display) {
+    if let Ok(mut file) = File::options().write(true).open(KMSG) {
+        write_emergency_record(&mut file, message);
+    }
+}
+
+fn write_emergency_record(writer: &mut impl Write, message: impl fmt::Display) {
+    let mut record = EmergencyRecord {
+        bytes: [0; EMERGENCY_RECORD_BYTES],
+        len: EMERGENCY_PREFIX.len(),
+    };
+    record.bytes[..record.len].copy_from_slice(EMERGENCY_PREFIX.as_bytes());
+    // fmt::write returns an error when the bounded sink fills. Do not unwrap:
+    // this path is also used from the panic hook.
+    if fmt::write(&mut record, format_args!("{message}")).is_err() {
+        let limit = EMERGENCY_RECORD_BYTES - 1 - TRUNCATED.len();
+        record.len = record.len.min(limit);
+        // All stored fragments are valid UTF-8; back up over continuation bytes.
+        while record.bytes[record.len] & 0xc0 == 0x80 {
+            record.len -= 1;
+        }
+        record.bytes[record.len..record.len + TRUNCATED.len()]
+            .copy_from_slice(TRUNCATED.as_bytes());
+        record.len += TRUNCATED.len();
+    }
+    record.bytes[record.len] = b'\n';
+    record.len += 1;
+    // One write is one kernel record. Never retry a short write as a new record,
+    // and never report failures through tracing (or panic).
+    let _ = writer.write(&record.bytes[..record.len]);
+}
+
+struct EmergencyRecord {
+    bytes: [u8; EMERGENCY_RECORD_BYTES],
+    len: usize,
+}
+
+impl fmt::Write for EmergencyRecord {
+    fn write_str(&mut self, text: &str) -> fmt::Result {
+        let mut count = text.len().min(EMERGENCY_RECORD_BYTES - 1 - self.len);
+        while !text.is_char_boundary(count) {
+            count -= 1;
+        }
+        self.bytes[self.len..self.len + count].copy_from_slice(&text.as_bytes()[..count]);
+        self.len += count;
+        if count < text.len() {
+            Err(fmt::Error)
+        } else {
+            Ok(())
+        }
+    }
 }
 
 struct KmsgMakeWriter;
@@ -201,4 +269,106 @@ fn trim_line_end(mut value: &[u8]) -> &[u8] {
         value = &value[..value.len() - 1];
     }
     value
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn render(message: impl fmt::Display) -> String {
+        let mut output = Vec::new();
+        write_emergency_record(&mut output, message);
+        assert!(output.len() <= EMERGENCY_RECORD_BYTES);
+        String::from_utf8(output).unwrap()
+    }
+
+    #[test]
+    fn emergency_formats_prefix_message_and_newline() {
+        assert_eq!(render(""), "<3>pocketboot: \n");
+        assert_eq!(
+            render(format_args!("panicked: {} at {}:{}", "oops", "main.rs", 42)),
+            "<3>pocketboot: panicked: oops at main.rs:42\n"
+        );
+    }
+
+    #[test]
+    fn emergency_preserves_exact_fit_and_marks_overflow() {
+        let capacity = EMERGENCY_RECORD_BYTES - EMERGENCY_PREFIX.len() - 1;
+        let exact = "a".repeat(capacity);
+        assert_eq!(render(&exact), format!("{EMERGENCY_PREFIX}{exact}\n"));
+        let output = render(format_args!("{exact}b"));
+        assert_eq!(output.len(), EMERGENCY_RECORD_BYTES);
+        assert!(output.ends_with(" [truncated]\n"));
+    }
+
+    #[test]
+    fn emergency_truncates_utf8_at_both_buffer_and_marker_boundaries() {
+        for character in ["é", "界", "🦀"] {
+            for offset in 0..4 {
+                let message = format!("{}{}", "a".repeat(offset), character.repeat(512));
+                let output = render(&message);
+                let retained = output
+                    .strip_prefix(EMERGENCY_PREFIX)
+                    .unwrap()
+                    .strip_suffix(" [truncated]\n")
+                    .unwrap();
+                assert!(message.starts_with(retained));
+                assert!(output.len() >= EMERGENCY_RECORD_BYTES - 3);
+            }
+        }
+    }
+
+    #[test]
+    fn emergency_stops_streamed_formatting_when_full() {
+        struct Streaming;
+        impl fmt::Display for Streaming {
+            fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+                // No allocation and no need to format the rest of a huge message.
+                for _ in 0..EMERGENCY_RECORD_BYTES {
+                    f.write_str("🦀")?;
+                }
+                panic!("bounded formatter should have stopped");
+            }
+        }
+        assert!(render(Streaming).ends_with(" [truncated]\n"));
+    }
+
+    #[test]
+    fn emergency_keeps_partial_output_on_formatting_error() {
+        struct Broken;
+        impl fmt::Display for Broken {
+            fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+                f.write_str("partial")?;
+                Err(fmt::Error)
+            }
+        }
+        assert_eq!(render(Broken), "<3>pocketboot: partial [truncated]\n");
+    }
+
+    #[test]
+    fn emergency_ignores_io_errors_and_short_writes_without_retrying() {
+        struct Writer {
+            calls: usize,
+            fail: bool,
+        }
+        impl Write for Writer {
+            fn write(&mut self, _: &[u8]) -> io::Result<usize> {
+                self.calls += 1;
+                if self.fail {
+                    Err(io::Error::from(io::ErrorKind::PermissionDenied))
+                } else {
+                    Ok(1)
+                }
+            }
+
+            fn flush(&mut self) -> io::Result<()> {
+                panic!("emergency output should not flush");
+            }
+        }
+        for fail in [true, false] {
+            let mut writer = Writer { calls: 0, fail };
+            write_emergency_record(&mut writer, "oops");
+            assert_eq!(writer.calls, 1);
+        }
+    }
 }

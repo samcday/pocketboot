@@ -75,5 +75,9 @@ Keep observations for these stages separate. Collect existing logs before
 rebooting or replacing a working image; coordinate device-changing tests with
 the device owner.
 
+For verbosity, failed-load menu recovery and previous-boot log retrieval, see
+[recovery diagnostics](recovery.md). Capturing pstore is not yet a guarantee
+that a destination kernel uses the same ramoops reservation or layout.
+
 [port]: https://github.com/pem120/pocketboot/commit/d3f4602418a03af4266128feb0f95f028e45fa1b
 [kernel]: https://github.com/pem120/linux/tree/45add32603ee4aa28979ad6ec70c10b14af4ac29
