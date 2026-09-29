@@ -840,6 +840,9 @@ mod tests {
                 .split_whitespace()
                 .any(|arg| arg == "lk2nd.pass-simplefb")
         );
+        let args = bootimg.cmdline.split_whitespace().collect::<Vec<_>>();
+        assert!(args.contains(&"lk2nd.pass-ramoops"));
+        assert!(!args.contains(&"lk2nd.pass-ramoops=zap"));
     }
 
     #[test]

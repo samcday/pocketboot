@@ -55,4 +55,5 @@ tags_offset = 0x03400000
 second_offset = 0
 dtb_offset = 0
 # Built-in initramfs; no separate ramdisk, preboot shim or QCDT table.
-cmdline = "console=tty0 loglevel=8 ignore_loglevel lk2nd.pass-simplefb clk_ignore_unused pd_ignore_unused regulator_ignore_unused"
+# Share LK2nd's mapped ramoops window; never use =zap during retained-log trials.
+cmdline = "console=tty0 loglevel=8 ignore_loglevel lk2nd.pass-simplefb lk2nd.pass-ramoops clk_ignore_unused pd_ignore_unused regulator_ignore_unused"

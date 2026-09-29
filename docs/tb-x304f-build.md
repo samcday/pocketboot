@@ -89,10 +89,10 @@ Image's `text_offset` relative to a 2 MiB-aligned base. The locally built
 Image has offset zero, so the expected entry placement is `0x80000000`,
 not the nominal header address `0x80080000`.
 
-The full first-boot command line is:
+The current diagnostic command line is:
 
 ```text
-console=tty0 loglevel=8 ignore_loglevel lk2nd.pass-simplefb clk_ignore_unused pd_ignore_unused regulator_ignore_unused
+console=tty0 loglevel=8 ignore_loglevel lk2nd.pass-simplefb lk2nd.pass-ramoops clk_ignore_unused pd_ignore_unused regulator_ignore_unused
 ```
 
 LK2nd passes the boot image command line through `boot_linux()` to
@@ -117,6 +117,15 @@ can appear after simpledrm probes. The initial image omitted this client:
 simpledrm and DRM panic support alone do not provide an fbcon console. This
 does not expose failures before framebuffer initialization or guarantee USB
 bring-up, but avoids mistaking an unchanged splash for a kernel that never ran.
+
+`PSTORE_CONSOLE` and the bare `lk2nd.pass-ramoops` token select retained
+kernel-console logging in LK2nd's own mapped scratch-end region. On this unit
+that is `0xbff80000`, size 512 KiB, with 8 KiB dump records, a 256 KiB console,
+and ECC disabled. LK2nd rewrites the board's original `0x8ee00000` ramoops
+reservation during handoff; the packaged DT still contains the original
+placeholder. Do not add `=zap`, which clears the retained region.
+See the bring-up record for source bounds, capture commands and retention
+limits. This does not provide logs before the kernel pstore console registers.
 
 ## Validation and remaining work
 
@@ -160,7 +169,13 @@ and the 54 build-tool tests passed again. LK2nd accepted this second candidate,
 but no USB appeared within 45 seconds and the screen was black when checked
 later. This is not a demonstrated USB fix.
 
-`PSTORE_CONSOLE` is now enabled for the next retained-log trial. Its successful
-rebuild does not verify kernel entry, RAM retention, or the retrieval path.
-The latest observed hardware state and logging-region checks belong in the
-linked bring-up record.
+`PSTORE_CONSOLE` is enabled for the retained-log profile. The bounded raw
+exporter was exercised before the trial, but the kernel rebuild does not
+verify Linux entry or RAM retention. The latest hardware state and
+logging-region checks belong in the linked bring-up record.
+
+The shared-region image is 4,784,128 bytes, SHA-256
+`c0da6ec5c7c287b94a0e1e814e0f1517da6e091fd75bba3e9c0a43e738bd24d2`.
+The built-in frontend, bare handoff flag, gzip/Image/DTB layout and mainline DT
+classification were checked. LK2nd accepted the image, but USB again remained
+absent for 45 seconds. Post-reset log retrieval and retention are pending.

@@ -20,7 +20,10 @@ record, not a claim that PocketBoot supports this tablet yet.
 - Both the initial PocketBoot image and its framebuffer-console follow-up
   were accepted by lk2nd, but neither produced tablet USB within 45 seconds.
   Both screens were black when checked later. Linux entry and userspace are
-  unconfirmed; retained diagnostics are the next step.
+  unconfirmed.
+- The shared-ramoops profile has also been attempted without USB appearing.
+  Its bounded raw exporter and pre-trial baseline capture work; post-reset
+  retrieval and actual RAM retention are still pending.
 
 ## Verified starting state
 
@@ -436,6 +439,68 @@ Instead of depending on a live view of the screen, the next logging profile
 enables `PSTORE_CONSOLE`. The rebuilt config and kernel include that frontend.
 Its region must be shared with lk2nd's supported ramoops exporter; RAM-log
 retention through the actual button-reset sequence is not yet verified.
+
+### Shared-region RAM logging trial
+
+The source audit explains why directly reading `0x8ee00000` from lk2nd was
+not a safe retrieval method: that aligned physical RAM address lies outside
+this build's mapped virtual ranges. An lk2nd translation fault is consistent
+with the reset, not proof that the physical region is unusable by Linux.
+
+The supported exporter instead uses the end of scratch:
+
+- Scratch base `0xa0100000`, size `0x1ff00000` (511 MiB), ending at
+  `0xc0000000`. The live `max-download-size` query matched this size.
+- The final 512 KiB is `0xbff80000` through `0xbfffffff`, inside lk2nd's
+  identity-mapped scratch area.
+- The first 256 KiB contains 32 dump records of 8 KiB; the last 256 KiB is
+  the console. ECC is zero in this lk2nd build.
+- This is separate from the small image downloads, kernel/tags, framebuffer
+  and inherited firmware reservations. A sufficiently large download can
+  still overwrite it; the advertised maximum does not protect the log tail.
+
+The current image enables `PSTORE_CONSOLE` and passes the **bare**
+`lk2nd.pass-ramoops` flag. LK2nd uses it to rewrite the existing kernel
+ramoops node to this shared region. Never use `lk2nd.pass-ramoops=zap` when
+preserving evidence: it clears the window. The kernel must still reach
+ramoops/console registration, and the final handed-off DT is not yet captured.
+
+The fixed-size `oem ramoops raw` export was tested before the trial: it
+returned exactly 524288 bytes, with no valid pre-trial records, and lk2nd
+remained responsive. The raw baseline and decoder metadata are private.
+Use this bounded raw export rather than `oem ramoops console`, which trusts
+the record's stored size, or the source's FIXME-marked dump decoder.
+
+The shared-region image is 4,784,128 bytes, SHA-256
+`c0da6ec5c7c287b94a0e1e814e0f1517da6e091fd75bba3e9c0a43e738bd24d2`.
+LK2nd accepted its download and boot in 0.384 seconds; there was still no
+tablet USB interface within 45 seconds. A post-reset capture is pending.
+
+After button recovery into stock fastboot, RAM-boot only the known lk2nd
+image, verify its identity, and retrieve **before another kernel boot**.
+For the verified lk2nd image, run from this repository:
+
+```sh
+(
+    : "${SERIAL:?Set SERIAL to the intended tablet's fastboot serial}"
+    umask 077
+    mkdir -p target/tb-x304f-lab || exit
+    OUT="$(mktemp -d target/tb-x304f-lab/ramoops.XXXXXX)" || exit
+    timeout 5s fastboot -s "$SERIAL" oem ramoops raw || exit
+    timeout 15s fastboot -s "$SERIAL" get_staged "$OUT/ramoops.raw" || exit
+    python3 tools/ramoops_decode.py \
+        --input "$OUT/ramoops.raw" --output "$OUT/decoded" --ecc 0 || exit
+    printf 'Private capture: %s\n' "$OUT"
+)
+```
+
+`--ecc 0` needs neither a kernel tree nor a host C compiler. Inspect
+`decoded.json` for invalid records rather than equating CLI success with a
+valid kernel log. Preserve the raw file and compare against the pre-trial
+baseline and expected kernel version. Power loss, reset behavior, cache state
+or later bootloader activity can destroy evidence; an empty capture does not
+prove that Linux never ran. `oem log` is only the current lk2nd session's log
+and cannot recover its pre-reset handoff messages.
 
 ## First-boot milestones
 
