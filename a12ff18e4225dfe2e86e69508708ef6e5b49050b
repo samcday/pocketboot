@@ -1,0 +1,17 @@
+Parking experiment review follow-up/restoration
+Repository: samcday/pocketboot
+Commit: a12ff18e4225dfe2e86e69508708ef6e5b49050b
+
+Restores the existing experiment above the repaired recovery branch using additive replay of c578716/e204ec1/7fe1064; includes baseline primary/Aff2 fixes and new diagnostic follow-up bb2765b. No force push. New diagnostic text names L2/SCM/ACC/entry state as possibilities on missing acknowledgement (not a measured diagnosis); tests assert panic=1, pocketboot.log=info and pass-ramoops withoutzap. Docs explicitly decline a guarantee of retained logs or loop-free panic reboot.
+
+Verification on final published tree:
+- cargo fmt --all -- --check; git diff --check: pass.
+- cargo test --locked --offline --workspace --features pocketpreboot/soc-msm8939: 225 pocketboot +20 preboot +54 xtask passed.
+- cargo test --locked --offline -p pocketpreboot --features soc-msm8916:19 passed.
+- CARGO_TARGET_AARCH64_UNKNOWN_LINUX_MUSL_RUNNER=qemu-aarch64 cargo test --locked --offline -p pocketboot --target aarch64-unknown-linux-musl:225 passed.
+- cargo build --locked --offline --release --target aarch64-unknown-none -p pocketpreboot --features device-msm8939-xiaomi-ferrari: pass.
+- python3 pocketpreboot/tests/kernel-topology.py: PASS.
+- bash pocketpreboot/tests/qemu/run.sh <scratchdir>: PASS resident v1:3 cores report SMPEN=0 and refuse release; PASS relocated Rust pointer table and FDT argument.
+- git diff --exit-code b03d8e0 HEAD -- src/main.rs src/gadget.rs src/ui.rs ui/main.slint src/adb.rs: pass. Unpublished retry/arbitration work was not accidentally included.
+
+These are code/compile/emulation checks, not hardware acceptance. Current full image CI is needed after publication; the earlier complete boot.img evidence is on e204ec1 and not a hash of this changed shim. No hardware/mount/flashing operations. Candidate resident region still requires the full live memory map before a transient test. Old PR40 auto-merged because of unintended ancestry; that badge is not approval.
