@@ -1,0 +1,49 @@
+name = "Samsung Galaxy Express SGH-I437"
+
+[kernel-source]
+# LogicalErzor's expressatt integration tree, not upstream Linux.
+remote = "https://codeberg.org/LogicalErzor/linux.git"
+sha = "c1012bdfd1aac8a12df548ac6484d9b0c4f8f5bf"
+
+[kernel]
+dtb_stem = "qcom-msm8960-samsung-expressatt"
+
+[cpio]
+target = "armv7-unknown-linux-musleabihf"
+
+[kconfig]
+# This DT has no simple-framebuffer. Use the tree's native MDP4/DSI panel.
+# The overlay disables Adreno: pocketboot's software renderer needs no blobs.
+DRM_SIMPLEDRM = false
+IOMMU_SUPPORT = true
+MSM_IOMMU = true
+DRM_MSM = true
+DRM_MSM_MDP4 = true
+DRM_MSM_DSI = true
+DRM_MSM_DSI_28NM_8960_PHY = true
+BACKLIGHT_CLASS_DEVICE = true
+DRM_PANEL_MAGNACHIP_AMS452GP32 = true
+
+# maXTouch and the TC360 touchkeys (including their GPIO-switched rail).
+TOUCHSCREEN_ATMEL_MXT = true
+I2C_GPIO = true
+NEW_LEDS = true
+LEDS_CLASS = true
+KEYBOARD_TM2_TOUCHKEY = true
+REGULATOR_FIXED_VOLTAGE = true
+
+[bootimg]
+# Addresses from QuickDirtyBoot's Expressatt recipe and pmaports deviceinfo.
+header_version = 0
+page_size = 2048
+kernel_image = "zImage"
+base = 0x80200000
+kernel_offset = 0x00008000
+ramdisk_offset = 0x01500000
+second_offset = 0x00f00000
+tags_offset = 0x00000100
+dtb_offset = 0x0
+# QuickDirtyBoot supplies a dummy ramdisk too; the real initramfs is built in.
+ramdisk_size = 1
+append_dtb = true
+cmdline = ""
