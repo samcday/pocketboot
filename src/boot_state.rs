@@ -6,6 +6,8 @@ use std::{
     path::{Path, PathBuf},
 };
 
+use crate::input;
+
 const ROOT_COMPATIBLE: &str = "/sys/firmware/devicetree/base/compatible";
 const DEBUGFS: &str = "/sys/kernel/debug";
 const REGMAP_DEBUGFS: &str = "/sys/kernel/debug/regmap";
@@ -26,6 +28,12 @@ const QCOM_PON_REASON_CHARGER_MASK: u8 = QCOM_PON_REASON_DC_CHARGER
     | QCOM_PON_REASON_CABLE;
 
 const QCOM_SPMI_REGMAP_LINE_LEN: usize = 9;
+
+const QCOM_PON_RT_STS: u32 = 0x10;
+const QCOM_PON_RT_STS_KPDPWR: u8 = 1 << 0;
+const QCOM_PON_RT_STS_RESIN: u8 = 1 << 1;
+const QCOM_PON_RESIN_COMPATIBLE: &str = "qcom,pm8941-resin";
+const QCOM_PON_PWRKEY_COMPATIBLE: &str = "qcom,pm8941-pwrkey";
 
 const QCOM_PON_TARGETS: [QcomPonTarget; 2] = [
     QcomPonTarget {
@@ -63,6 +71,57 @@ pub(crate) enum RebootMode {
 pub(crate) struct BootStateSource {
     pub(crate) backend: &'static str,
     pub(crate) detail: String,
+}
+
+/// Live PMIC key state from PON_RT_STS. pm8941-pwrkey never reports a key
+/// held since before it probed, and some boards do not enable it at all.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub(crate) struct PonKeys {
+    pub(crate) registers: PathBuf,
+    pub(crate) rt_sts_reg: u32,
+    pub(crate) volume_down: bool,
+    pub(crate) power: bool,
+}
+
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub(crate) struct PonKeyState {
+    pub(crate) volume_down: bool,
+    pub(crate) power: bool,
+}
+
+impl PonKeys {
+    pub(crate) fn read(&self) -> io::Result<PonKeyState> {
+        let registers = File::open(&self.registers)?;
+        let rt_sts = read_regmap_u8(&registers, self.rt_sts_reg)?;
+        Ok(self.decode(rt_sts))
+    }
+
+    pub(crate) fn volume_down_pressed(&self) -> bool {
+        match self.read() {
+            Ok(state) => state.volume_down,
+            Err(err) => {
+                tracing::debug!(
+                    registers = %self.registers.display(),
+                    error = %err,
+                    "PMIC PON key read failed"
+                );
+                false
+            }
+        }
+    }
+
+    fn decode(&self, rt_sts: u8) -> PonKeyState {
+        PonKeyState {
+            volume_down: self.volume_down && rt_sts & QCOM_PON_RT_STS_RESIN != 0,
+            power: self.power && rt_sts & QCOM_PON_RT_STS_KPDPWR != 0,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum PonKey {
+    VolumeDown,
+    Power,
 }
 
 pub(crate) fn detect() -> BootState {
@@ -106,6 +165,111 @@ fn state_with_source(backend: &'static str, detail: String) -> BootState {
         source: Some(BootStateSource { backend, detail }),
         ..BootState::default()
     }
+}
+
+pub(crate) fn detect_pon_keys() -> Option<PonKeys> {
+    if let Err(err) = ensure_debugfs() {
+        tracing::debug!(path = DEBUGFS, error = %err, "PMIC PON key probe skipped");
+        return None;
+    }
+
+    let entries = fs::read_dir(REGMAP_DEBUGFS).ok()?;
+    for entry in entries.flatten() {
+        let regmap_path = entry.path();
+        if !matches!(
+            read_trimmed(regmap_path.join("name")).as_deref(),
+            Ok("pmic-spmi")
+        ) {
+            continue;
+        }
+
+        let pmic_node = Path::new(SPMI_DEVICES)
+            .join(entry.file_name())
+            .join("of_node");
+        if let Some(keys) = pon_keys_for_pmic(&pmic_node, regmap_path.join("registers")) {
+            return Some(keys);
+        }
+    }
+    None
+}
+
+fn pon_keys_for_pmic(pmic_node: &Path, registers: PathBuf) -> Option<PonKeys> {
+    for entry in fs::read_dir(pmic_node).ok()?.flatten() {
+        let pon_node = entry.path();
+        let Ok(compatibles) = read_fdt_strings(pon_node.join("compatible")) else {
+            continue;
+        };
+        if !compatibles.iter().any(|value| value.ends_with("-pon")) {
+            continue;
+        }
+        let Ok(pon_base) = read_first_fdt_u32(pon_node.join("reg")) else {
+            continue;
+        };
+
+        let mut volume_down = false;
+        let mut power = false;
+        for key in pon_key_nodes(&pon_node) {
+            match key {
+                PonKey::VolumeDown => volume_down = true,
+                PonKey::Power => power = true,
+            }
+        }
+        if volume_down || power {
+            return Some(PonKeys {
+                registers,
+                rt_sts_reg: pon_base.saturating_add(QCOM_PON_RT_STS),
+                volume_down,
+                power,
+            });
+        }
+    }
+    None
+}
+
+fn pon_key_nodes(pon_node: &Path) -> Vec<PonKey> {
+    let Ok(entries) = fs::read_dir(pon_node) else {
+        return Vec::new();
+    };
+    entries
+        .flatten()
+        .filter_map(|entry| {
+            let node = entry.path();
+            let compatibles = read_fdt_strings(node.join("compatible")).ok()?;
+            let status = fs::read(node.join("status")).ok();
+            let linux_code = fs::read(node.join("linux,code")).ok();
+            classify_pon_key(&compatibles, status.as_deref(), linux_code.as_deref())
+        })
+        .collect()
+}
+
+fn classify_pon_key(
+    compatibles: &[String],
+    status: Option<&[u8]>,
+    linux_code: Option<&[u8]>,
+) -> Option<PonKey> {
+    let (key, code) = if has_compatible(compatibles, QCOM_PON_RESIN_COMPATIBLE) {
+        (PonKey::VolumeDown, input::KEY_VOLUMEDOWN)
+    } else if has_compatible(compatibles, QCOM_PON_PWRKEY_COMPATIBLE) {
+        (PonKey::Power, input::KEY_POWER)
+    } else {
+        return None;
+    };
+
+    let enabled = status.is_none_or(fdt_status_enabled);
+    // pm8941-pwrkey falls back to KEY_POWER when linux,code is absent.
+    let linux_code = match linux_code {
+        Some(bytes) => parse_first_fdt_u32(bytes),
+        None => Some(u32::from(input::KEY_POWER)),
+    };
+    let code_matches = linux_code == Some(u32::from(code));
+    (enabled && code_matches).then_some(key)
+}
+
+fn fdt_status_enabled(status: &[u8]) -> bool {
+    matches!(
+        parse_fdt_strings(status).first().map(String::as_str),
+        Some("okay" | "ok")
+    )
 }
 
 fn detect_qcom_pon(
@@ -383,10 +547,12 @@ fn parse_fdt_strings(bytes: &[u8]) -> Vec<String> {
 
 fn read_first_fdt_u32(path: impl AsRef<Path>) -> io::Result<u32> {
     let bytes = fs::read(path)?;
-    let cell = bytes
-        .get(..4)
-        .ok_or_else(|| invalid_data("missing u32 FDT cell"))?;
-    Ok(u32::from_be_bytes([cell[0], cell[1], cell[2], cell[3]]))
+    parse_first_fdt_u32(&bytes).ok_or_else(|| invalid_data("missing u32 FDT cell"))
+}
+
+fn parse_first_fdt_u32(bytes: &[u8]) -> Option<u32> {
+    let cell = bytes.get(..4)?;
+    Some(u32::from_be_bytes([cell[0], cell[1], cell[2], cell[3]]))
 }
 
 fn invalid_data(error: impl Into<Box<dyn std::error::Error + Send + Sync>>) -> io::Error {
@@ -652,5 +818,248 @@ mod tests {
         assert!(pon_reason1 & QCOM_PON_REASON_HARD_RESET != 0);
         assert!(pon_reason1 & QCOM_PON_REASON_CHARGER_MASK != 0);
         assert_eq!(pon_reason1 & QCOM_PON_REASON_KPD, 0);
+    }
+
+    const KEY_VOLUMEDOWN_CELL: [u8; 4] = [0, 0, 0, 114];
+    const KEY_POWER_CELL: [u8; 4] = [0, 0, 0, 116];
+
+    fn compatibles(values: &[&str]) -> Vec<String> {
+        values.iter().map(|value| value.to_string()).collect()
+    }
+
+    #[test]
+    fn parses_fdt_node_status() {
+        assert!(fdt_status_enabled(b"okay\0"));
+        assert!(fdt_status_enabled(b"ok\0"));
+        assert!(!fdt_status_enabled(b"disabled\0"));
+        assert!(!fdt_status_enabled(b"\0"));
+    }
+
+    #[test]
+    fn parses_fdt_linux_code() {
+        assert_eq!(parse_first_fdt_u32(&KEY_VOLUMEDOWN_CELL), Some(114));
+        assert_eq!(parse_first_fdt_u32(&[0, 0, 0x01, 0x74]), Some(0x174));
+        assert_eq!(parse_first_fdt_u32(&[0, 0, 114]), None);
+    }
+
+    #[test]
+    fn trusts_enabled_pm8941_resin_with_volume_down_code() {
+        let resin = compatibles(&["qcom,pm8941-resin"]);
+
+        assert_eq!(
+            classify_pon_key(&resin, None, Some(&KEY_VOLUMEDOWN_CELL)),
+            Some(PonKey::VolumeDown)
+        );
+        assert_eq!(
+            classify_pon_key(&resin, Some(b"okay\0"), Some(&KEY_VOLUMEDOWN_CELL)),
+            Some(PonKey::VolumeDown)
+        );
+        assert_eq!(
+            classify_pon_key(&resin, Some(b"disabled\0"), Some(&KEY_VOLUMEDOWN_CELL)),
+            None
+        );
+        assert_eq!(classify_pon_key(&resin, None, None), None);
+        assert_eq!(classify_pon_key(&resin, None, Some(&KEY_POWER_CELL)), None);
+    }
+
+    #[test]
+    fn trusts_pm8941_pwrkey_with_power_code() {
+        let pwrkey = compatibles(&["qcom,pm8941-pwrkey"]);
+
+        assert_eq!(
+            classify_pon_key(&pwrkey, None, Some(&KEY_POWER_CELL)),
+            Some(PonKey::Power)
+        );
+        assert_eq!(classify_pon_key(&pwrkey, None, None), Some(PonKey::Power));
+        assert_eq!(
+            classify_pon_key(&pwrkey, None, Some(&KEY_VOLUMEDOWN_CELL)),
+            None
+        );
+    }
+
+    #[test]
+    fn rejects_resin_compatibles_with_other_status_bits() {
+        assert_eq!(
+            classify_pon_key(
+                &compatibles(&["qcom,pmk8350-resin"]),
+                None,
+                Some(&KEY_VOLUMEDOWN_CELL)
+            ),
+            None
+        );
+        assert_eq!(
+            classify_pon_key(
+                &compatibles(&["qcom,pm8941-resin-x"]),
+                None,
+                Some(&KEY_VOLUMEDOWN_CELL)
+            ),
+            None
+        );
+    }
+
+    #[test]
+    fn decodes_rt_sts_only_for_trusted_keys() {
+        let mut keys = PonKeys {
+            registers: PathBuf::from("/nonexistent/registers"),
+            rt_sts_reg: 0x810,
+            volume_down: true,
+            power: false,
+        };
+
+        assert_eq!(
+            keys.decode(0x03),
+            PonKeyState {
+                volume_down: true,
+                power: false
+            }
+        );
+        assert_eq!(keys.decode(0x01), PonKeyState::default());
+
+        keys.power = true;
+        assert_eq!(
+            keys.decode(0x01),
+            PonKeyState {
+                volume_down: false,
+                power: true
+            }
+        );
+        keys.volume_down = false;
+        assert_eq!(
+            keys.decode(0x02),
+            PonKeyState {
+                volume_down: false,
+                power: false
+            }
+        );
+    }
+
+    struct TempDir {
+        path: PathBuf,
+    }
+
+    impl TempDir {
+        fn new() -> Self {
+            let nonce = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos();
+            let path = std::env::temp_dir().join(format!(
+                "pocketboot-pon-keys-test-{}-{nonce}",
+                std::process::id()
+            ));
+            fs::create_dir_all(&path).unwrap();
+            Self { path }
+        }
+
+        fn node(&self, path: &str, properties: &[(&str, &[u8])]) {
+            let node = self.path.join(path);
+            fs::create_dir_all(&node).unwrap();
+            for (name, value) in properties {
+                fs::write(node.join(name), value).unwrap();
+            }
+        }
+    }
+
+    impl Drop for TempDir {
+        fn drop(&mut self) {
+            let _ = fs::remove_dir_all(&self.path);
+        }
+    }
+
+    #[test]
+    fn finds_pm8916_pon_keys_in_pmic_of_node() {
+        let pmic = TempDir::new();
+        pmic.node("rtc@6000", &[("compatible", b"qcom,pm8941-rtc\0")]);
+        pmic.node(
+            "pon@800",
+            &[
+                ("compatible", b"qcom,pm8916-pon\0"),
+                ("reg", &[0, 0, 0x08, 0x00]),
+            ],
+        );
+        pmic.node(
+            "pon@800/pwrkey",
+            &[
+                ("compatible", b"qcom,pm8941-pwrkey\0"),
+                ("linux,code", &KEY_POWER_CELL),
+            ],
+        );
+        pmic.node(
+            "pon@800/resin",
+            &[
+                ("compatible", b"qcom,pm8941-resin\0"),
+                ("linux,code", &KEY_VOLUMEDOWN_CELL),
+                ("status", b"okay\0"),
+            ],
+        );
+
+        let keys = pon_keys_for_pmic(&pmic.path, PathBuf::from("registers")).unwrap();
+
+        assert_eq!(
+            keys,
+            PonKeys {
+                registers: PathBuf::from("registers"),
+                rt_sts_reg: 0x810,
+                volume_down: true,
+                power: true,
+            }
+        );
+    }
+
+    #[test]
+    fn finds_pm660_resin_without_pwrkey() {
+        let pmic = TempDir::new();
+        pmic.node(
+            "pon@800",
+            &[
+                ("compatible", b"qcom,pm8998-pon\0"),
+                ("reg", &[0, 0, 0x08, 0x00]),
+            ],
+        );
+        pmic.node(
+            "pon@800/pwrkey",
+            &[
+                ("compatible", b"qcom,pm8941-pwrkey\0"),
+                ("linux,code", &KEY_POWER_CELL),
+                ("status", b"disabled\0"),
+            ],
+        );
+        pmic.node(
+            "pon@800/resin",
+            &[
+                ("compatible", b"qcom,pm8941-resin\0"),
+                ("linux,code", &KEY_VOLUMEDOWN_CELL),
+            ],
+        );
+
+        let keys = pon_keys_for_pmic(&pmic.path, PathBuf::from("registers")).unwrap();
+
+        assert!(keys.volume_down);
+        assert!(!keys.power);
+        assert_eq!(keys.rt_sts_reg, 0x810);
+    }
+
+    #[test]
+    fn ignores_pon_without_trusted_keys() {
+        let pmic = TempDir::new();
+        pmic.node(
+            "pon@800",
+            &[
+                ("compatible", b"qcom,pm8916-pon\0"),
+                ("reg", &[0, 0, 0x08, 0x00]),
+            ],
+        );
+        pmic.node(
+            "pon@800/resin",
+            &[
+                ("compatible", b"qcom,pm8941-resin\0"),
+                ("status", b"disabled\0"),
+            ],
+        );
+
+        assert_eq!(
+            pon_keys_for_pmic(&pmic.path, PathBuf::from("registers")),
+            None
+        );
     }
 }

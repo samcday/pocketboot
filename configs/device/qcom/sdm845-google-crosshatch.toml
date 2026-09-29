@@ -71,4 +71,5 @@ ramdisk_offset = 0x01000000
 second_offset = 0x00f00000
 tags_offset = 0x00000100
 dtb_offset = 0x01f00000
+# pocketboot.drm_page_flips is a UI lab flag, so this image stays in the boot menu instead of autobooting.
 cmdline = "earlycon console=ttyMSM0,115200n8 msm.skip_gpu=1 msm.separate_gpu_kms=1 pocketboot.log=info pocketboot.drm_page_flips=16 loglevel=8 ignore_loglevel drm.debug=0x6"

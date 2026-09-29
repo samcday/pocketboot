@@ -13,6 +13,8 @@ the A5U's MDP5, EA8061V video-mode path.
 ## Safety and starting state
 
 The A5U must already be running Pocketboot and offering userspace fastboot.
+Pocketboot autoboots the first bootable OS, so reach its menu with `pocketboot.menu`
+on the kernel cmdline or by holding volume-down once the Pocketboot kernel starts.
 Supply its serial explicitly; the runner never enumerates or auto-selects a
 device. Before downloading the image it requires these exact getvars from the
 explicitly addressed target:

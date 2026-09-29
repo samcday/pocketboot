@@ -80,6 +80,9 @@ fn run_qemu(workspace_root: &Path, image: &Path, disk: &Path, extra_args: &[Stri
     println!(
         "host attach: sudo modprobe vhci-hcd && sudo usbip attach -r 127.0.0.1 -d usbip-vudc.0"
     );
+    println!(
+        "vol-down break-in: pass -- -qmp tcp:127.0.0.1:4444,server=on,wait=off and hold qcode \"volumedown\" with input-send-event"
+    );
 
     let mut command = Command::new(qemu);
     command
@@ -103,6 +106,9 @@ fn run_qemu(workspace_root: &Path, image: &Path, disk: &Path, extra_args: &[Stri
         .args(["-device", "virtio-blk-device,drive=pocketboot"])
         .args(["-netdev", "user,id=net0,hostfwd=tcp:127.0.0.1:3240-:3240"])
         .args(["-device", "virtio-net-device,netdev=net0"])
+        .args(["-global", "virtio-mmio.force-legacy=false"])
+        .args(["-device", "virtio-gpu-device"])
+        .args(["-device", "virtio-keyboard-device"])
         .args(extra_args);
     run_command(command, "qemu")
 }
