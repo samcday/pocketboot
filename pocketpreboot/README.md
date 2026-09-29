@@ -7,12 +7,13 @@ count is `num_possible_cpus()` (4 or 8). The primary is whichever CPU the
 firmware boots: MPIDR 0 on MSM8916, but MPIDR 0x100 (big-cluster core 0) on
 MSM8939, so preboot must not assume MPIDR 0 and slot 0 is a normal secondary
 there. The kernel's `pb_index()` and the cache-off resident trampoline compute
-the same index. This MSM8939 path is experimental and is not enabled in the
-Xiaomi Mi 4i (ferrari) build: its overlay uses lk2nd-owned `spin-table` CPUs
-without a pocketboot parking reservation. Enabling the experimental path would
-require `pocketboot,msm8939-acc` CPU methods, the 4 KiB
-`pocketboot,spin-table-v1` page, preboot packaging, and the matching kernel
-patch; see [the MSM8939 patch README](../patches/kernel/msm8939/README.md).
+the same index. This branch enables the experimental Xiaomi Mi 4i (ferrari)
+path using `pocketboot,msm8939-acc` CPU methods, a 4 KiB
+`pocketboot,spin-table-v1` page, preboot packaging and the matching kernel
+patch. MSM8939 cold startup also checks/powers the target cluster's L2 before
+per-core ACC startup. See the [experiment's hardware gates](../docs/ferrari-parking-experiment.md)
+and [MSM8939 patch README](../patches/kernel/msm8939/README.md). The no-preboot
+baseline remains on the separate Ferrari bring-up branch.
 
 For UART-free lab diagnostics, see the optional
 [triplicated RAM trace](../docs/preboot-ram-trace.md).
@@ -41,11 +42,12 @@ after a firmware reset that left DRAM intact. Preboot never overwrites possibly
 executing resident code.
 
 A packaged image entered through kexec can reuse the page. This requires all
-four incoming CPU nodes to use `spin-table` with their exact v1 release slots,
+incoming CPU nodes to use `spin-table` with their exact v1 release slots,
 the matching descriptor, zero release words, and each secondary's nonzero
 request to match its acknowledgment and exception level. Reentry performs no
-SCM calls, ACC operations, or writes to the resident page. A bootloader reset
-that restores the raw startup DT does not meet this contract and is rejected.
+SCM calls, L2/ACC operations, or writes to the resident page. A bootloader reset
+that restores the raw startup DT instead takes the cold path, which may reclaim
+retained page contents only after proving the secondaries are held in reset.
 
 The resident format is specified in [the versioned parking ABI](../docs/msm8916-spin-table-abi.md).
 The assembly reports each secondary's exception level before publishing its

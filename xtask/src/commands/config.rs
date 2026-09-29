@@ -873,7 +873,7 @@ mod tests {
     }
 
     #[test]
-    fn ferrari_uses_lk2nd_smp_and_an_appended_dtb() {
+    fn ferrari_experiment_uses_owned_parking_and_an_appended_dtb() {
         let workspace_root = super::super::workspace_root().unwrap();
         let device = KernelDevice::parse("qcom/msm8939-xiaomi-ferrari").unwrap();
         let config = load_device_config(&workspace_root, &device).unwrap();
@@ -884,6 +884,7 @@ mod tests {
         assert_eq!(
             source.patches,
             [
+                "patches/kernel/msm8939/0001-arm64-pocketboot-spin-table-kexec.patch",
                 "patches/kernel/msm8939/0002-usb-chipidea-msm-enable-sg-bounce.patch",
                 "patches/kernel/msm8939/0003-iommu-qcom-kexec-context.patch",
             ]
@@ -895,6 +896,7 @@ mod tests {
         let kconfig = config.kconfig_contents().unwrap();
         for symbol in [
             "ARCH_QCOM",
+            "ARM64_SPIN_TABLE_KEXEC",
             "MSM_GCC_8939",
             "QCOM_A53PLL",
             "QCOM_CLK_APCS_MSM8916",
@@ -914,15 +916,15 @@ mod tests {
             );
         }
         assert!(kconfig.contains("CONFIG_NR_CPUS=8\n"));
-        assert!(!kconfig.contains("CONFIG_ARM64_SPIN_TABLE_KEXEC=y\n"));
 
         let bootimg = config.bootimg.as_ref().unwrap();
         assert_eq!(bootimg.kernel_image, "Image.gz");
         assert_eq!(bootimg.header_version, 0);
         assert_eq!(bootimg.page_size, 2048);
         assert_eq!(bootimg.base + bootimg.kernel_offset, 0x80080000);
-        // lk2nd owns SMP; no pocketpreboot shim is packaged.
-        assert!(bootimg.preboot.is_none());
+        let preboot = bootimg.preboot.as_ref().unwrap();
+        assert_eq!(preboot.load_addr, 0x80080000);
+        assert_eq!(preboot.payload_align, 0x200000);
         // Xiaomi MSM8939 uses an appended DTB, not a QCDT vendor table.
         assert!(bootimg.append_dtb);
         assert!(bootimg.qcdt.is_none());
@@ -937,12 +939,25 @@ mod tests {
         ] {
             assert!(
                 overlay.contains(&format!(
-                    "&{{/cpus/{cpu}}} {{ enable-method = \"spin-table\"; }};"
+                    "&{{/cpus/{cpu}}} {{ enable-method = \"pocketboot,msm8939-acc\"; }};"
                 )),
-                "missing lk2nd spin-table method for {cpu}"
+                "missing preboot cold-start method for {cpu}"
             );
         }
-        assert!(!overlay.contains("pocketboot,spin-table-v1"));
+        assert_eq!(overlay.matches("pocketboot,spin-table-v1").count(), 1);
+        assert!(overlay.contains("reg = <0 0x854ff000 0 0x1000>;"));
+        assert!(overlay.contains("no-map;"));
+        assert!(!bootimg.cmdline.contains("spin-table=force"));
+        assert!(!bootimg.cmdline.contains("pass-ramoops=zap"));
+        for argument in ["lk2nd.pass-ramoops", "panic=1", "pocketboot.log=info"] {
+            assert!(
+                bootimg
+                    .cmdline
+                    .split_ascii_whitespace()
+                    .any(|arg| arg == argument),
+                "missing experiment diagnostic argument {argument}"
+            );
+        }
     }
 
     #[test]

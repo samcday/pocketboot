@@ -39,4 +39,10 @@ ramdisk_size = 1
 append_seandroid_enforce = true
 # lk2nd injects the vendor ramoops region into the DT. No "=zap" so a panic
 # from the previous boot is still readable from lk2nd fastboot afterwards.
-cmdline = "lk2nd.pass-ramoops"
+cmdline = "lk2nd.pass-ramoops panic=1 pocketboot.log=info"
+
+# Experimental cold-start/parking path. Keep the no-preboot baseline on the
+# Ferrari bring-up branch; see docs/ferrari-parking-experiment.md before use.
+[bootimg.preboot]
+load_addr = 0x80080000
+payload_align = 0x200000

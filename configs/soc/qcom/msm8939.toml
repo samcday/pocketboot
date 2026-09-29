@@ -5,6 +5,7 @@ remote = "https://github.com/pem120/linux.git"
 # https://github.com/pem120/linux/tree/ferrari/lkml
 sha = "45add32603ee4aa28979ad6ec70c10b14af4ac29"
 patches = [
+    "patches/kernel/msm8939/0001-arm64-pocketboot-spin-table-kexec.patch",
     "patches/kernel/msm8939/0002-usb-chipidea-msm-enable-sg-bounce.patch",
     "patches/kernel/msm8939/0003-iommu-qcom-kexec-context.patch",
 ]
@@ -13,8 +14,8 @@ patches = [
 # Platform sizing: two clusters of four Cortex-A53s
 ARCH_QCOM = true
 NR_CPUS = 8
-# lk2nd owns SMP bringup; the pocketboot spin-table parking patch is not
-# applied, so there is no ARM64_SPIN_TABLE_KEXEC symbol to enable.
+# Experimental owned resident page, installed by pocketpreboot before Linux.
+ARM64_SPIN_TABLE_KEXEC = true
 
 # Core Qualcomm firmware/resource plumbing
 QCOM_SOC = true

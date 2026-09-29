@@ -1,12 +1,28 @@
 /dts-v1/;
 /plugin/;
 
-/* lk2nd installs the spin table and brings up all eight CPUs itself. */
-&{/cpus/cpu@0} { enable-method = "spin-table"; };
-&{/cpus/cpu@1} { enable-method = "spin-table"; };
-&{/cpus/cpu@2} { enable-method = "spin-table"; };
-&{/cpus/cpu@3} { enable-method = "spin-table"; };
-&{/cpus/cpu@100} { enable-method = "spin-table"; };
-&{/cpus/cpu@101} { enable-method = "spin-table"; };
-&{/cpus/cpu@102} { enable-method = "spin-table"; };
-&{/cpus/cpu@103} { enable-method = "spin-table"; };
+/* Leave secondary startup to pocketpreboot, not lk2nd's holding pen. */
+&{/cpus/cpu@0} { enable-method = "pocketboot,msm8939-acc"; };
+&{/cpus/cpu@1} { enable-method = "pocketboot,msm8939-acc"; };
+&{/cpus/cpu@2} { enable-method = "pocketboot,msm8939-acc"; };
+&{/cpus/cpu@3} { enable-method = "pocketboot,msm8939-acc"; };
+&{/cpus/cpu@100} { enable-method = "pocketboot,msm8939-acc"; };
+&{/cpus/cpu@101} { enable-method = "pocketboot,msm8939-acc"; };
+&{/cpus/cpu@102} { enable-method = "pocketboot,msm8939-acc"; };
+&{/cpus/cpu@103} { enable-method = "pocketboot,msm8939-acc"; };
+
+&{/reserved-memory} {
+	#address-cells = <2>;
+	#size-cells = <2>;
+
+	/*
+	 * Experiment-only candidate in the gap after framebuffer (0x85000000)
+	 * and before firmware (0x86000000). Verify the live DT reservation map
+	 * before hardware use; preboot also validates overlap and RAM bounds.
+	 */
+	spin-table@854ff000 {
+		compatible = "pocketboot,spin-table-v1";
+		reg = <0 0x854ff000 0 0x1000>;
+		no-map;
+	};
+};

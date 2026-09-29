@@ -5,11 +5,16 @@ The device configuration originates from pem120's pocketboot
 [`ferrari/lkml` at `45add32603ee4aa28979ad6ec70c10b14af4ac29`][kernel]
 and applies the checked-in MSM8939 USB SG-bounce and IOMMU patches.
 
-The current image is intended to boot **through lk2nd**: an Android v0 boot
-image containing `Image.gz` with an appended DTB and built-in pocketboot
-initramfs. It does not enable pocketpreboot or the experimental MSM8939
-CPU-parking kernel patch. Preserve this bring-up baseline until the replacement
-SMP path has its own evidence.
+The bring-up baseline ([PR #37][baseline]) boots **through lk2nd**: an Android
+v0 boot image containing `Image.gz` with an appended DTB and built-in pocketboot
+initramfs. It does not enable pocketpreboot or the MSM8939 CPU-parking kernel
+patch. Preserve this baseline until the replacement SMP path has its own
+evidence.
+
+**This experimental branch enables a different CPU startup path.** Read the
+[parking experiment](ferrari-parking-experiment.md) before building or using its
+image. The build command and artifact name are the same; the branch/commit
+identifies which behavior is packaged.
 
 ## Build and retrieve
 
@@ -36,12 +41,12 @@ in the repository root is not this build's output.
 
 ## Known kexec blocker
 
-There are two source-confirmed barriers in the current no-preboot configuration:
+There are two source-confirmed barriers in the baseline no-preboot configuration:
 userspace first rejects the unowned lk2nd table with
 `live spin-table CPUs have no owned parking contract`. Independently, the
 kernel also lacks the CPU-shutdown support needed to perform a safe handoff.
 
-The current DT uses lk2nd-owned `spin-table` for eight CPUs. In the pinned
+The baseline DT uses lk2nd-owned `spin-table` for eight CPUs. In the pinned
 kernel, the spin-table CPU operations do not provide `cpu_die`; with more than
 one possible CPU, `cpus_are_stuck_in_kernel()` returns true.
 If reached, `machine_kexec_prepare()` rejects the legacy kexec load with
@@ -79,5 +84,6 @@ For verbosity, failed-load menu recovery and previous-boot log retrieval, see
 [recovery diagnostics](recovery.md). Capturing pstore is not yet a guarantee
 that a destination kernel uses the same ramoops reservation or layout.
 
+[baseline]: https://github.com/samcday/pocketboot/pull/37
 [port]: https://github.com/pem120/pocketboot/commit/d3f4602418a03af4266128feb0f95f028e45fa1b
 [kernel]: https://github.com/pem120/linux/tree/45add32603ee4aa28979ad6ec70c10b14af4ac29

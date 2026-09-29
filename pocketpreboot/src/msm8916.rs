@@ -242,6 +242,8 @@ fn prepare_fdt_inner(fdt: usize, payload: usize, payload_size: usize) -> Result<
         uart::write_str(" acc=");
         uart::write_hex64(cpu.acc_base);
         uart::writeln("");
+        #[cfg(feature = "soc-msm8939")]
+        power_up_l2(cpu.acc_base as usize, read32, write32, dsb_sy, delay_us);
         boot_cortex_a53(cpu.acc_base as usize);
         let ack = spin_table.ack_addr(cpu.slot) as usize;
         let mut acknowledged = false;
@@ -256,6 +258,8 @@ fn prepare_fdt_inner(fdt: usize, payload: usize, payload_size: usize) -> Result<
             uart::write_str("msm8916: park acknowledgment timeout cpu");
             uart::write_hex64(cpu.reg as u64);
             uart::writeln("");
+            #[cfg(feature = "soc-msm8939")]
+            uart::writeln("msm8939: check L2 power, SCM/ACC startup and resident entry state");
             return Err(Error::StartupTimeout);
         }
         let entry_el =
@@ -872,6 +876,44 @@ fn resident_image() -> &'static [u8] {
 #[cfg(not(target_arch = "aarch64"))]
 fn resident_image() -> &'static [u8] {
     &[]
+}
+
+/// MSM8939 cold entry only, after validating the ACC bases and ownership.
+/// lk2nd cpu-boot.c (8e563023d843) and Xiaomi cpu_pwr_ctl.c (da2c4ce51444)
+/// agree on this sequence; msm8939-cpu.dtsi selects qcom,8916-l2ccc.
+/// No readiness spin: the existing bounded resident-ack wait detects failure.
+#[cfg(feature = "soc-msm8939")]
+fn power_up_l2(
+    acc_base: usize,
+    mut read: impl FnMut(usize) -> u32,
+    mut write: impl FnMut(usize, u32),
+    mut barrier: impl FnMut(),
+    mut delay: impl FnMut(u64),
+) {
+    // Aff1=1: 0x0b011000; Aff1=0: 0x0b111000, for every core.
+    let base = (acc_base & 0xfff0_0000) + 0x11000;
+    if read(base + 0x18) & (1 << 9) != 0 {
+        return; // L2_HS_STS, not PMIC_APC_ON (bit 28).
+    }
+    write(base + 0x14, 0x10d700); // Close L2/SCU logic GDHS.
+    write(base + 0x0c, 0x400000); // Assert PRESETDBGn.
+    barrier();
+    delay(2);
+    write(base + 0x14, 0x101700); // Release memory clamps.
+    write(base + 0x14, 0x101703); // Wake L2/SCU RAMs.
+    barrier();
+    delay(2);
+    write(base + 0x58, 1); // Software clock enable.
+    write(base + 0x14, 0x101603); // Release logic clamp.
+    barrier();
+    delay(2);
+    write(base + 0x0c, 0); // Release PRESETDBGn.
+    write(base + 0x14, 0x100203); // Release logic reset.
+    barrier();
+    delay(54);
+    write(base + 0x14, 0x10100203); // PMIC_APC_ON.
+    write(base + 0x58, 3); // Hardware clock control + enable.
+    barrier();
 }
 
 fn boot_cortex_a53(acc_base: usize) {
@@ -1850,11 +1892,68 @@ mod tests {
         assert_eq!(slots, (0..MAX_CPUS as u32).collect::<Vec<_>>());
 
         #[cfg(not(feature = "soc-msm8939"))]
-        let invalid = [4u32, 0x100, 0x101, 0x1_0000];
+        let invalid = [4u32, 0x10, 0x100, 0x101, 0x1_0000];
         #[cfg(feature = "soc-msm8939")]
-        let invalid = [4u32, 0x200, 0x1_0000, 0x1_0100];
+        let invalid = [4u32, 0x10, 0x110, 0x200, 0x1_0000, 0x1_0100];
         for reg in invalid {
             assert!(cpu_slot_index(reg).is_err(), "reg {reg:#x}");
+        }
+    }
+
+    #[cfg(feature = "soc-msm8939")]
+    #[test]
+    fn l2_power_sequence_and_cluster_bases() {
+        use std::cell::RefCell;
+        #[derive(Debug, PartialEq)]
+        enum Op {
+            Read(usize),
+            Write(usize, u32),
+            Barrier,
+            Delay(u64),
+        }
+        use Op::*;
+        for (acc, base) in [(0x0b088000, 0x0b011000), (0x0b188000, 0x0b111000)] {
+            for core in 0..4 {
+                // Bit 28 alone is NOT a powered indication for 8916-l2ccc.
+                for status in [0, 1 << 28, 1 << 9, (1 << 9) | (1 << 28)] {
+                    let ops = RefCell::new(Vec::new());
+                    power_up_l2(
+                        acc + core * 0x10000,
+                        |addr| {
+                            ops.borrow_mut().push(Read(addr));
+                            status
+                        },
+                        |addr, value| ops.borrow_mut().push(Write(addr, value)),
+                        || ops.borrow_mut().push(Barrier),
+                        |us| ops.borrow_mut().push(Delay(us)),
+                    );
+                    let mut expected = vec![Read(base + 0x18)];
+                    if status & (1 << 9) == 0 {
+                        expected.extend([
+                            Write(base + 0x14, 0x10d700),
+                            Write(base + 0x0c, 0x400000),
+                            Barrier,
+                            Delay(2),
+                            Write(base + 0x14, 0x101700),
+                            Write(base + 0x14, 0x101703),
+                            Barrier,
+                            Delay(2),
+                            Write(base + 0x58, 1),
+                            Write(base + 0x14, 0x101603),
+                            Barrier,
+                            Delay(2),
+                            Write(base + 0x0c, 0),
+                            Write(base + 0x14, 0x100203),
+                            Barrier,
+                            Delay(54),
+                            Write(base + 0x14, 0x10100203),
+                            Write(base + 0x58, 3),
+                            Barrier,
+                        ]);
+                    }
+                    assert_eq!(ops.into_inner(), expected);
+                }
+            }
         }
     }
 

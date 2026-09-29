@@ -154,7 +154,7 @@ index 49029eace3ad..93f080534489 100644
  #include <asm/cputype.h>
  #include <asm/io.h>
  #include <asm/smp_plat.h>
-@@ -40,6 +48,276 @@ static void write_pen_release(u64 val)
+@@ -40,6 +48,290 @@ static void write_pen_release(u64 val)
  }
  
  
@@ -191,7 +191,13 @@ index 49029eace3ad..93f080534489 100644
 + */
 +static unsigned int pb_index(u64 mpidr)
 +{
-+	return ((mpidr >> 8) & 0xff) * PB_CLUSTER_CPUS + (mpidr & 0xf);
++	unsigned int cluster = (mpidr >> 8) & 0xff;
++	unsigned int core = mpidr & 0xff;
++
++	if (mpidr != ((u64)cluster << 8 | core) ||
++	    cluster >= PB_MAX_CPUS / PB_CLUSTER_CPUS || core >= PB_CLUSTER_CPUS)
++		return PB_MAX_CPUS;
++	return cluster * PB_CLUSTER_CPUS + core;
 +}
 +
 +static void __iomem *pb_slot(unsigned int cpu)
@@ -225,6 +231,7 @@ index 49029eace3ad..93f080534489 100644
 +	struct reserved_mem *reserved;
 +	struct resource res;
 +	unsigned int cpu, count = 0;
++	unsigned int seen = 0;
 +	char magic[8];
 +	int ret = -EINVAL;
 +
@@ -258,23 +265,30 @@ index 49029eace3ad..93f080534489 100644
 +	if (!reserved || reserved->base != res.start ||
 +	    reserved->size != PB_REGION_SIZE)
 +		goto out;
-+	if (!num_possible_cpus() || num_possible_cpus() > PB_MAX_CPUS ||
++	if ((num_possible_cpus() != PB_CLUSTER_CPUS &&
++	     num_possible_cpus() != PB_MAX_CPUS) ||
++	    (of_machine_is_compatible("qcom,msm8939") &&
++	     num_possible_cpus() != PB_MAX_CPUS) ||
 +	    pb_index(cpu_logical_map(0)) >= num_possible_cpus())
 +		goto out;
 +	for_each_possible_cpu(cpu) {
 +		struct device_node *dn = of_get_cpu_node(cpu, NULL);
 +		u64 release, mpidr = cpu_logical_map(cpu);
++		unsigned int index = pb_index(mpidr);
 +		int err;
 +
 +		/* cpu_init() is not called for CPU0; validate its DT directly. */
 +		err = of_property_read_u64(dn, "cpu-release-addr", &release);
 +		of_node_put(dn);
-+		if (err || pb_index(mpidr) >= num_possible_cpus() ||
++		if (err || index >= num_possible_cpus() || (seen & (1U << index)) ||
 +		    get_cpu_ops(cpu) != &smp_spin_table_ops ||
 +		    release != res.start + PB_SLOTS +
-+				       pb_index(mpidr) * PB_STRIDE)
++				       index * PB_STRIDE)
 +			goto out;
++		seen |= 1U << index;
 +	}
++	if (seen != (1U << num_possible_cpus()) - 1)
++		goto out;
 +
 +	pb_region = ioremap_cache(res.start, PB_REGION_SIZE);
 +	if (!pb_region) {
@@ -431,7 +445,7 @@ index 49029eace3ad..93f080534489 100644
  static int smp_spin_table_cpu_init(unsigned int cpu)
  {
  	struct device_node *dn;
-@@ -68,6 +346,13 @@ static int smp_spin_table_cpu_prepare(unsigned int cpu)
+@@ -68,6 +360,13 @@ static int smp_spin_table_cpu_prepare(unsigned int cpu)
  	__le64 __iomem *release_addr;
  	phys_addr_t pa_holding_pen = __pa_symbol(secondary_holding_pen);
  
@@ -445,7 +459,7 @@ index 49029eace3ad..93f080534489 100644
  	if (!cpu_release_addr[cpu])
  		return -ENODEV;
  
-@@ -124,4 +409,9 @@ const struct cpu_operations smp_spin_table_ops = {
+@@ -124,4 +423,9 @@ const struct cpu_operations smp_spin_table_ops = {
  	.cpu_init	= smp_spin_table_cpu_init,
  	.cpu_prepare	= smp_spin_table_cpu_prepare,
  	.cpu_boot	= smp_spin_table_cpu_boot,

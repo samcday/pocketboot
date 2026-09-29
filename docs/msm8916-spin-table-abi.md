@@ -8,8 +8,9 @@ kexec. A DB410c PSCI baseline alone does not establish that result.
 
 The MSM8939 port extends this layout to eight CPUs. Its userspace DTB handling
 has host and ARM64/QEMU regression coverage, but the complete eight-CPU parking
-path has no hardware acceptance yet and is not enabled in the Ferrari build.
-The four-core results do not validate the eight-core extension.
+path has no hardware acceptance yet. It is enabled only in the
+[Ferrari parking experiment](ferrari-parking-experiment.md), not the no-preboot
+baseline. The four-core results do not validate the eight-core extension.
 
 ## Ownership and device tree
 
