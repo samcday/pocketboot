@@ -89,11 +89,14 @@ fastboot boot instantnoodle/boot.img
 
 Do **not** flash the image, erase `dtbo`/`vendor_boot`/`vbmeta`, change slots,
 or disable verified boot to work around a rejection. Record the exact
-fastboot response and stop instead. The OnePlus 6T's slot behaviour is not
-assumed to describe this phone.
+fastboot response and stop instead.
 
 If Linux starts, first check whether the display changes and the USB gadget
 enumerates. A black screen does not necessarily mean the kernel failed.
+If neither screen nor USB provides evidence, stop rather than guessing kernel
+parameters; physical UART access has not been established for this test.
+Use the previously agreed recovery path, then check the original bootloader's
+current slot and confirm that the original OS still starts.
 Once connected to **pocketboot's** fastboot implementation, collect:
 
 ```sh
@@ -102,6 +105,10 @@ fastboot get_staged instantnoodle-dmesg.txt
 fastboot oem 'shell:cat /proc/partitions; cat /proc/cmdline'
 fastboot get_staged instantnoodle-system.txt
 ```
+
+Keep the complete log. For a blank display, useful evidence includes simpledrm
+probe output, SMMU faults and interconnect/power-domain messages. Do not change
+SMMU bypass or framebuffer addresses without a device-specific diagnosis.
 
 Record display, button/touch, UFS, and USB observations separately. Test cable
 orientation and reconnect behaviour explicitly before relying on USB recovery.

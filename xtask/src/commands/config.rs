@@ -786,6 +786,8 @@ mod tests {
             "PHY_QCOM_QMP_COMBO",
             "USB_CONFIGFS_F_FS",
             "INPUT_PM8941_PWRKEY",
+            "KEYBOARD_GPIO",
+            "PINCTRL_QCOM_SPMI_PMIC",
             "TOUCHSCREEN_S6SY761",
         ] {
             assert!(
