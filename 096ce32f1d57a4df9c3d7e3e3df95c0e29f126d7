@@ -1,0 +1,11 @@
+Recovery source-layer restoration and review follow-up
+Repository: samcday/pocketboot
+Commit: 096ce32f1d57a4df9c3d7e3e3df95c0e29f126d7
+
+Restores the original PR39 recovery layer above updated baseline cb977df with forward cherry-picks after unexpected merge ancestry made Git believe recovery was already merged. Original authors preserved. Adds mixed-record failure/source-retention regression and explicit all-or-nothing policy, and removes duplicated panic prefix. Main/UI/gadget retry behavior remains exactly b03d8e0; the newer retry/backoff/early-continue draft9f68d17 is NOT included because further review found pending-default arbitration races.
+
+Pinned Linux pstore source review at45add32603ee: fs/pstore/inode.c132-142 reads the buffer with simple_read_from_buffer, not per-read decompression. fs/pstore/platform.c583-649,693-710 decompresses before publishing; failed decompression retains compressed buffer/flag, and inode.c365-368 exposes .enc.z. Corrupt compressed contents therefore do not themselves produce the review's claimed read-time EIO. Existing copy test preserves opaque .enc.z bytes. Independent I/O failures still abort snapshot publication, but originals remain; new test completes one copy then injects failure in another and verifies no partial snapshot and both unchanged sources.
+https://github.com/pem120/linux/blob/45add32603ee4aa28979ad6ec70c10b14af4ac29/fs/pstore/inode.c#L132-L142
+https://github.com/pem120/linux/blob/45add32603ee4aa28979ad6ec70c10b14af4ac29/fs/pstore/platform.c#L583-L710
+
+Verification: git diff --exit-code cb977df HEAD -- pocketpreboot configs patches passed (lower layer unchanged); cargo fmt --all -- --check and git diff --check passed; cargo test --locked --offline --workspace --features pocketpreboot/soc-msm8916 passed. Snapshot8 tests and emergency writer6 tests also passed under aarch64-musl/QEMU on the pre-publication stacked tree. No real mount, USB or phone test. Sam-owned recovery branch published; push to old fork PR was rejected after GitHub auto-marked it merged. No default-branch push or forced update.
