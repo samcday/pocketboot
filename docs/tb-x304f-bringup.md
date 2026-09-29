@@ -407,6 +407,18 @@ does not establish Linux entry or userspace startup; neither is confirmed.
 The screen/panic state remains to be inspected before resetting the device.
 No image was flashed and no factory reset was performed.
 
+Static comparison against the stock image found no proven CPU/PSCI, GIC,
+packaging, or USB-config defect. It did identify a diagnostic gap: the first
+image requested `console=tty0` but had no framebuffer console. A blank or
+unchanged screen would therefore not prove that Linux never ran.
+
+The next candidate enables the fbdev DRM client and framebuffer console
+without changing the DTB or initramfs. It is 4,784,128 bytes, SHA-256
+`c707c18b92da380fdc2bfe9158c7c10e33cc09acda09957da186a52fdd03124b`.
+Build, generated-config, and image-layout checks passed; it has not been
+booted. This should expose normal kernel text once simpledrm probes, not
+pre-framebuffer failures. It is not yet a fix for the missing USB interface.
+
 ## First-boot milestones
 
 Keep unlock/recovery, the first mainline boot, and the later PocketFed install

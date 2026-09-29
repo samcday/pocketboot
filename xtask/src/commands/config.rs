@@ -798,6 +798,9 @@ mod tests {
             "USB_CONFIGFS_ACM",
             "USB_CONFIGFS_F_FS",
             "DRM_SIMPLEDRM",
+            "DRM_FBDEV_EMULATION",
+            "DRM_CLIENT_DEFAULT_FBDEV",
+            "FRAMEBUFFER_CONSOLE",
         ] {
             assert!(
                 kconfig.contains(&format!("CONFIG_{symbol}=y\n")),
@@ -823,6 +826,12 @@ mod tests {
         assert!(bootimg.preboot.is_none());
         assert!(bootimg.qcdt.is_none());
         assert!(bootimg.dtbh.is_none());
+        assert!(
+            bootimg
+                .cmdline
+                .split_whitespace()
+                .any(|arg| arg == "console=tty0")
+        );
         assert!(
             bootimg
                 .cmdline

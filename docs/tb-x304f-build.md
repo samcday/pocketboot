@@ -111,6 +111,13 @@ They are diagnostic policy, not a power-management solution. USB is explicitly
 peripheral-only and its charger/extcon and host-VBUS dependencies are removed;
 this target does not manage charging or provide USB host mode.
 
+`console=tty0` is paired with `DRM_FBDEV_EMULATION`,
+`DRM_CLIENT_DEFAULT_FBDEV` and `FRAMEBUFFER_CONSOLE` so ordinary kernel text
+can appear after simpledrm probes. The initial image omitted this client:
+simpledrm and DRM panic support alone do not provide an fbcon console. This
+does not expose failures before framebuffer initialization or guarantee USB
+bring-up, but avoids mistaking an unchanged splash for a kernel that never ran.
+
 ## Validation and remaining work
 
 Local validation completed with Rust 1.96.0 and AArch64 GCC 16.2.1:
@@ -120,7 +127,7 @@ Local validation completed with Rust 1.96.0 and AArch64 GCC 16.2.1:
 - `cargo xtask build` lists the target.
 - `cargo xtask kernel-src ...` twice: clean application, then idempotent.
 - `cargo xtask build qcom/msm8917-lenovo-tbx304x`: built PocketBoot, BusyBox,
-  kernel, DTB and a 4,734,976-byte `boot.img`.
+  kernel, DTB and the initial 4,734,976-byte `boot.img`, before enabling fbcon.
 - Binary inspection verified the v0 header, exact gzip+DTB payload, ARM64
   header, APQ8017/SKU5 metadata, PSCI, peripheral USB and retained reservations.
   All requested enabled Kconfig values survived the strict merge.
@@ -143,3 +150,12 @@ The first hardware trial was accepted by LK2nd, but no tablet USB interface
 appeared within 45 seconds. Linux entry and userspace startup are not yet
 confirmed. See the [bring-up record](tb-x304f-bringup.md) for the observed
 result, bootloader image, recovery constraints, and next diagnostic checkpoint.
+
+A console-enabled candidate was then rebuilt using the same initramfs and
+unchanged DTB: 4,784,128 bytes, SHA-256
+`c707c18b92da380fdc2bfe9158c7c10e33cc09acda09957da186a52fdd03124b`.
+The generated config confirms fbdev emulation, the fbdev default DRM client,
+fbcon, and their fbdev-core dependency are built in. Gzip/Image/DTB inspection
+and the 54 build-tool tests passed again. This candidate has not been
+hardware-tested and is an observability improvement, not a demonstrated USB
+fix.
