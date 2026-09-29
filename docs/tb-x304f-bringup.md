@@ -57,21 +57,44 @@ These are queries only. Record failures and empty fields rather than guessing
 their meaning. `MSM8917` is a generic platform identity, not enough to tell two
 tablets apart or prove the exact Lenovo model.
 
+Lenovo's [platform specification][lenovo-spec] identifies the Wi-Fi TB-X304F
+as **APQ8017** and the LTE TB-X304L as **MSM8917** (Snapdragon 425, four
+Cortex-A53 cores). Do not select an LTE programmer, firmware image, or board
+DT from the stock fastboot product string.
+
 ## Unlock gate
 
-The suggested starting reference is the
-[TB-X304F/L greyed-out OEM-unlock guide][unlock-guide]. Before using any
-workaround:
+The [TB-X304F/L greyed-out OEM-unlock guide][unlock-guide] describes a direct
+EDL/Firehose `devinfo` rewrite, **not** a normal user-confirmed fastboot unlock.
+The linked archived BLUnlocker scripts independently confirm the partition
+operations: [dump_devinfo.bat][devinfo-read] uses `emmcdl -d devinfo` to read
+the partition into a host file; [unlock.bat][devinfo-write] uses
+`emmcdl -b devinfo devinfo.img` to write that file back. The write script prints
+"Bootloader Unlocked" without checking the command's exit status.
+
+The XDA page returned a web challenge during research. Its search-indexed text
+describes a hex edit "as shown below", but the actual byte-edit illustration
+was not available in the retrieved text. The tool README does not specify the
+edit either. **The exact offsets and replacement bytes remain unverified.**
+Do not fill this gap with a generic Qualcomm example or another device's dump.
+
+The guide offers model-specific Firehose attachments; acceptance by this
+tablet and a restoration path have not been tested. The scripts contain no
+explicit data-wipe or fuse operation, but the guide describes a possible
+recovery data-format step if the modified device boots to a password prompt.
+Treat all user data as at risk.
+
+Before using this workaround:
 
 1. Obtain the owner's explicit permission for bootloader unlocking and the
-   expected factory reset; back up anything they want to keep.
+   possible factory reset; back up anything they want to keep.
 2. Verify the full procedure and its applicability to the exact model and
    firmware. A search snippet or a similarly named Lenovo tablet is not
    sufficient.
-3. If the procedure involves Qualcomm EDL, identify the exact compatible
-   programmer and recovery firmware. Establish and verify a readback path
-   before proposing partition edits. Keep device-unique data and raw backups
-   private.
+3. Identify the exact TB-X304F-compatible programmer and recovery firmware.
+   Establish a verified readback path and preserve a byte-identical original
+   `devinfo` backup before proposing edits. Keep device-unique data and raw
+   backups private.
 4. Explain any proposed low-level write separately and get approval before
    executing it. Do not erase a protection partition, overwrite bootloader
    stages, or transplant another tablet's partition image as an experiment.
@@ -128,5 +151,8 @@ fork. A reusable agent skill can follow once the device-control and recovery
 contract has actually been tested.
 
 [unlock-guide]: https://xdaforums.com/t/guide-unlock-bootloader-of-lenovo-tab-4-10-with-oem-unlock-greyed-out-tb-x304f-l-and-other-qcom-tablets.4201857/
+[lenovo-spec]: https://psref.lenovo.com/syspool/Sys/PDF/Lenovo_Tablets/TAB4_10/TAB4_10_Spec.PDF
+[devinfo-read]: https://github.com/Naveen3Singh/BLUnlocker/blob/45a1e187764e18bd2ce7fadfc57e00bf40f457d3/dump_devinfo.bat
+[devinfo-write]: https://github.com/Naveen3Singh/BLUnlocker/blob/45a1e187764e18bd2ce7fadfc57e00bf40f457d3/unlock.bat
 [lk2nd]: https://github.com/msm8916-mainline/lk2nd
 [lab-relay]: https://github.com/samcday/skills/pull/1
