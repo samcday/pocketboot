@@ -27,10 +27,32 @@ empty. An empty value with an `OKAY` response is not evidence that a partition
 is absent. These results do not identify the Android firmware version or the
 partition layout well enough to authorize a write.
 
-No unlock, reboot, boot, flash, erase, EDL transition, or partition readback
-has been performed in this bring-up session. In particular, the disabled
-Android OEM-unlock control corresponds to unlock ability being disabled in
-the bootloader.
+This is the pre-unlock baseline. The disabled Android OEM-unlock control
+corresponds to unlock ability being disabled in the bootloader.
+
+## Authorized unlock attempt
+
+The owner has authorized unlocking this expendable development unit, including
+data loss and bricking risk. That authorization covers the EDL workaround;
+preserving original partitions and verifying the edit remain technical
+requirements, not additional consent gates.
+
+The first attempts on 2026-09-29 established:
+
+| Operation | Result |
+| --- | --- |
+| Stock `fastboot flashing unlock` | Rejected: `oem unlock is not allowed` |
+| Stock `fastboot oem edl` | Rejected: `unknown command` |
+| Stock `fastboot oem reboot-edl` | Rejected: `unknown command` |
+| Stock `fastboot reboot` | Returned to Android, USB `17ef:7bc7` |
+
+All fastboot commands selected the tablet's serial explicitly. Lock-state
+queries after the rejected normal unlock still showed locked and untampered.
+No partition has been written through fastboot or EDL.
+
+Android initially exposed no ADB interface. The guide's `adb reboot edl` path
+requires USB debugging to be enabled and the host authorized first; fastboot
+access alone does not establish that prerequisite.
 
 ## Read-only preflight
 
@@ -77,11 +99,17 @@ the partition into a host file; [unlock.bat][devinfo-write] uses
 `emmcdl -b devinfo devinfo.img` to write that file back. The write script prints
 "Bootloader Unlocked" without checking the command's exit status.
 
-The XDA page returned a web challenge during research. Its search-indexed text
-describes a hex edit "as shown below", but the actual byte-edit illustration
-was not available in the retrieved text. The tool README does not specify the
-edit either. **The exact offsets and replacement bytes remain unverified.**
-Do not fill this gap with a generic Qualcomm example or another device's dump.
+Although the live XDA page returned a web challenge, its [archived
+illustration][devinfo-illustration] was recovered. It circles the bytes at
+offsets **`0x10` and `0x18`**, both set to **`0x01`**, in a file starting with
+`ANDROID-BOOT!`. The image SHA-256 is
+`08854b18206856a5dcc9690625c72235f6e428bad68ff3e46bf422f61c03fe14`.
+
+This verifies what the guide depicts, not the layout of this unit's unread
+partition. In particular, do not label `0x18` as "critical unlocked": known LK
+layouts use that position for different fields. Inspect the original dump
+and preserve all unrelated bytes rather than transplanting the guide's data
+or invoking a generic unlock helper that can choose a different partition.
 
 The guide offers model-specific Firehose attachments; acceptance by this
 tablet and a restoration path have not been tested. The scripts contain no
@@ -100,15 +128,43 @@ Before using this workaround:
    Establish a verified readback path and preserve a byte-identical original
    `devinfo` backup before proposing edits. Keep device-unique data and raw
    backups private.
-4. Explain any proposed low-level write separately and get approval before
-   executing it. Do not erase a protection partition, overwrite bootloader
-   stages, or transplant another tablet's partition image as an experiment.
+4. Ensure the owner's authorization covers the low-level partition write;
+   honor authorization already given for this operation. Do not erase a
+   protection partition, overwrite bootloader stages, or transplant another
+   tablet's partition image as an experiment.
 5. Re-query the lock state after the unlock/reset. Do not infer success from
    the host command's exit status alone.
 
-There is no approved or device-validated unlock recipe in this document yet.
+No `devinfo` write has yet been tested on this unit.
 Unlocking the bootloader is not the same operation as disabling secure-boot
 fuses; do not attempt fuse changes.
+
+### Programmer candidate
+
+The XDA TB-X304F programmer attachment is ID `5156731`; the archived page
+lists it, but the ZIP itself was not recovered. Instead, the programmer was
+extracted from [this third-party mirror's TB-X304F firmware package][stock-zip]:
+
+- Archive: `TB-X304F_S001017_2211021443_Q21000_ROW_GB.zip`.
+- Member: `TB-X304F_S001017_2211021443_Q21000_ROW_GB/image/prog_emmc_firehose_8917_ddr.mbn`.
+- Size: 375580 bytes; SHA-256:
+  `9dadea461c392fb993831b5af3cfcfe7067ab7caef9919b5269887a01ad85ea2`.
+- Parsed certificate HWID: `000550E100000000` (APQ8017), OEM/model `0000`.
+- Parsed root-certificate hash:
+  `92242cf8f6fad111a0b0e2aef2fceb6932ac73d2451037cdc6059da3a4f6dd9d`.
+
+HTTP range reads retrieved the ZIP directory and this member; its ZIP CRC
+was checked. The whole archive was not downloaded or hash-verified, and the
+mirror is not a Lenovo-origin download. Certificate parsing does not establish
+that this unit accepts the programmer: compare the actual Sahara HWID and
+PK hash before loading it. No programmer has been sent to the tablet yet.
+
+The host's installed `edl` launcher failed because its Python package was
+missing. Running `python3 ~/src/edl/edl.py --help` from the source checkout at
+`51e11022455d26bcf0b8305b930c474e9b3c81ad` worked, as did its offline
+`fhloaderparse.py`. Neither the checkout nor the system installation was
+modified. Run tools from an ignored local artifact directory and pass
+`PYTHONDONTWRITEBYTECODE=1` when using an unattached source checkout.
 
 ## Existing lk2nd support
 
@@ -197,6 +253,14 @@ mechanism. Do not reuse the DB410c relay channel or assume any spare channel
 is wired to the tablet. Button/reset automation needs a separately verified
 wiring and recovery procedure.
 
+Reuse the parallel PocketBoot work rather than building another recovery
+path: [PR #44][menu-pr] provides volume-down/menu entry and
+[PR #42][recovery-pr] provides failed-load recovery and retained pstore
+diagnostics. Both were draft at this audit; #42 is stacked on the extlinux
+work, not directly on `main`. Neither establishes this tablet's key input,
+USB re-enumeration, or ramoops memory layout, and neither guarantees recovery
+from a hard hang.
+
 `~/src/lk2nd` can be inspected without attaching it to a Delta thread. Attach
 it before making changes there; prefer existing device support over a new
 fork. A reusable agent skill can follow once the device-control and recovery
@@ -206,6 +270,8 @@ contract has actually been tested.
 [lenovo-spec]: https://psref.lenovo.com/syspool/Sys/PDF/Lenovo_Tablets/TAB4_10/TAB4_10_Spec.PDF
 [devinfo-read]: https://github.com/Naveen3Singh/BLUnlocker/blob/45a1e187764e18bd2ce7fadfc57e00bf40f457d3/dump_devinfo.bat
 [devinfo-write]: https://github.com/Naveen3Singh/BLUnlocker/blob/45a1e187764e18bd2ce7fadfc57e00bf40f457d3/unlock.bat
+[devinfo-illustration]: https://web.archive.org/web/20250206102708id_/https://xdaforums.com/attachments/1607766281870-png.5154947/
+[stock-zip]: https://mirrors-obs-2.lolinet.com/firmware/lenowow/2017/Tab_4_10/TB-X304F/TB-X304F_S001017_2211021443_Q21000_ROW_GB.zip
 [lk2nd]: https://github.com/msm8916-mainline/lk2nd
 [lk2nd-tbx304x]: https://github.com/msm8916-mainline/lk2nd/commit/517bb38a409d4ac982f09e83a046e4dc71be5029
 [lk2nd-release]: https://github.com/msm8916-mainline/lk2nd/releases/tag/23.1
@@ -214,3 +280,5 @@ contract has actually been tested.
 [linux-msm8917]: https://github.com/torvalds/linux/blob/master/arch/arm64/boot/dts/qcom/msm8917.dtsi
 [downstream-dts]: https://github.com/lenovo-devs/android_kernel_lenovo_msm8953/blob/lineage-16.0-tbx304/arch/arm/boot/dts/qcom/tbx304-msm8917-pmi8937-qrd-sku5.dts
 [lab-relay]: https://github.com/samcday/skills/pull/1
+[menu-pr]: https://github.com/samcday/pocketboot/pull/44
+[recovery-pr]: https://github.com/samcday/pocketboot/pull/42
