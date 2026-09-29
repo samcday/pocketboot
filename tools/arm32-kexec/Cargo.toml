@@ -1,0 +1,24 @@
+[package]
+name = "arm32-kexec-smoke"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+# Keep the PID 1 harness independent of pocketboot's UI/build dependencies.
+[workspace]
+
+[[example]]
+name = "arm32-kexec-smoke"
+path = "../../examples/arm32-kexec-smoke.rs"
+
+[dependencies]
+flate2 = "1"
+libc = "0.2"
+ruzstd = "0.8"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", default-features = false, features = ["fmt", "registry", "std"] }
+
+[profile.release]
+panic = "abort"
+opt-level = "s"
+strip = true
