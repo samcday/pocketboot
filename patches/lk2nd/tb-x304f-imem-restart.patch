@@ -1,0 +1,26 @@
+Subject: [PATCH] project: msm8952: allow selecting the IMEM restart protocol
+
+Bootstrap experiment for lk2nd 517bb38a409d4ac982f09e83a046e4dc71be5029.
+Keep the existing PON default for other builds. The TB-X304F lab build can
+select USE_PON_REBOOT_REG=0 to use LK's existing IMEM cookie and warm-reset
+path for bootloader/recovery requests.
+
+The Lenovo TB-X304 kernel writes 0x77665500 to IMEM for "bootloader" and
+deletes qcom,store-hard-reset-reason from the board's PON node. In contrast,
+the default LK2nd PON/hard-reset path returned this unit to Android when
+asked to reboot to its bootloader. This override follows that source
+evidence; successful fastboot re-entry still requires hardware validation.
+
+diff --git a/project/msm8952.mk b/project/msm8952.mk
+--- a/project/msm8952.mk
++++ b/project/msm8952.mk
+@@ -137,7 +137,8 @@
+ 
+ #Use PON register for reboot reason
+ ENABLE_REBOOT_MODULE := 1
+-DEFINES += USE_PON_REBOOT_REG=1
++USE_PON_REBOOT_REG ?= 1
++DEFINES += USE_PON_REBOOT_REG=$(USE_PON_REBOOT_REG)
+ 
+ # Enable unit test FW
+ ifeq ($(ENABLE_UNITTEST_FW),1)

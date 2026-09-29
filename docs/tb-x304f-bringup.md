@@ -16,7 +16,11 @@ record, not a claim that PocketBoot supports this tablet yet.
 - Returning from lk2nd with `fastboot reboot bootloader` landed in Android,
   not stock fastboot. Physical fastboot entry is still needed; unattended
   reset recovery is not established.
-- A mainline PocketBoot kernel has not booted yet.
+- A quieter lk2nd build with an experimental IMEM restart setting also
+  booted. That setting's return-to-fastboot behavior is not yet tested.
+- The first 4.7 MB PocketBoot image was accepted by lk2nd, but no tablet USB
+  interface appeared within 45 seconds. Linux entry and userspace are not
+  confirmed; screen evidence is still needed.
 
 ## Verified starting state
 
@@ -330,7 +334,40 @@ it has not been booted yet.
 The subsequent return-path test accepted `fastboot reboot bootloader` but
 landed in stock Android (`17ef:7bc7`, no ADB), not stock fastboot. Do not
 describe the loop as unattended or assume that command is a recovery path
-on this firmware. A PocketBoot/mainline boot remains untested.
+on this firmware.
+
+### Quiet build and IMEM restart experiment
+
+The [restart-protocol patch](../patches/lk2nd/tb-x304f-imem-restart.patch)
+makes `USE_PON_REBOOT_REG` overridable while preserving the default value of
+`1` for other builds. The Lenovo kernel's [restart path][lenovo-restart]
+writes the `0x77665500` bootloader cookie to IMEM. Its
+[board PON description][lenovo-pon] deletes `qcom,store-hard-reset-reason`,
+selecting the warm-reset path rather than relying on a retained PON reason.
+That differs from this lk2nd target's original PON/hard-reset configuration.
+This is source evidence for a candidate fix, not verification of stock
+aboot's mode-selection implementation.
+
+After applying both lk2nd patches to the same source archive, build:
+
+```sh
+make -j16 TOOLCHAIN_PREFIX=arm-none-eabi- \
+    LK2ND_DTBS=msm8917-qrd-sku5.dtb \
+    LK2ND_FORCE_FASTBOOT=1 DEBUG_FBCON=0 USE_PON_REBOOT_REG=0 \
+    LK2ND_VERSION=517bb38-tbx304f-lab-imem lk2nd-msm8952
+```
+
+Both compile-time cases were checked: without an override the generated
+config still sets `USE_PON_REBOOT_REG=1`; this invocation sets it to `0`.
+The resulting image is 299024 bytes, SHA-256
+`132ce182d877b42c1645c84f6108202039736b253b9d543929ca257ef2f98d1d`.
+It RAM-booted from stock fastboot and returned the expected product, version,
+and panel in 0.849 seconds from the host's boot invocation. Its screenshot
+shows a readable menu without debug text drawn over it.
+
+LK2nd reported `MPIDR=0x80000100` and `MIDR=0x410fd034`, consistent with
+the board port's boot CPU. The new restart protocol has **not** yet been
+tested by rebooting this build; the next action was the kernel trial below.
 
 ## Kernel and boot-image prerequisites
 
@@ -353,6 +390,22 @@ boot-header kernel load offset: the former reserves the start of `boot` for
 lk2nd when it is installed persistently. It is not a PocketBoot kernel load
 address. Derive this tablet's image layout from verified sources, not another
 Qualcomm device's configuration.
+
+## First PocketBoot trial
+
+The [experimental build target](tb-x304f-build.md) is now
+`qcom/msm8917-lenovo-tbx304x`. Its 4,734,976-byte image has SHA-256
+`54d72e13b8f4d57bf9d751f446fa9ed6f9f22f820bf171074edc12f04fcdff36`.
+It packages the pinned kernel with built-in PocketBoot/BusyBox initramfs,
+APQ8017 selection metadata, peripheral-only USB, and LK2nd-supplied simplefb.
+
+From the quiet IMEM lk2nd build, the first `fastboot boot` returned `OKAY`
+for download (0.148 s) and boot (0.230 s), total 0.381 s. Afterward no USB
+device appeared on the tablet's physical port within 45 seconds. There was
+no PocketBoot fastboot/ADB/ACM identity to query. A host boot acknowledgement
+does not establish Linux entry or userspace startup; neither is confirmed.
+The screen/panic state remains to be inspected before resetting the device.
+No image was flashed and no factory reset was performed.
 
 ## First-boot milestones
 
@@ -421,6 +474,8 @@ contract has actually been tested.
 [linux-msm8917]: https://github.com/torvalds/linux/blob/master/arch/arm64/boot/dts/qcom/msm8917.dtsi
 [downstream-dts]: https://github.com/lenovo-devs/android_kernel_lenovo_msm8953/blob/lineage-16.0-tbx304/arch/arm/boot/dts/qcom/tbx304-msm8917-pmi8937-qrd-sku5.dts
 [pem120-dts]: https://github.com/pem120/linux-msm89x7/blob/a51b91b503307d35902447dd1f90db765372cf3b/arch/arm64/boot/dts/qcom/msm8917-lenovo-tbx304x.dts
+[lenovo-restart]: https://github.com/lenovo-devs/android_kernel_lenovo_msm8953/blob/lineage-16.0-tbx304/drivers/power/reset/msm-poweroff.c
+[lenovo-pon]: https://github.com/lenovo-devs/android_kernel_lenovo_msm8953/blob/lineage-16.0-tbx304/arch/arm/boot/dts/qcom/tbx304/tbx304-msm-pm8937.dtsi
 [lab-relay]: https://github.com/samcday/skills/pull/1
 [menu-pr]: https://github.com/samcday/pocketboot/pull/44
 [recovery-pr]: https://github.com/samcday/pocketboot/pull/42
