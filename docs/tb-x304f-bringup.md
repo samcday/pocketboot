@@ -261,7 +261,11 @@ checkout, the latest release, and upstream development:
 The stock identity now confirms that the panel/board match, but upstream's
 root SoC list omits APQ8017. The small
 [bootstrap patch](../patches/lk2nd/tb-x304f-apq8017.patch) adds APQ8017 while
-retaining MSM8917; no other lk2nd source changes were needed.
+retaining MSM8917; no other lk2nd source changes were needed for the initial
+bootstrap. The addition was present from the first tested build; an
+unmodified control image has not been tested. This is positive evidence for
+the patched image, not an observed failure of the unmodified image or proof
+that this unit differs from the original device-support author's tablet.
 
 A candidate was built from a source archive of commit `517bb38`, under
 `target/tb-x304f-lab/`, leaving `~/src/lk2nd` untouched. Apply the bootstrap
@@ -474,7 +478,10 @@ the record's stored size, or the source's FIXME-marked dump decoder.
 The shared-region image is 4,784,128 bytes, SHA-256
 `c0da6ec5c7c287b94a0e1e814e0f1517da6e091fd75bba3e9c0a43e738bd24d2`.
 LK2nd accepted its download and boot in 0.384 seconds; there was still no
-tablet USB interface within 45 seconds. A post-reset capture is pending.
+tablet USB interface within 45 seconds. On 2026-09-30 the owner reported a
+blank screen with possibly lit backlight, uncertain in bright ambient light,
+and a return to fastboot. Backlight alone would not establish Linux progress:
+it could remain enabled from the bootloader. A post-reset capture is pending.
 
 After button recovery into stock fastboot, RAM-boot only the known lk2nd
 image, verify its identity, and retrieve **before another kernel boot**.
