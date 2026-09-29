@@ -4,6 +4,20 @@ The first goal is a repeatable PocketBoot boot with a working USB diagnostic
 path, before installing PocketFed or replacing Android. This is a bring-up
 record, not a claim that PocketBoot supports this tablet yet.
 
+## Current status
+
+- Stock fastboot confirms unlocked; secure boot remains enabled and critical
+  partitions remain locked.
+- A 301072-byte lk2nd image has booted transiently from stock fastboot, with
+  USB commands, NT35521S display handoff, log retrieval, and screenshot
+  capture working. Nothing was installed into `boot` or `aboot`.
+- Stock Android now asks for its startup/decryption password. No factory
+  reset has been issued; Android is not needed for the transient boot path.
+- Returning from lk2nd with `fastboot reboot bootloader` landed in Android,
+  not stock fastboot. Physical fastboot entry is still needed; unattended
+  reset recovery is not established.
+- A mainline PocketBoot kernel has not booted yet.
+
 ## Verified starting state
 
 Read-only queries against one stock TB-X304F on 2026-09-29 returned:
@@ -81,10 +95,18 @@ or GPT partition was written.
 
 After the Firehose reset attempt the tablet returned as Android USB
 `17ef:7bc7`, without ADB. The reset command also logged a default-sector-size
-mismatch before USB disconnected. **Post-reboot fastboot unlock verification
-is still pending**, as is inspection of the tablet's screen. The partition
-comparison proves the requested edit persisted, not that the bootloader
-accepted it or that Android completed booting. No factory reset was issued.
+mismatch before USB disconnected. The owner observed **"To start Android,
+enter your password"**, despite not having set a password. This is the
+post-unlock condition described in the guide, not an ADB authorization prompt.
+Stock recovery's factory data reset is the documented route back to usable
+Android; it has deliberately not been performed for this Linux bootstrap.
+
+After the owner forced the tablet back to stock fastboot, the bootloader
+confirmed `Device unlocked: true`, `Device critical unlocked: false`, and
+`Device tampered: false`. Its getvars returned `unlocked=yes`, `secure=yes`,
+and still `get_unlock_ability=0`. The disabled unlock-ability setting is not
+the current lock state. This confirms the one-byte edit worked on this unit,
+without changing the critical-unlock flag or writing bootloader partitions.
 
 ## Read-only preflight
 
@@ -168,7 +190,8 @@ Before using this workaround:
 5. Re-query the lock state after the unlock/reset. Do not infer success from
    the host command's exit status alone.
 
-The one-byte write/readback result above is not yet a complete unlock recipe.
+The one-byte write was followed by a successful stock-fastboot unlock check
+on this unit; recovery of stock Android remains a separate step.
 Unlocking the bootloader is not the same operation as disabling secure-boot
 fuses; do not attempt fuse changes.
 
@@ -251,10 +274,63 @@ Its appended DT was checked for SoC IDs `<303 0 307 0>` and board ID
 The DT filter takes the basename for this target: prefixing it with
 `msm8952/` silently filtered out every appended DT in an earlier build.
 
-The forced-fastboot build is intended for a **transient bootstrap trial**,
-not installation. Never flash its `emmc_appsboot.mbn` output over the signed
-stock `aboot`. Neither an lk2nd boot nor a PocketBoot boot has been tested on
-this unit yet.
+The forced-fastboot build is for **transient bootstrap**, not installation.
+Never flash its `emmc_appsboot.mbn` output over the signed stock `aboot`.
+
+### Verified transient boot
+
+Stock fastboot accepted this image using `fastboot boot`. The host's download
+and boot command completed in about 0.024 seconds. Retrieved lk2nd logs show
+device detection at 80 ms, framebuffer detection at 100 ms, and fastboot
+processing commands at 600 ms; these are lk2nd's own startup timestamps, not
+a measured complete boot-cycle duration.
+
+The running image reported:
+
+| Getvar | Result |
+| --- | --- |
+| `product` | `lk2nd-msm8952` |
+| `lk2nd:version` | `517bb38-tbx304f-lab` |
+| `lk2nd:model` | `Lenovo Tab 4 10 (TB-X304X)` |
+| `lk2nd:compatible` | `lenovo,tbx304x` |
+| `lk2nd:panel` | `qcom,mdss_dsi_nt35521s_wxga_video` |
+
+The `TB-X304X` label comes from the reused family definition; the unit was
+independently identified as a TB-X304F. Use **`lk2nd:version`**, not
+`version-bootloader` or `lk2nd-version`, to identify this build. An initial
+watcher checked the wrong variable and timed out even though lk2nd had booted.
+
+The stock-initialized framebuffer is 800x1280 RGB888, base `0x90001000`,
+stride 2400. USB screenshot capture succeeded. The handed-in DT reports
+two 1 GiB RAM banks at `0x80000000` and `0xc0000000`.
+
+Once `product=lk2nd-msm8952` is confirmed on the explicitly selected device,
+retrieve diagnostics without writing a partition:
+
+```sh
+(
+    : "${SERIAL:?Set SERIAL to the intended tablet's fastboot serial}"
+    : "${OUT:?Set OUT to a private host-local artifact directory}"
+    umask 077
+    mkdir -p "$OUT" || exit
+    timeout 5s fastboot -s "$SERIAL" getvar lk2nd:version || exit
+    timeout 5s fastboot -s "$SERIAL" oem log || exit
+    timeout 10s fastboot -s "$SERIAL" get_staged "$OUT/lk2nd.log" || exit
+    timeout 5s fastboot -s "$SERIAL" oem screenshot || exit
+    timeout 15s fastboot -s "$SERIAL" get_staged "$OUT/lk2nd.ppm"
+)
+```
+
+The framebuffer-debug build draws logs over its menu. A quieter candidate
+was also built with `DEBUG_FBCON=0` and
+`LK2ND_VERSION=517bb38-tbx304f-lab-quiet`, SHA-256
+`68454f94e33c5af86e7ac241a91c194c35df4f6a5cc53c63cf0033fc64efef86`;
+it has not been booted yet.
+
+The subsequent return-path test accepted `fastboot reboot bootloader` but
+landed in stock Android (`17ef:7bc7`, no ADB), not stock fastboot. Do not
+describe the loop as unattended or assume that command is a recovery path
+on this firmware. A PocketBoot/mainline boot remains untested.
 
 ## Kernel and boot-image prerequisites
 
