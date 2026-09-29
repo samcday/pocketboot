@@ -1,5 +1,10 @@
 name = "Samsung Galaxy Express GT-I8730"
 
+[kernel-source]
+# samsung-expressltexx-mainlining's Linux gitlink / samsung-expressltexx branch.
+remote = "https://github.com/samcday/linux.git"
+sha = "3bc07d096bddd33218b8c13b9fa30ffdaba3c050"
+
 [kernel]
 dtb_stem = "qcom-msm8930-samsung-expressltexx"
 
@@ -7,6 +12,13 @@ dtb_stem = "qcom-msm8930-samsung-expressltexx"
 target = "armv7-unknown-linux-musleabihf"
 
 [kconfig]
+# PM8917's direct L31 rail powers maXTouch; it is not an RPM regulator.
+REGULATOR_QCOM_PM8917 = true
+TOUCHSCREEN_ATMEL_MXT = true
+I2C_GPIO = true
+NEW_LEDS = true
+LEDS_CLASS = true
+KEYBOARD_TM2_TOUCHKEY = true
 
 [bootimg]
 header_version = 0
