@@ -48,11 +48,43 @@ The first attempts on 2026-09-29 established:
 
 All fastboot commands selected the tablet's serial explicitly. Lock-state
 queries after the rejected normal unlock still showed locked and untampered.
-No partition has been written through fastboot or EDL.
+After the owner enabled USB debugging and authorized the host, stock Android
+provided the following identity:
 
-Android initially exposed no ADB interface. The guide's `adb reboot edl` path
-requires USB debugging to be enabled and the host authorized first; fastboot
-access alone does not establish that prerequisite.
+| Source | Result |
+| --- | --- |
+| Android model/build | TB-X304F, `TB-X304F_S001016_190329_ROW`, Android 8.1.0 |
+| `soc0/machine`, `soc0/soc_id` | `APQ8017`, `307` |
+| Stock DT `qcom,msm-id` | `<303 0 307 0 308 0 309 0>` |
+| Stock DT `qcom,board-id` | `<0x1000b 0>` |
+| Selected panel in DT bootargs | `qcom,mdss_dsi_nt35521s_wxga_video` |
+
+Serial-selected `adb reboot edl` successfully entered `05c6:9008` on the same
+physical USB port. A Sahara-only query matched both the HWID and full signing
+root hash of the programmer below; the programmer was then accepted.
+
+Before writing, the full `devinfo`, `aboot`, `abootbak`, `boot`, `recovery`,
+`config`, and `misc` partitions were saved. Two independent `devinfo` reads
+matched; both GPT copies were saved and their header/table CRCs verified.
+Original files and SHA-256 manifests are retained read-only under the ignored,
+host-local `target/tb-x304f-lab/original-partitions/`. These backups are not in
+the PR and must be preserved before removing this worktree or cleaning
+`target/`; they have not been copied to a separate recovery location.
+
+The original `devinfo` began with `ANDROID-BOOT!` and had DWORD values
+`0, 0, 0, 1` at offsets `0x10`, `0x14`, `0x18`, and `0x1c`. The staged image
+changed **only byte `0x10`, from `0` to `1`**. It left `0x18` unchanged instead
+of copying the second edit in the guide. An immediate pre-write read still
+matched the original; after writing the 1 MiB `devinfo` image, a full readback
+matched the staged image byte-for-byte. No boot, recovery, bootloader, config,
+or GPT partition was written.
+
+After the Firehose reset attempt the tablet returned as Android USB
+`17ef:7bc7`, without ADB. The reset command also logged a default-sector-size
+mismatch before USB disconnected. **Post-reboot fastboot unlock verification
+is still pending**, as is inspection of the tablet's screen. The partition
+comparison proves the requested edit persisted, not that the bootloader
+accepted it or that Android completed booting. No factory reset was issued.
 
 ## Read-only preflight
 
@@ -105,14 +137,15 @@ offsets **`0x10` and `0x18`**, both set to **`0x01`**, in a file starting with
 `ANDROID-BOOT!`. The image SHA-256 is
 `08854b18206856a5dcc9690625c72235f6e428bad68ff3e46bf422f61c03fe14`.
 
-This verifies what the guide depicts, not the layout of this unit's unread
-partition. In particular, do not label `0x18` as "critical unlocked": known LK
+This verifies what the guide depicts, not every firmware's partition layout.
+In particular, do not label `0x18` as "critical unlocked": known LK
 layouts use that position for different fields. Inspect the original dump
 and preserve all unrelated bytes rather than transplanting the guide's data
 or invoking a generic unlock helper that can choose a different partition.
 
-The guide offers model-specific Firehose attachments; acceptance by this
-tablet and a restoration path have not been tested. The scripts contain no
+The guide offers model-specific Firehose attachments; this session used the
+stock-package programmer described below. Restoring the original partition
+has not been tested. The scripts contain no
 explicit data-wipe or fuse operation, but the guide describes a possible
 recovery data-format step if the modified device boots to a password prompt.
 Treat all user data as at risk.
@@ -135,11 +168,11 @@ Before using this workaround:
 5. Re-query the lock state after the unlock/reset. Do not infer success from
    the host command's exit status alone.
 
-No `devinfo` write has yet been tested on this unit.
+The one-byte write/readback result above is not yet a complete unlock recipe.
 Unlocking the bootloader is not the same operation as disabling secure-boot
 fuses; do not attempt fuse changes.
 
-### Programmer candidate
+### Accepted programmer
 
 The XDA TB-X304F programmer attachment is ID `5156731`; the archived page
 lists it, but the ZIP itself was not recovered. Instead, the programmer was
@@ -155,9 +188,9 @@ extracted from [this third-party mirror's TB-X304F firmware package][stock-zip]:
 
 HTTP range reads retrieved the ZIP directory and this member; its ZIP CRC
 was checked. The whole archive was not downloaded or hash-verified, and the
-mirror is not a Lenovo-origin download. Certificate parsing does not establish
-that this unit accepts the programmer: compare the actual Sahara HWID and
-PK hash before loading it. No programmer has been sent to the tablet yet.
+mirror is not a Lenovo-origin download. On this unit, Sahara reported exactly
+the HWID and full PK hash above, and successfully loaded this programmer.
+Firehose reported eMMC with 512-byte sectors and 30535680 total sectors.
 
 The host's installed `edl` launcher failed because its Python package was
 missing. Running `python3 ~/src/edl/edl.py --help` from the source checkout at
@@ -165,6 +198,15 @@ missing. Running `python3 ~/src/edl/edl.py --help` from the source checkout at
 `fhloaderparse.py`. Neither the checkout nor the system installation was
 modified. Run tools from an ignored local artifact directory and pass
 `PYTHONDONTWRITEBYTECODE=1` when using an unattached source checkout.
+
+Do not trust that client's `gpt` success message alone: at this revision the
+file-writing statements are commented out, so it says "Dumped" without
+creating the files. This session instead read sectors explicitly, then
+checked both GPT header CRCs, both entry-array CRCs, and matching entries.
+The verified files are `gpt/gpt-main-with-mbr.bin` and
+`gpt/gpt-backup-full.bin` in the private backup directory. The backup reserves
+32 sectors for its entry array even though the 48 entries occupy only 12;
+derive its starting LBA from the backup header, not from entry count alone.
 
 ## Existing lk2nd support
 
@@ -186,12 +228,33 @@ checkout, the latest release, and upstream development:
   formatting changes, not a final rejection of device support; the clean
   addition landed later.
 
-This gives us source-level prior art, **not a verified TB-X304F/APQ8017 boot
-image**. Before a trial, compare this unit's stock DT IDs and panel selection
-with that definition, record the exact source revision, and build a matching
-candidate. Do not use the older generic release just because its SoC-family
-name looks plausible. Neither an lk2nd boot nor a PocketBoot boot has been
-tested on this unit.
+The stock identity now confirms that the panel/board match, but upstream's
+root SoC list omits APQ8017. The small
+[bootstrap patch](../patches/lk2nd/tb-x304f-apq8017.patch) adds APQ8017 while
+retaining MSM8917; no other lk2nd source changes were needed.
+
+A candidate was built from a source archive of commit `517bb38`, under
+`target/tb-x304f-lab/`, leaving `~/src/lk2nd` untouched. Apply the bootstrap
+patch with `patch -p1` in that extracted source, then build there:
+
+```sh
+make -j16 TOOLCHAIN_PREFIX=arm-none-eabi- \
+    LK2ND_DTBS=msm8917-qrd-sku5.dtb \
+    LK2ND_FORCE_FASTBOOT=1 DEBUG_FBCON=1 \
+    LK2ND_VERSION=517bb38-tbx304f-lab lk2nd-msm8952
+```
+
+The output `build-lk2nd-msm8952/lk2nd.img` is 301072 bytes, SHA-256
+`394ae757926f15bd38e2901c29033075ae76ba870cf523250787947371b6889a`.
+Its appended DT was checked for SoC IDs `<303 0 307 0>` and board ID
+`<0x1000b 0>`, and checked to be present inside the Android boot image.
+The DT filter takes the basename for this target: prefixing it with
+`msm8952/` silently filtered out every appended DT in an earlier build.
+
+The forced-fastboot build is intended for a **transient bootstrap trial**,
+not installation. Never flash its `emmc_appsboot.mbn` output over the signed
+stock `aboot`. Neither an lk2nd boot nor a PocketBoot boot has been tested on
+this unit yet.
 
 ## Kernel and boot-image prerequisites
 
@@ -201,11 +264,13 @@ TB-X304F board DT in upstream Linux or a TB-X304F-specific postmarketOS device
 profile. PocketBoot has neither an MSM8917/APQ8017 SoC configuration nor a
 TB-X304 device configuration.
 
-The [downstream TBX304 kernel DTS][downstream-dts] and its panel definitions
-are useful reference material. They describe MSM8917/PMI8937 QRD SKU5 with
-`qcom,board-id = <0x1000b 0>`; they are not a ready-to-use mainline DT or proof
-of this Wi-Fi unit's IDs. A matching mainline board DT still needs to be
-located or developed and validated.
+An existing mainline-oriented board port was subsequently found in
+[`pem120/linux-msm89x7`][pem120-dts], branch `lenovo-tbx304`, commit
+`a51b91b503307d35902447dd1f90db765372cf3b`. It provides
+`msm8917-lenovo-tbx304x.dts` for the MSM8917 TB-X304L/X, not yet a validated
+APQ8017/TB-X304F target. This is the starting point to adapt and test rather
+than writing a board port from scratch. The
+[downstream TBX304 kernel DTS][downstream-dts] remains a stock reference.
 
 Also distinguish [lk2nd's 512 KiB partition offset][lk2nd-boot] from an Android
 boot-header kernel load offset: the former reserves the start of `boot` for
@@ -279,6 +344,7 @@ contract has actually been tested.
 [lk2nd-boot]: https://github.com/msm8916-mainline/lk2nd/blob/main/Documentation/boot.md
 [linux-msm8917]: https://github.com/torvalds/linux/blob/master/arch/arm64/boot/dts/qcom/msm8917.dtsi
 [downstream-dts]: https://github.com/lenovo-devs/android_kernel_lenovo_msm8953/blob/lineage-16.0-tbx304/arch/arm/boot/dts/qcom/tbx304-msm8917-pmi8937-qrd-sku5.dts
+[pem120-dts]: https://github.com/pem120/linux-msm89x7/blob/a51b91b503307d35902447dd1f90db765372cf3b/arch/arm64/boot/dts/qcom/msm8917-lenovo-tbx304x.dts
 [lab-relay]: https://github.com/samcday/skills/pull/1
 [menu-pr]: https://github.com/samcday/pocketboot/pull/44
 [recovery-pr]: https://github.com/samcday/pocketboot/pull/42
