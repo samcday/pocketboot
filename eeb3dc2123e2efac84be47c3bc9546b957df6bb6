@@ -1,0 +1,9 @@
+Review follow-up for samcday/pocketboot PR38
+Commit: eeb3dc2123e2efac84be47c3bc9546b957df6bb6
+
+Changed: explicit config-symlink/default/fail-closed DTB documentation; a BLS-side layout-order regression using the production BLS DTB selector with injected compatible reader. No extlinux path semantics changed.
+
+Reference verified: lk2nd 8b46487c4c76776c4f2f61468d44a74c69e6b9ea lk2nd/boot/extlinux.c, normalize_path lines348-357 prefixes relative paths with root/extlinux; lk2nd_try_extlinux lines675-691 opens root/extlinux/extlinux.conf then expands against root. It does not replace that directory with the symlink target's directory. Therefore the proposed canonical-target-directory change would alter compatibility.
+https://github.com/msm8916-mainline/lk2nd/blob/8b46487c4c76776c4f2f61468d44a74c69e6b9ea/lk2nd/boot/extlinux.c#L348-L357
+
+Verification on the standalone extlinux branch: cargo test --locked --offline --workspace passed 196 pocketboot, 1 featureless preboot and53 xtask tests. Explicit extlinux absolute-symlink and BLS ordering tests also passed earlier on the stacked tree. Whitespace/formatting checks passed. No device operations.

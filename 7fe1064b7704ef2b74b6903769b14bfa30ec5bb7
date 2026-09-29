@@ -1,0 +1,18 @@
+Preboot QEMU harness verification
+Repository: https://github.com/samcday/pocketboot
+Commit: 7fe1064b7704ef2b74b6903769b14bfa30ec5bb7
+
+Environment: QEMU emulator version 11.0.93 (qemu-11.1.0-0.2.rc3.fc45)
+Copyright (c) 2003-2026 Fabrice Bellard and the QEMU Project developers
+
+Command: bash pocketpreboot/tests/qemu/run.sh <scratch-output-directory>
+Exit status: 0
+UART output:
+PASS resident v1: 3 cores report SMPEN=0 and refuse release
+PASS relocated Rust pointer table and FDT argument
+
+Only UART backend changed in this commit: explicit file serial instead of nographic/stdin/stdout. Scout reproduced the timeout on b03d8e0 and the experiment with stdio, then saw both succeed with file UART. This supports a host/QEMU stdio-backend interaction, not a resident regression.
+
+The test proves the emulated four-core Cortex-A53 noncoherent path: three secondary acknowledgements/SMPEN snapshots, refusal to release with SMPEN clear, plus relocated Rust pointer-table/FDT startup. It does NOT prove coherent release, hardware two-cluster bringup, SCM/ACC/L2 or eight-core handoff. No device operations.
+
+Full kernel/image build, packaged-image inspection and host tests concern the identical production source/config at parent e204ec13a16b7f5926289e3f7ee72e83388c8c80; detailed reproducible evidence is in refs/notes/evidence on that commit. This commit changes only the test runner, not the boot image.

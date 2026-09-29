@@ -1,0 +1,14 @@
+Review follow-up for samcday/pocketboot PR37
+Commit: cb977dffc52b3c14dd56c44aabbf0188f39e8ff4
+
+Changes: bring resident Aff2 rejection down into the baseline layer; restore MSM8916's physical-primary-zero policy in preboot while retaining MSM8939 dense primary lookup; add tests that cover all listed primaries and missing CPUs. Document unresolved IOMMU ordering concern rather than blindly hoist TLBI.
+
+Source review: pinned pem120/linux45add32603ee4aa28979ad6ec70c10b14af4ac29 drivers/iommu/arm/arm-smmu/qcom_iommu.c assigns domain pointers before loop (239-240), restores secure config and disables old context within loop (252-271), enables SCTLR.M (295-307), then the checked-in patch invalidates/syncs before publishing pgtbl_ops. A pre-loop helper call has valid pointers/ASIDs, but precedes secure restore/context disable; an active old context could refill stale translations after that early invalidation. Current enable-to-invalidate window is a source-confirmed risk, not a captured device DMA event. No safe zero-window sequence is established here; no IOMMU code changed.
+https://github.com/pem120/linux/blob/45add32603ee4aa28979ad6ec70c10b14af4ac29/drivers/iommu/arm/arm-smmu/qcom_iommu.c#L239-L320
+MSM8916's existing0006 patch uses the same post-program position. Existing A5 evidence supports keeping invalidation, not a guarantee against transient active DMA.
+
+CodeRabbit pb_setup finding is false: actual insertion is smp_spin_table_cpu_prepare, not cpu_init. setup_arch invokes smp_init_cpus; later kernel_init_freeable invokes smp_prepare_cpus. Exact pinned source: arch/arm64/kernel/smp.c490-503,740-821; arch/arm64/kernel/setup.c357-359; init/main.c1006-1011,1646-1660.
+
+Verification: cargo test --locked --offline --workspace --features pocketpreboot/soc-msm8916 passed; separate preboot soc-msm8939 tests passed. Each preboot feature has19 tests. Both freestanding aarch64-unknown-none feature builds passed. Built resident.S with aarch64 GNU binutils and ran QEMU virt,gicv2,cortex-a53,smp4,file-backed UART: PASS resident v1: 3 cores report SMPEN=0 and refuse release. This tests noncoherent refusal, not coherent release or eight-core hardware. No device operations.
+
+Integration incident: this commit unexpectedly has a second parent8ecdee7 (a higher-layer private review commit), despite its tested tree being the baseline layer. Subsequent normal merges fast-forwarded upper branches and removed their source layers; GitHub inferred PR39/40 were merged. Upper layers were restored by additive replay commits, not force pushes. During failed integration, the uncommitted msm8916.rs was also observed containing recovery Markdown, while this committed tree remained correct. The unexpected working copy was saved in temporary scratch and restored from this commit before testing. Root tooling cause not established. Do not infer review/hardware acceptance from the old upper PR merged badges.

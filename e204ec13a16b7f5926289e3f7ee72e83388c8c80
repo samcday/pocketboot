@@ -1,0 +1,188 @@
+Ferrari owned-parking experiment: source and packaged-artifact verification
+Repository: https://github.com/samcday/pocketboot
+Commit: e204ec13a16b7f5926289e3f7ee72e83388c8c80
+Kernel pin: pem120/linux 45add32603ee4aa28979ad6ec70c10b14af4ac29 with configured patches 0001,0002,0003.
+Host: Linux 7.2.7-300.fc45.x86_64 x86_64 GNU/Linux
+
+Commands/results:
+- cargo xtask kernel-src qcom/msm8939-xiaomi-ferrari: complete series applies to pristine pin.
+- CARGO_BUILD_JOBS=6 cargo xtask build qcom/msm8939-xiaomi-ferrari: full Rust/initramfs/kernel/DTB/preboot/Android boot-image build passed.
+- cargo test --locked --offline --workspace --features pocketpreboot/soc-msm8939: 223 pocketboot +19 preboot +54 xtask tests passed.
+- cargo test --locked --offline -p pocketpreboot --features soc-msm8916: 18 passed.
+- python3 pocketpreboot/tests/kernel-topology.py: extracted actual kernel index/setup checks passed with stub DT accessors.
+- cargo fmt --all -- --check; git diff --check: passed.
+- Independent review found no source-level integration blockers; L2 sequence checked against pinned lk2nd and Xiaomi sources cited in patch README.
+
+QEMU limitation at this revision: resident harness times out without output on both this experiment and the unchanged recovery baseline. No resident QEMU success claimed. Investigation is separate from ARM64 user-mode pocketboot tests (223 passed on recovery b03d8e0).
+
+No phone operations occurred. The resident-page address is only a source/static-image candidate. Full live firmware-populated DT/memreserve map must be checked before any hardware test. No evidence yet for SCM/ACC/L2 behavior, cross-cluster coherency, resident handoff, or postmarketOS boot.
+
+Packaged image inspection (not a hardware observation):
+{
+  "boot_img_sha256": "aec27d3ebddefec40677136eac40036149a7ed97cc8385ffbb700fcbb8e22744",
+  "boot_img_bytes": 5103632,
+  "android_kernel_bytes": 5098034,
+  "load_address": "0x80080000",
+  "outer_text_offset": "0x80000",
+  "shim_file_bytes": 28896,
+  "shim_runtime_bytes": 573776,
+  "payload_offset": "0x180000",
+  "inner_load_address": "0x80200000",
+  "inner_image_bytes": 10891272,
+  "inner_runtime_bytes": 11206656,
+  "envelope_bytes": 12779520,
+  "appended_dtb_bytes": 48897,
+  "cpu_ids": [
+    "0x0",
+    "0x1",
+    "0x2",
+    "0x3",
+    "0x100",
+    "0x101",
+    "0x102",
+    "0x103"
+  ],
+  "cpu_method": "pocketboot,msm8939-acc",
+  "owned_region": [
+    "0x854ff000",
+    "0x85500000"
+  ],
+  "reservations": [
+    {
+      "node": "/reserved-memory/spin-table@854ff000",
+      "address": "0x854ff000",
+      "size": "0x1000"
+    },
+    {
+      "node": "/reserved-memory/tz-apps@86000000",
+      "address": "0x86000000",
+      "size": "0x300000"
+    },
+    {
+      "node": "/reserved-memory/smem@86300000",
+      "address": "0x86300000",
+      "size": "0x100000"
+    },
+    {
+      "node": "/reserved-memory/hypervisor@86400000",
+      "address": "0x86400000",
+      "size": "0x100000"
+    },
+    {
+      "node": "/reserved-memory/tz@86500000",
+      "address": "0x86500000",
+      "size": "0x180000"
+    },
+    {
+      "node": "/reserved-memory/reserved@86680000",
+      "address": "0x86680000",
+      "size": "0x80000"
+    },
+    {
+      "node": "/reserved-memory/rmtfs@86700000",
+      "address": "0x86700000",
+      "size": "0xe0000"
+    },
+    {
+      "node": "/reserved-memory/rfsa@867e0000",
+      "address": "0x867e0000",
+      "size": "0x20000"
+    },
+    {
+      "node": "/reserved-memory/mpss@86800000",
+      "address": "0x86800000",
+      "size": "0x0"
+    },
+    {
+      "node": "/reserved-memory/framebuffer@83000000",
+      "address": "0x83000000",
+      "size": "0x2000000"
+    }
+  ],
+  "memreserve": [],
+  "limitation": "Static packaged DT only; live firmware-populated map and hardware behavior not verified"
+}
+
+Reproducible inspection script, run with DELTA_SCRATCH_DIR pointing to a writable temporary directory:
+import hashlib, json, os, pathlib, struct, subprocess, zlib
+root = pathlib.Path('target/kernel/qcom/msm8939-xiaomi-ferrari')
+scratch = pathlib.Path(os.environ['DELTA_SCRATCH_DIR'])
+image = (root / 'boot.img').read_bytes()
+assert image[:8] == b'ANDROID!'
+kernel_size, load = struct.unpack_from('<II', image, 8)
+page, version = struct.unpack_from('<II', image, 36)
+assert (load, page, version) == (0x80080000, 2048, 0)
+blob = image[page:page+kernel_size]
+z = zlib.decompressobj(31)
+envelope = z.decompress(blob) + z.flush()
+assert z.eof and envelope[56:60] == b'ARM\x64'
+text_offset, shim_runtime = struct.unpack_from('<QQ', envelope, 8)
+assert (load & ~0x1fffff) + text_offset == load
+payload_offset = ((load + shim_runtime + 0x1fffff) & ~0x1fffff) - load
+assert payload_offset == 0x180000
+assert (load + payload_offset) % 0x200000 == 0
+inner = (root / 'arch/arm64/boot/Image').read_bytes()
+assert envelope[payload_offset:payload_offset+len(inner)] == inner
+assert inner[56:60] == b'ARM\x64'
+inner_runtime, = struct.unpack_from('<Q', inner, 16)
+assert len(envelope) >= payload_offset + max(len(inner), inner_runtime)
+shim = pathlib.Path('target/preboot/qcom/msm8939-xiaomi-ferrari/pocketpreboot.bin').read_bytes()
+assert payload_offset >= max(len(shim), shim_runtime)
+assert envelope[:8] == shim[:8] and envelope[16:len(shim)] == shim[16:]
+dtb = z.unused_data
+header = struct.unpack_from('>10I', dtb)
+magic, total, off_struct, off_strings, off_reserve, *_ = header
+assert magic == 0xd00dfeed and total == len(dtb)
+nodes = {}; stack = []; pos = off_struct
+while True:
+    token, = struct.unpack_from('>I', dtb, pos); pos += 4
+    if token == 1:
+        end = dtb.index(b'\0', pos)
+        stack.append(dtb[pos:end].decode()); pos = (end+4) & ~3
+        path = '/' + '/'.join(stack[1:]); nodes[path] = {}
+    elif token == 2:
+        stack.pop()
+    elif token == 3:
+        length, name_off = struct.unpack_from('>II', dtb, pos); pos += 8
+        name_end = dtb.index(b'\0', off_strings+name_off)
+        name = dtb[off_strings+name_off:name_end].decode()
+        nodes['/'+'/'.join(stack[1:])][name] = dtb[pos:pos+length]
+        pos = (pos+length+3) & ~3
+    elif token == 4:
+        pass
+    elif token == 9:
+        break
+    else:
+        raise AssertionError(token)
+cpus = {p:props for p,props in nodes.items() if props.get('device_type') == b'cpu\0'}
+expected = {0,1,2,3,0x100,0x101,0x102,0x103}
+assert len(cpus) == 8 and {int.from_bytes(p['reg'],'big') for p in cpus.values()} == expected
+assert all(p['enable-method'] == b'pocketboot,msm8939-acc\0' for p in cpus.values())
+owned = [(p,props) for p,props in nodes.items() if b'pocketboot,spin-table-v1' in props.get('compatible',b'').split(b'\0')]
+assert len(owned) == 1
+owned_path, props = owned[0]
+assert props['reg'] == struct.pack('>4I',0,0x854ff000,0,0x1000) and 'no-map' in props
+assert int.from_bytes(nodes['/reserved-memory']['#address-cells'],'big') == 2
+assert int.from_bytes(nodes['/reserved-memory']['#size-cells'],'big') == 2
+reserved = []
+for p, props in nodes.items():
+    if p.startswith('/reserved-memory/') and p.count('/') == 2 and 'reg' in props:
+        assert len(props['reg']) % 16 == 0
+        for addr,size in struct.iter_unpack('>QQ', props['reg']):
+            if p != owned_path and size:
+                assert addr+size <= 0x854ff000 or addr >= 0x85500000, (p,addr,size)
+            reserved.append({'node':p,'address':hex(addr),'size':hex(size)})
+memreserve = []
+while True:
+    addr,size = struct.unpack_from('>QQ',dtb,off_reserve);off_reserve += 16
+    if not (addr or size): break
+    assert addr+size <= 0x854ff000 or addr >= 0x85500000
+    memreserve.append([hex(addr),hex(size)])
+config = (root / '.config').read_text()
+for line in ['CONFIG_ARM64_SPIN_TABLE_KEXEC=y','CONFIG_NR_CPUS=8','CONFIG_HOTPLUG_CPU=y','CONFIG_KEXEC=y','CONFIG_ARM64_4K_PAGES=y','CONFIG_PSTORE_RAM=y','CONFIG_PSTORE_CONSOLE=y']:
+    assert line+'\n' in config, line
+(scratch/'ferrari-experiment.dtb').write_bytes(dtb)
+subprocess.run(['dtc','-q','-I','dtb','-O','dts','-o',str(scratch/'ferrari-experiment.dts'),str(scratch/'ferrari-experiment.dtb')],check=True)
+report = {'boot_img_sha256':hashlib.sha256(image).hexdigest(),'boot_img_bytes':len(image),'android_kernel_bytes':kernel_size,'load_address':hex(load),'outer_text_offset':hex(text_offset),'shim_file_bytes':len(shim),'shim_runtime_bytes':shim_runtime,'payload_offset':hex(payload_offset),'inner_load_address':hex(load+payload_offset),'inner_image_bytes':len(inner),'inner_runtime_bytes':inner_runtime,'envelope_bytes':len(envelope),'appended_dtb_bytes':len(dtb),'cpu_ids':list(map(hex,sorted(expected))),'cpu_method':'pocketboot,msm8939-acc','owned_region':[hex(0x854ff000),hex(0x85500000)],'reservations':reserved,'memreserve':memreserve,'limitation':'Static packaged DT only; live firmware-populated map and hardware behavior not verified'}
+(scratch/'ferrari-package-inspection.json').write_text(json.dumps(report,indent=2)+'\n')
+print(json.dumps(report,indent=2))
