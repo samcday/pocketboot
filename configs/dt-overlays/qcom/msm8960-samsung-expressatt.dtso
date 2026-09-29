@@ -1,0 +1,16 @@
+/dts-v1/;
+/plugin/;
+
+/* Keep display bring-up independent of Adreno firmware and GPU state. */
+&{/soc/gpu@4300000} {
+	status = "disabled";
+};
+
+&{/soc/iommu@7c00000} {
+	status = "disabled";
+};
+
+/* pocketboot exposes a USB gadget, not an OTG host. */
+&{/soc/usb@12500000} {
+	dr_mode = "peripheral";
+};

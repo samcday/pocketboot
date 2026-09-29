@@ -21,6 +21,8 @@ cargo xtask build
 
 (You will need a bunch of undocumented cross-compile toolchain deps, sorry about that)
 
+Experimental Galaxy Express builds: [Expressltexx and Expressatt](docs/samsung-express.md).
+
 Dev docs will be forthcoming. For now, ask your favourite clanker for an explanation.
 
 [LinuxBoot]: https://www.linuxboot.org/

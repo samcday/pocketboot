@@ -1,4 +1,4 @@
-name = "Qualcomm MSM8930"
+name = "Qualcomm MSM8960"
 
 [kernel]
 arch = "arm"
@@ -50,6 +50,11 @@ HWSPINLOCK_QCOM = true
 MFD_QCOM_RPM = true
 PM_DEVFREQ = true
 
+# MDP4 needs RPM fabric bandwidth votes, not just enabled display clocks.
+INTERCONNECT = true
+INTERCONNECT_QCOM = true
+INTERCONNECT_QCOM_MSM8960 = true
+
 # Clocks, pinctrl, GPIO and PMIC access
 COMMON_CLK_QCOM = true
 QCOM_CLK_RPM = true
@@ -75,7 +80,7 @@ DMADEVICES = true
 QCOM_BAM_DMA = true
 QCOM_GSBI = true
 
-# eMMC/SD storage on MSM8930 is PL18x/AMBA, not SDHCI.
+# eMMC/SD use PL18x/AMBA, not SDHCI.
 MMC_ARMMMCI = true
 MMC_QCOM_DML = true
 
