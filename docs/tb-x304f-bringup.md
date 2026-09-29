@@ -49,7 +49,7 @@ for variable in product secure unlocked max-download-size \
 do
     timeout 5s fastboot -s "$SERIAL" getvar "$variable" || exit
 done
-timeout 5s fastboot -s "$SERIAL" oem device-info
+timeout 5s fastboot -s "$SERIAL" oem device-info || exit
 timeout 5s fastboot -s "$SERIAL" flashing get_unlock_ability
 ```
 
@@ -105,6 +105,32 @@ There is no approved or device-validated unlock recipe in this document yet.
 Unlocking the bootloader is not the same operation as disabling secure-boot
 fuses; do not attempt fuse changes.
 
+## Existing lk2nd support
+
+Source audit on 2026-09-29 found a useful distinction between the local
+checkout, the latest release, and upstream development:
+
+- The inspected local `~/src/lk2nd` checkout has no TB-X304 device definition.
+- Upstream [commit 517bb38][lk2nd-tbx304x] adds **Lenovo Tab 4 10x (TB-X304x)**
+  in `lk2nd/device/dts/msm8952/msm8917-qrd-sku5.dts`, built by the
+  `lk2nd-msm8952` target. Its root uses `qcom,msm-id = <QCOM_ID_MSM8917 0>`
+  and `qcom,board-id = <QCOM_BOARD_ID(QRD, 1, 0) 0>`. Its board definition
+  selects `lenovo,tbx304x`, the `msm8917-lenovo-tbx304x` kernel DTB, and
+  NT35521S, NT35521S-BOE, or JD9364-BOE panel variants.
+- [Release 23.1][lk2nd-release] predates that addition. Its generic
+  `lk2nd-msm8952.img` is not evidence of TB-X304 support: it lacks the QRD SKU5
+  DTB. The MSM8917 MTP DTB is not a substitute for the tablet's QRD selection.
+- The earlier [PR #664][lk2nd-pr] was closed during cleanup of unrelated
+  formatting changes, not a final rejection of device support; the clean
+  addition landed later.
+
+This gives us source-level prior art, **not a verified TB-X304F/APQ8017 boot
+image**. Before a trial, compare this unit's stock DT IDs and panel selection
+with that definition, record the exact source revision, and build a matching
+candidate. Do not use the older generic release just because its SoC-family
+name looks plausible. Neither an lk2nd boot nor a PocketBoot boot has been
+tested on this unit.
+
 ## First-boot milestones
 
 Keep unlock/recovery, the first mainline boot, and the later PocketFed install
@@ -155,4 +181,7 @@ contract has actually been tested.
 [devinfo-read]: https://github.com/Naveen3Singh/BLUnlocker/blob/45a1e187764e18bd2ce7fadfc57e00bf40f457d3/dump_devinfo.bat
 [devinfo-write]: https://github.com/Naveen3Singh/BLUnlocker/blob/45a1e187764e18bd2ce7fadfc57e00bf40f457d3/unlock.bat
 [lk2nd]: https://github.com/msm8916-mainline/lk2nd
+[lk2nd-tbx304x]: https://github.com/msm8916-mainline/lk2nd/commit/517bb38a409d4ac982f09e83a046e4dc71be5029
+[lk2nd-release]: https://github.com/msm8916-mainline/lk2nd/releases/tag/23.1
+[lk2nd-pr]: https://github.com/msm8916-mainline/lk2nd/pull/664
 [lab-relay]: https://github.com/samcday/skills/pull/1
