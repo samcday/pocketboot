@@ -42,20 +42,25 @@ device in an enumeration: the lab also contains other fastboot targets.
 With `SERIAL` set to the intended tablet's fastboot serial:
 
 ```sh
-: "${SERIAL:?Set SERIAL to the intended tablet's fastboot serial}"
-for variable in product secure unlocked max-download-size \
-    partition-size:boot partition-size:recovery partition-size:aboot \
-    partition-size:devinfo partition-size:config partition-size:frp
-do
-    timeout 5s fastboot -s "$SERIAL" getvar "$variable" || exit
-done
-timeout 5s fastboot -s "$SERIAL" oem device-info || exit
-timeout 5s fastboot -s "$SERIAL" flashing get_unlock_ability
+(
+    : "${SERIAL:?Set SERIAL to the intended tablet's fastboot serial}"
+    preflight_status=0
+    for variable in product secure unlocked max-download-size \
+        partition-size:boot partition-size:recovery partition-size:aboot \
+        partition-size:devinfo partition-size:config partition-size:frp
+    do
+        timeout 5s fastboot -s "$SERIAL" getvar "$variable" || preflight_status=1
+    done
+    timeout 5s fastboot -s "$SERIAL" oem device-info || preflight_status=1
+    timeout 5s fastboot -s "$SERIAL" flashing get_unlock_ability || preflight_status=1
+    exit "$preflight_status"
+)
 ```
 
 These are queries only. Record failures and empty fields rather than guessing
-their meaning. `MSM8917` is a generic platform identity, not enough to tell two
-tablets apart or prove the exact Lenovo model.
+their meaning. A failed query does not skip the remaining diagnostics; the
+subshell returns nonzero if any query fails. `MSM8917` is a generic platform
+identity, not enough to tell two tablets apart or prove the exact Lenovo model.
 
 Lenovo's [platform specification][lenovo-spec] identifies the Wi-Fi TB-X304F
 as **APQ8017** and the LTE TB-X304L as **MSM8917** (Snapdragon 425, four
