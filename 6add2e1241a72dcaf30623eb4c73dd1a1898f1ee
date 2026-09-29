@@ -1,0 +1,91 @@
+# Evidence: autoboot + volume-down break-in (6add2e1, harness 9282d4d)
+
+Repo: samcday/pocketboot, branch claude/pocketboot-menu-behavior-1ca56e, rebased on
+origin/main 79cdf78 ("qemu: omit KEYBOARD_GPIO from the aarch64 virt kernel").
+Host: Fedora 45 x86_64, rustc 1.96.0, qemu-system-aarch64 11.0.93 (11.1.0-rc3), TCG.
+QEMU kernel: target/kernel/src/msm8916 tree (Linux 7.1.0-rc6+, samcday/linux
+pocketboot/msm8916 d87323486b) built via `cargo xtask qemu target/kernel/src/msm8916
+--build-only` with the pocketboot release binary from 6add2e1 embedded in the initramfs.
+
+## Checks rerun on 6add2e1 (2026-09-29, after the rebase)
+
+    cargo fmt --all -- --check                                                   OK
+    cargo test --offline -p pocketboot --features qemu                           213 passed
+    cargo test --offline -p xtask                                                53 passed
+    cargo check --offline -p pocketboot --target aarch64-unknown-linux-musl
+        --features busybox,qemu                                                  OK (3 pre-existing warnings)
+    cargo check --offline -p pocketboot --target aarch64-unknown-linux-musl
+        --features busybox                                                       OK
+    cargo check --offline -p pocketboot --target armv7-unknown-linux-musleabihf  OK
+    CARGO_TARGET_AARCH64_UNKNOWN_LINUX_MUSL_RUNNER=qemu-aarch64 cargo test
+        --offline -p pocketboot --features qemu --target aarch64-unknown-linux-musl
+                                                                                 213 passed
+    python3 -m py_compile tools/db410c_kexec.py                                  OK
+    cargo xtask qemu target/kernel/src/msm8916 --build-only                      OK
+
+The 3 warnings are the pre-existing baseline: 2x libc::time_t deprecation in adb.rs and
+the unused `continue_then` in fastboot/mod.rs. None in touched files.
+
+## QEMU end-to-end (tools/qemu_boot_policy.py, rerun on 6add2e1 + 9282d4d)
+
+    PASS autoboot
+      gen1 decides autoboot; kexec starts; gen1 never logs 'UI thread spawned',
+      'USB gadget thread spawned', 'battery watcher thread spawned';
+      gen2 menu via pocketboot.menu; gen1 starting up -> kexec: 638 ms
+    PASS volume-down-hold   decision menu/volume-down; watcher logged break-in; no kexec; UI started
+    PASS empty-disk         decision menu/no-bootable-entry; PID 1 still alive
+    PASS broken-default     autoboot attempted; menu/boot-failed "kernel is not a raw arm64 Image";
+                            PID 1 still alive; no kexec
+    PASS cmdline-menu       decision menu/cmdline; discovery completes; no kexec; no watcher
+
+Key serial lines (kernel clock, gen1 unless noted):
+
+autoboot:
+    [0.404459] INFO pocketboot: starting up
+    [0.419029] INFO pocketboot::breakin: volume-down break-in watcher spawned thread="pocketboot-breakin"
+    [0.829316] INFO pocketboot: local flash settled elapsed_ms=403 since_start_ms=433 disks=1 partitions=1
+    [0.870975] INFO pocketboot: boot discovery complete count=1 elapsed_ms=475
+    [0.872053] INFO pocketboot: POCKETBOOT_BOOT_DECISION decision="autoboot" id=pocketboot-gen2.conf
+               source=/run/pocketboot/boot/esp-vda1/loader/entries/pocketboot-gen2.conf elapsed_ms=476
+    [1.009929] INFO pocketboot: autoboot entry loaded id=pocketboot-gen2.conf elapsed_ms=614
+    [1.042261] kexec_core: Starting new kernel
+    gen2: [0.857021] starting up / [0.879069] POCKETBOOT_BOOT_DECISION decision="menu" reason=cmdline elapsed_ms=35
+
+volume-down-hold (QMP input-send-event qcode volumedown resent every 50 ms from t=0):
+    [0.497162] INFO pocketboot: starting up
+    [0.512476] INFO pocketboot::breakin: volume-down break-in watcher spawned
+    [0.546649] INFO pocketboot::breakin: volume-down break-in detected source=/dev/input/event0 elapsed_ms=58
+    [0.549639] INFO pocketboot: POCKETBOOT_BOOT_DECISION decision="menu" reason=volume-down elapsed_ms=61
+    [0.948018] INFO pocketboot: boot discovery complete count=2 elapsed_ms=459
+
+broken-default (linux payload = 64 KiB of zeros):
+    [0.878118] INFO pocketboot: POCKETBOOT_BOOT_DECISION decision="autoboot" id=broken.conf ... elapsed_ms=477
+    [0.913763] WARN pocketboot: POCKETBOOT_BOOT_DECISION decision="menu" reason=boot-failed
+               entry="broken kernel" error="kernel is not a raw arm64 Image" elapsed_ms=513
+
+Critical-path breakdown under TCG: settle quiet window ~400 ms (settle.rs QUIET_AFTER_PRESENT=350ms)
+dominates; discovery +40 ms; load ~140 ms; loaded -> kexec ~30 ms.
+
+## Prior results (2026-09-24, pre-rebase working tree, same code minus the rebase)
+
+A wider 12-scenario harness (scratchpad only, not retained) passed twice: the five above plus a
+vol-down tap mid-scan, a tap during the load (caught by the final pre-exec check), a
+mixed disk (broken default + good entry, then a UI-selected boot of the good entry into gen2),
+no disk at all (settle cap 5 s, then menu/no-bootable-entry), pocketboot.drm_page_flips=4
+(menu/lab, page-flip lab markers unchanged), a 15 s discovery timeout with a throttled disk
+(menu/discovery-timeout, banner cleared once discovery finished), and a failed menu-initiated
+boot (banner shown, list not stuck in "booting", second entry then booted). Screendumps of
+each menu were inspected: "Boot failed" banner, "No bootable OS found / Connect USB to use
+fastboot" empty state, held vol-down did not scroll the selection. Those artifacts were lost
+with the session scratchpad; the committed harness reproduces the core five.
+
+Measured then: gen1 starting-up -> Starting new kernel 593-669 ms over 3 runs (mean 640 ms over
+6); Watcher::finish closing evdev fds cost 20-35 ms via synchronize_rcu per close, which is why
+6add2e1 holds the fds open across kexec (loaded -> kexec dropped from ~60 ms to ~30 ms).
+
+## Not tested
+
+- Real hardware: PMIC PON_RT_STS reads on A5U/DB410c, pm8941 held-key suppression in the UI,
+  fastboot gadget respawn on the ChipIdea (msm8916) UDC after `fastboot continue` with nothing
+  bootable, A5U panel state when the UI never modesets before kexec.
+- reboot_mode=bootloader (no QEMU backend; decode is unit-tested only, and it is log-only by design).
