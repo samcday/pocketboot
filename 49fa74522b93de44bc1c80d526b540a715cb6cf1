@@ -1,0 +1,122 @@
+# Initial ARM32 kexec evidence
+
+Repository: https://github.com/samcday/pocketboot
+Commit: 49fa74522b93de44bc1c80d526b540a715cb6cf1
+UTC: 2026-09-29T22:08:40Z
+
+Scope: real Linux-to-Linux kexec in QEMU ARM virt, host regressions and
+ARMv7/AArch64 cross builds. No Samsung device was connected, flashed, booted,
+or used to validate display/USB/resource shutdown or secondary CPUs.
+
+Environment:
+- Rootless Podman using the checked-in CI image:
+  ghcr.io/samcday/pocketboot-ci:df-308fa9a36a632a0c6407cd5e8b241765ff35490924769332169de1459bbf82e8
+  manifest sha256:ef66268ec095fd5f3e3849da0cae4ecb1e0e1ec08dd43ac72b01833e32f019d4
+- Container Rust 1.96.0 and LLVM/LLD 19.1.7.
+- QEMU kernel: samcday/linux 3bc07d096bddd33218b8c13b9fa30ffdaba3c050,
+  release 7.1.0-rc3+, clean source, tools/arm32-kexec/kernel.config,
+  uniprocessor ARM virt / cortex-a15 / 256 MiB. Separate external source and
+  destination initramfs; actual src/kexec.rs included in guest PID 1.
+- Host tool versions:
+QEMU emulator version 11.0.93 (qemu-11.1.0-0.2.rc3.fc45)
+Copyright (c) 2003-2026 Fabrice Bellard and the QEMU Project developers
+rustc 1.96.0 (ac68faa20 2026-05-25)
+Python 3.15.0rc2
+
+Commands (from project root; SMOKE_MODE=build and main crate cross builds
+ran in the CI container with this worktree mounted at the same path):
+  cargo test -p pocketboot --bin pocketboot
+  cargo test -p xtask
+  cargo build --release --target armv7-unknown-linux-musleabihf --features busybox --bin pocketboot
+  cargo build --release --target aarch64-unknown-linux-musl --features busybox --bin pocketboot
+  cargo test --manifest-path tools/arm32-kexec/Cargo.toml --example arm32-kexec-smoke
+  SMOKE_MODE=build bash tools/arm32-kexec/run.sh "$PWD/target/kernel/src/msm8930/msm8930-samsung-expressltexx" LLVM=1
+  SMOKE_MODE=run bash tools/arm32-kexec/run.sh "$PWD/target/kernel/src/msm8930/msm8930-samsung-expressltexx"
+  rustfmt --check --edition 2024 --config skip_children=true src/kexec.rs src/kexec/arm.rs src/kexec/memory.rs examples/arm32-kexec-smoke.rs
+  bash -n tools/arm32-kexec/run.sh
+  shellcheck tools/arm32-kexec/run.sh
+  git diff --check
+
+All final commands exited 0. Main crate and xtask results:
+test result: ok. 192 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.04s
+test result: ok. 53 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.03s
+
+Standalone loader/harness tests:
+test result: ok. 45 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.03s
+
+Relevant serial window (two independent QEMU runs; each destination had to
+validate corrected memory, destination cmdline, unique initrd sentinel,
+booted-from-kexec, absence of the appended poison DTB, correct supplied-DTB
+provenance, and then power off within the timeout):
+Kernel command line: console=ttyAMA0 rdinit=/init panic=-1 pocketboot.smoke.stage=source pocketboot.smoke.case=fallback
+ARM32-KEXEC-SMOKE: LOAD case=fallback
+ INFO arm32_kexec_smoke::kexec::arm: prepared ARM kexec segment segment="zImage" phys=0x40008000 bufsz=1211364 memsz=1212416
+ INFO arm32_kexec_smoke::kexec::arm: prepared ARM kexec segment segment="initrd" phys=0x40535000 bufsz=290330 memsz=290816
+ INFO arm32_kexec_smoke::kexec::arm: prepared ARM kexec segment segment="dtb" phys=0x4057c000 bufsz=7954 memsz=8192
+kexec_core: Starting new kernel
+Kernel command line: console=ttyAMA0 rdinit=/init panic=-1 pocketboot.smoke.stage=destination pocketboot.smoke.case=fallback
+ARM32-KEXEC-SMOKE: PASS case=fallback
+reboot: Power down
+Kernel command line: console=ttyAMA0 rdinit=/init panic=-1 pocketboot.smoke.stage=source pocketboot.smoke.case=supplied
+ARM32-KEXEC-SMOKE: LOAD case=supplied
+ INFO arm32_kexec_smoke::kexec: grafted live memory and native CPU handoff contract into supplied DTB bytes=7669
+ INFO arm32_kexec_smoke::kexec::arm: prepared ARM kexec segment segment="zImage" phys=0x40008000 bufsz=1211364 memsz=1212416
+ INFO arm32_kexec_smoke::kexec::arm: prepared ARM kexec segment segment="initrd" phys=0x40535000 bufsz=290330 memsz=290816
+ INFO arm32_kexec_smoke::kexec::arm: prepared ARM kexec segment segment="dtb" phys=0x4057c000 bufsz=7906 memsz=8192
+kexec_core: Starting new kernel
+Kernel command line: console=ttyAMA0 rdinit=/init panic=-1 pocketboot.smoke.stage=destination pocketboot.smoke.case=supplied
+ARM32-KEXEC-SMOKE: PASS case=supplied
+reboot: Power down
+ARM32-KEXEC-SMOKE: PASS both cases
+
+Artifact SHA256 (exact tested QEMU build/fixtures, not CI device images):
+39f8fa238d582f182b59ea611fedf3aa80114f8f20e5809a21b3b4bc8ade350c  target/arm32-kexec-qemu/kernel/arch/arm/boot/zImage
+72e9c63021128d29bfcc19890b2f560eed10551643cee101d8c31a225a5009cf  target/arm32-kexec-qemu/rust/armv7-unknown-linux-musleabihf/release/examples/arm32-kexec-smoke
+6687080708d8357fbb766e453378b3c182fbc74b0da9ea4a400ed812515b3941  target/arm32-kexec-qemu/source.cpio.gz
+7397dddfd0493ec0d6a5ed3017f410d1c3011ab7e765612a3c69d75f0c6e876b  target/arm32-kexec-qemu/destination.cpio.gz
+a284979b0e5faf7e2420398de982e340ca39bdf68e11074a9ada882060a4b511  target/arm32-kexec-qemu/supplied.dtb
+bc3e02d54a429f38bda0e2209de3df85ae3fb79f2badd3edb4ab96bfda5d7d1f  target/arm32-kexec-qemu/destination.zImage
+
+Source/footprint evidence and review corrections:
+- arch/arm/kernel/machine_kexec.c + relocate_kernel.S supply r0/r1/r2 and
+  find the last FDT-magic segment; no userspace assembly purgatory is needed.
+  Flags are KEXEC_ARCH_ARM (40<<16), normal load; libc's ARM syscall is 347.
+- The usual inflated+file+0x11000 estimate is not a full runtime bound.
+  compressed/head.S adds relocation-code headroom and compressed/vmlinux.lds.S
+  places decompressor BSS after _edata; its kernel-size tag describes the
+  destination kernel BSS, NOT decompressor BSS.
+- Recorded phone compressed-ELF symbols at the original build revision:
+  ltexx _start=0 restart=f4 reloc_code_end=9f0 _edata=424a70 _end=424a88,
+         inflated=7aa250 kernel_bss=30da8.
+  att   _start=0 restart=f4 reloc_code_end=9f0 _edata=46d000 _end=46d018,
+         inflated=851e5c kernel_bss=2f11c.
+  With entry 80208000 the old page-rounded estimate ended 0x4a8/0x638 below
+  the exposed relocated heap end. This is an incomplete-bound proof, not
+  an observed corruption or proof that gzip used its final heap bytes.
+- Final bound is max(inflated+kernel_bss, inflated+2*file_len+64KiB BSS
+  allowance+64KiB heap+4KiB stack+4KiB alignment), in u64. Relocation code
+  fits in file_len; the decompressor BSS allowance is an explicit supported-
+  build contract, not runtime information from the tag. The checked ELF
+  symbols below validate it for these builds. Wider support needs evidence
+  or producer metadata, not a claim that all modern zImages are covered.
+- Fail closed if DT and /proc/iomem lowest RAM disagree or are not 2MiB
+  aligned, because fdt_check_mem_start may otherwise select a different output
+  address. Unsupported usable-memory overrides/nested/disabled banks reject.
+- Preserve live firmware DT reservations in supplied destination DT reserve
+  maps: ARM /proc/iomem does not expose all memblock.reserved entries.
+- Initial QEMU fixture failed to exec Thumb musl PID1 with ENOEXEC because
+  allnoconfig omitted ARM_THUMB. Added it and asserted the effective option.
+
+Current decompressor contract checks:
+target/arm32-kexec-qemu/kernel/arch/arm/boot/compressed/vmlinux
+decompressor contract: BSS/gap=24, stack=4096 bytes; relocation code within image
+target/kernel/qcom/msm8930-samsung-expressltexx/arch/arm/boot/compressed/vmlinux
+decompressor contract: BSS/gap=24, stack=4096 bytes; relocation code within image
+target/kernel/qcom/msm8960-samsung-expressatt/arch/arm/boot/compressed/vmlinux
+decompressor contract: BSS/gap=24, stack=4096 bytes; relocation code within image
+
+Limits: no raw Image, old size-less zImage, SMP loader, crash-kernel or
+physical-device success claim. Placement stays in the first 128MiB boot
+window and depends on the documented decompressor build contract. QEMU
+proves the kernel syscall/relocation/FDT/initrd path, not Krait hardware
+coherency or peripheral shutdown.
