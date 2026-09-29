@@ -1,0 +1,136 @@
+# Samsung Express build evidence
+
+Repository: https://github.com/samcday/pocketboot
+Commit: 8e4973308b9df68b8cf086a31ce6e34affde8c44
+UTC: 2026-09-29T21:25:50Z
+
+Scope: host cross-build and artifact inspection only. No phone was connected,
+booted, flashed, or used to test display, USB, storage, or kexec. The current
+pocketboot userspace loader remains ARM64-only; ARM32 load returns Unsupported.
+
+Environment:
+- x86_64 Linux host, rootless Podman.
+- CI image from the checked-in .github/Dockerfile:
+  ghcr.io/samcday/pocketboot-ci:df-308fa9a36a632a0c6407cd5e8b241765ff35490924769332169de1459bbf82e8
+  manifest digest sha256:ef66268ec095fd5f3e3849da0cae4ecb1e0e1ec08dd43ac72b01833e32f019d4
+- rustc 1.96.0 (ac68faa20 2026-05-25), Debian clang 19.1.7,
+  arm-linux-gnueabihf GCC 14.2.0. Kernels use LLVM; BusyBox uses ARM musl.
+- Expressltexx source: https://github.com/samcday/linux.git
+  3bc07d096bddd33218b8c13b9fa30ffdaba3c050; release 7.1.0-rc3+.
+- Expressatt source: https://codeberg.org/LogicalErzor/linux.git
+  c1012bdfd1aac8a12df548ac6484d9b0c4f8f5bf; release 7.2.0+.
+- Both kernel checkouts stayed clean and at their configured commits.
+
+Commands:
+  cargo xtask kernel-src qcom/msm8930-samsung-expressltexx
+  cargo xtask kernel-src qcom/msm8960-samsung-expressatt
+  # In the CI image, with the project mounted at its same absolute path:
+  cargo xtask build qcom/msm8930-samsung-expressltexx
+  cargo xtask build qcom/msm8960-samsung-expressatt
+  # Host checks:
+  cargo test -p xtask
+  rustfmt --check --edition 2024 --config skip_children=true xtask/src/commands/ci_matrix.rs
+  git diff --check
+
+Both final full build commands exited 0. No prebuilt substitute initrd or
+out-of-tree kernel modifications were used. BusyBox and pocketboot were built
+for armv7-unknown-linux-musleabihf, packed, embedded, and linked into zImage.
+
+Iteration notes:
+- Initial Expressltexx configuration rejected an attempted CONFIG_SSBI=y;
+  these kernels build ssbi.o under MFD_PM8XXX. Removed the nonexistent symbol.
+- Source review found native Expressatt MDP4's explicit RPM fabric bandwidth
+  dependency. Added INTERCONNECT, INTERCONNECT_QCOM, and
+  INTERCONNECT_QCOM_MSM8960=y, rebuilt successfully, and asserted the final
+  generated .config (not merely the TOML). Its DT supplies mdp0-mem/mdp1-mem;
+  drivers/gpu/drm/msm/disp/mdp4/mdp4_kms.c:373 documents FIFO underruns without
+  the vote. A regression test now covers these symbols.
+- Both final configs have CONFIG_KEXEC=y and CONFIG_SMP unset. Source evidence
+  for SMP=n is arch/arm/kernel/machine_kexec.c:machine_kexec_prepare and
+  arch/arm/mach-qcom/platsmp.c's missing cpu_kill. This removes a kernel-side
+  barrier; it does not implement or validate userspace ARM32 handoff.
+
+Test result:
+test result: ok. 57 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.05s
+
+Artifact validation results:
+msm8930-samsung-expressltexx: 4366336 bytes (4.16 MiB), SHA256 1b3fa29bc7b1b3235e087ade78f33cc4f3ffde85feeed371c425c859e0173027
+  PASS v0/page/zImage/DTB/header SHA1/addresses, resolved drivers, SMP=n, static ARM init + BusyBox; initramfs_inc_data 1181025 bytes
+msm8960-samsung-expressatt: 4694016 bytes (4.48 MiB), SHA256 2c21fa2fb8ed0d41b3afce150b2b4a819b9f8fb8e90a757c03a4fe60915faab9
+  PASS v0/page/zImage/DTB/header SHA1/addresses, resolved drivers, SMP=n, static ARM init + BusyBox; initramfs_inc_data 1181025 bytes
+
+Additionally, gzip-decompressing each usr/initramfs_inc_data produced a
+byte-for-byte match of its validated pocketboot-initrd.cpio.
+
+What this establishes: both independently pinned targets build complete
+Android boot images using the CI toolchain; generated configs retain required
+built-ins; zImage and the correct processed board DTB are actually packaged;
+Expressatt's GPU-off and USB-peripheral overlay survives packaging; embedded
+/init and BusyBox are executable static ARM ELF32 binaries. It does NOT
+establish partition fit or hardware boot/functionality.
+
+The following standalone Python validation was run from the project root:
+
+```python
+from pathlib import Path
+import gzip, hashlib, struct, subprocess, tomllib
+
+root = Path.cwd()
+for soc, name in [('msm8930', 'expressltexx'), ('msm8960', 'expressatt')]:
+    stem = f'{soc}-samsung-{name}'
+    cfg = tomllib.loads((root / f'configs/device/qcom/{stem}.toml').read_text())
+    b = cfg['bootimg']
+    out = root / f'target/kernel/qcom/{stem}'
+    data = (out / 'boot.img').read_bytes()
+    assert data[:8] == b'ANDROID!'
+    ks, ka, rs, ra, ss, sa, tags, page, version, osv = struct.unpack_from('<10I', data, 8)
+    assert (ka, ra, sa, tags) == tuple(b['base'] + b[k] for k in ['kernel_offset', 'ramdisk_offset', 'second_offset', 'tags_offset'])
+    assert (page, version, ss, rs) == (2048, 0, 0, b.get('ramdisk_size', 0))
+    image = (out / 'arch/arm/boot/zImage').read_bytes()
+    dtbpath = out / ('pocketboot.dtb' if name == 'expressatt' else f'arch/arm/boot/dts/qcom/qcom-{stem}.dtb')
+    dtb = dtbpath.read_bytes()
+    assert struct.unpack_from('<I', image, 0x24)[0] == 0x016f2818
+    assert struct.unpack_from('>2I', dtb) == (0xd00dfeed, len(dtb))
+    assert data[page:page + ks] == image + dtb
+    aligned = lambda n: (n + page - 1) // page * page
+    assert len(data) == page + aligned(ks) + aligned(rs)
+    rd = data[page + aligned(ks):page + aligned(ks) + rs]
+    digest = hashlib.sha1(image + dtb + struct.pack('<I', ks) + rd + struct.pack('<I', rs) + struct.pack('<I', 0)).digest()
+    assert data[576:596] == digest
+    def prop(node, key):
+        return subprocess.check_output(['fdtget', '-t', 's', str(dtbpath), node, key], text=True).strip()
+    assert prop('/', 'compatible') == f'samsung,{name} qcom,{soc}'
+    if name == 'expressatt':
+        assert prop('/soc/gpu@4300000', 'status') == 'disabled'
+        assert prop('/soc/iommu@7c00000', 'status') == 'disabled'
+        assert prop('/soc/usb@12500000', 'dr_mode') == 'peripheral'
+        assert prop('/soc/dsi@4700000/panel@0', 'compatible') == 'magnachip,ams452gp32'
+        expected = ['DRM_MSM', 'DRM_MSM_MDP4', 'DRM_MSM_DSI_28NM_8960_PHY', 'MSM_IOMMU', 'DRM_PANEL_MAGNACHIP_AMS452GP32', 'INTERCONNECT', 'INTERCONNECT_QCOM', 'INTERCONNECT_QCOM_MSM8960']
+    else:
+        assert prop('/chosen/framebuffer@88a00000', 'compatible') == 'simple-framebuffer'
+        expected = ['DRM_SIMPLEDRM', 'REGULATOR_QCOM_PM8917']
+    kconfig = set((out / '.config').read_text().splitlines())
+    for key in expected + ['KEXEC', 'MMC_ARMMMCI', 'MMC_QCOM_DML', 'USB_CHIPIDEA_UDC', 'USB_CONFIGFS_F_FS', 'TOUCHSCREEN_ATMEL_MXT', 'KEYBOARD_TM2_TOUCHKEY', 'PINCTRL_QCOM_SSBI_PMIC', 'INPUT_PMIC8XXX_PWRKEY']:
+        assert f'CONFIG_{key}=y' in kconfig, key
+    assert '# CONFIG_SMP is not set' in kconfig
+    archive = (root / f'target/cpio/qcom/{stem}/pocketboot-initrd.cpio').read_bytes()
+    members, pos = {}, 0
+    while archive[pos:pos+6] == b'070701':
+        fields = [int(archive[pos + 6 + i*8:pos + 14 + i*8], 16) for i in range(13)]
+        mode, size, nlen = fields[1], fields[6], fields[11]
+        member = archive[pos+110:pos+110+nlen-1].decode().removeprefix('./').removeprefix('/')
+        pos = (pos + 110 + nlen + 3) & ~3
+        members[member] = (mode, archive[pos:pos+size])
+        pos = (pos + size + 3) & ~3
+        if member == 'TRAILER!!!': break
+    for member in ['init', 'bin/busybox']:
+        mode, elf = members[member]
+        assert mode & 0o111 and elf[:5] == b'\x7fELF\x01'
+        assert struct.unpack_from('<H', elf, 18)[0] == 40
+        phoff = struct.unpack_from('<I', elf, 28)[0]
+        entsize, num = struct.unpack_from('<HH', elf, 42)
+        assert all(struct.unpack_from('<I', elf, phoff + n*entsize)[0] != 3 for n in range(num)), 'dynamic interpreter'
+    inc = (out / 'usr/initramfs_inc_data').read_bytes()
+    print(f'{stem}: {len(data)} bytes ({len(data)/1048576:.2f} MiB), SHA256 {hashlib.sha256(data).hexdigest()}')
+    print(f'  PASS v0/page/zImage/DTB/header SHA1/addresses, resolved drivers, SMP=n, static ARM init + BusyBox; initramfs_inc_data {len(inc)} bytes')
+```
