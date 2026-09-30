@@ -3,9 +3,10 @@
 This is an **LK2nd-first diagnostic target**, not direct-stock-boot support or
 a fully validated Linux port. Three normal RAM-boots now verify PocketBoot
 USB fastboot, automatic eMMC discovery and live log retrieval; a read-only GPT
-capture matches the original backup. Visible framebuffer output and kexec
-remain unverified. No flashing is required by the build, and no hardware
-commands are included here.
+capture matches the original backup. A subsequent LCD-supply fix has
+owner-confirmed visible framebuffer output. Touch and kexec remain unverified.
+No flashing is required by the build, and no hardware commands are included
+here.
 
 ## Build
 
@@ -136,9 +137,13 @@ Capturing that final handed-off DT is still a hardware validation step.
 
 The three `ignore_unused` flags temporarily preserve firmware-owned display
 clocks, power domains and rails without native DRM/DSI taking ownership.
-They are diagnostic policy, not a power-management solution. USB is explicitly
-peripheral-only and its charger/extcon and host-VBUS dependencies are removed;
-this target does not manage charging or provide USB host mode.
+They do not prevent a driver's probe-time changes: the PocketBoot DT patch
+also marks `lcd_3v3` as `regulator-boot-on`, preventing the fixed-regulator
+driver from driving its enable GPIO low during probe. The existing fixed
+voltage and polarity are retained. These are firmware-handoff policies, not
+a complete power-management solution. USB is explicitly peripheral-only and
+its charger/extcon and host-VBUS dependencies are removed; this target does
+not manage charging or provide USB host mode.
 
 `console=tty0` is paired with `DRM_FBDEV_EMULATION`,
 `DRM_CLIENT_DEFAULT_FBDEV` and `FRAMEBUFFER_CONSOLE` so ordinary kernel text
@@ -179,8 +184,9 @@ The successful build had three existing PocketBoot Rust warnings
 
 The normal image now confirms Linux entry, PSCI/SMP, framebuffer-driver
 registration, PocketBoot init, USB fastboot and eMMC read I/O across three
-RAM-boots. Retained logs survive the tested recovery path. Still unvalidated:
-visible framebuffer output, large USB transfers, storage writes and kexec.
+RAM-boots. The subsequent LCD boot-on trial also confirms visible UI.
+Retained logs survive the tested recovery path. Still unvalidated:
+touch, large USB transfers, storage writes and kexec.
 This kernel also lacks the existing MSM8916 series' ChipIdea SG-bounce and
 FunctionFS reset-work fixes; large fastboot uploads and gadget teardown must
 not be assumed reliable. Touch, native panel/GPU, Wi-Fi and audio are deferred.
@@ -265,3 +271,8 @@ is 4,810,752 bytes, SHA-256
 It contains no probe wrapper or timed diagnostic panic. See the
 [normal-boot evidence](tb-x304f-bringup.md#verified-normal-usb-and-emmc-boot)
 and the separate [lab probe guide](tb-x304f-probe.md).
+
+The LCD boot-on candidate is also 4,810,752 bytes, SHA-256
+`0e69d2e2e346d87032d60ef5a3cac999aa41aff8a001af2eac1554509f7792dd`.
+Only its DT changed from that normal image. The owner confirmed a working
+framebuffer; see the [display evidence](tb-x304f-bringup.md#verified-visible-framebuffer).

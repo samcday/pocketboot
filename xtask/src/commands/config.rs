@@ -854,6 +854,13 @@ mod tests {
         assert!(args.contains(&"deferred_probe_timeout=5"));
         assert!(args.contains(&"pocketboot.log=info"));
         assert!(args.contains(&"pocketboot.usb_role=device"));
+        for preserved in [
+            "clk_ignore_unused",
+            "pd_ignore_unused",
+            "regulator_ignore_unused",
+        ] {
+            assert!(args.contains(&preserved), "{preserved}");
+        }
         let panic_args = args
             .iter()
             .copied()

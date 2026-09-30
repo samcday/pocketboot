@@ -7,10 +7,11 @@ Only the `msm8917-lenovo-tbx304x` device config selects this series.
 1. `0001-arm64-dts-qcom-tbx304x-apq8017.patch` adds the measured APQ8017
    bootloader selection ID, preserving the source board's family identity.
 2. `0002-arm64-dts-qcom-tbx304x-pocketboot.patch` is PocketBoot-only policy:
-   let LK2nd supply the actual simplefb node/reservation and make USB
-   peripheral-only with an explicit role-switch API instead of charger/extcon
-   dependencies. PocketBoot opts into device role for this target. This is not
-   intended as a general-purpose upstream board change.
+   let LK2nd supply the actual simplefb node/reservation, preserve its enabled
+   LCD supply during fixed-regulator probe, and make USB peripheral-only with
+   an explicit role-switch API instead of charger/extcon dependencies.
+   PocketBoot opts into device role for this target. This is not intended as
+   a general-purpose upstream board change.
 3. `0003-arm64-dts-qcom-msm8917-rpm-mailbox.patch` moves RPM IPC from the
    legacy APCS syscon path to mailbox channel 0, preserving offset 8/bit 0.
    This avoids a dependency on the CPU PLL provider and explicit PLL gating
@@ -42,5 +43,7 @@ Compilation and DT inspection passed. The
 [normal-image trials](../../../docs/tb-x304f-bringup.md#verified-normal-usb-and-emmc-boot)
 confirm Linux, all four CPUs, simpledrm/fbcon registration, PocketBoot USB
 fastboot and automatic eMMC discovery. A small read-only GPT transfer matched
-the original backup. Visible display output, large transfers, writes and
-kexec remain separate validation work.
+the original backup. The subsequent
+[LCD boot-on trial](../../../docs/tb-x304f-bringup.md#verified-visible-framebuffer)
+has owner-confirmed visible UI. Touch, large transfers, writes and kexec
+remain separate validation work.

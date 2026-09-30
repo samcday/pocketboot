@@ -10,6 +10,12 @@ to avoid overlapping reservations and dependencies on native DSI PLL
 drivers. The experimental command line preserves unused clocks, power
 domains and regulators instead of taking native display ownership.
 
+Keep the firmware-enabled LCD supply on during fixed-regulator probe.
+Without regulator-boot-on, that driver requests the enable GPIO low;
+regulator_ignore_unused only prevents later cleanup and cannot undo the
+initial power cut. The native panel consumer is absent in this profile.
+Retain the board's existing GPIO polarity and fixed voltage.
+
 Use USB only as a peripheral for initial diagnostics. Drop the charger
 extcon and host VBUS dependencies so gadget probing does not need the
 SMBCHG driver or its battery/charging policy.
@@ -17,7 +23,8 @@ Expose the existing role-switch API so PocketBoot can explicitly request
 device role for this extcon-free bootstrap.
 
 Keep the board port's remaining memory reservations and PSCI CPU method.
-No RAM size, CPU parking protocol or native panel assumptions are added.
+No RAM size or CPU parking protocol changes are added. Native panel
+programming remains with the firmware.
 
 diff --git a/arch/arm64/boot/dts/qcom/msm8917-lenovo-tbx304x.dts b/arch/arm64/boot/dts/qcom/msm8917-lenovo-tbx304x.dts
 --- a/arch/arm64/boot/dts/qcom/msm8917-lenovo-tbx304x.dts
@@ -49,7 +56,15 @@ diff --git a/arch/arm64/boot/dts/qcom/msm8917-lenovo-tbx304x.dts b/arch/arm64/bo
  	};
  
  	gpio-keys {
-@@ -99,11 +81,6 @@
+@@ -91,6 +73,7 @@
+ 	lcd_3v3: lcd-3v3-regulator {
+ 		compatible = "regulator-fixed";
+ 		regulator-name = "lcd_3v3";
++		regulator-boot-on;
+ 		regulator-min-microvolt = <3300000>;
+ 		regulator-max-microvolt = <3300000>;
+ 		gpio = <&tlmm 46 GPIO_ACTIVE_HIGH>;
+@@ -99,11 +82,6 @@
  	};
  
  	reserved-memory {
@@ -61,7 +76,7 @@ diff --git a/arch/arm64/boot/dts/qcom/msm8917-lenovo-tbx304x.dts b/arch/arm64/bo
  		ramoops_mem: ramoops@8ee00000 {
  			compatible = "ramoops";
  			reg = <0x0 0x8ee00000 0x0 0x80000>;
-@@ -448,9 +425,8 @@
+@@ -448,9 +426,8 @@
  };
  
  &usb {

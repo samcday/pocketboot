@@ -1,8 +1,9 @@
 # Lenovo Tab 4 10 TB-X304F bring-up
 
 The experimental profile now has repeatable PocketBoot RAM-boots, working USB
-fastboot diagnostics and verified eMMC reads. This is a bring-up record, not
-a fully validated tablet port or a PocketFed installation.
+fastboot diagnostics, verified eMMC reads and owner-confirmed visible UI.
+This is a bring-up record, not a fully validated tablet port or a PocketFed
+installation.
 
 ## Current status
 
@@ -24,8 +25,9 @@ a fully validated tablet port or a PocketFed installation.
   backup byte-for-byte. This validates small read-only transfers, not large
   uploads, writes or kexec.
 - Linux starts all four CPUs and PocketBoot reports its 800x1280 DRM UI ready.
-  Visible display output still needs confirmation; native display, charging,
-  Wi-Fi and audio are not validated.
+  The owner confirmed visible framebuffer output after preserving the
+  firmware-enabled LCD rail during fixed-regulator probe. Touch is not yet
+  working; native display, charging, Wi-Fi and audio are not validated.
 - The target now passes `panic=-1`. With `boot` empty, one complete unattended
   panic cycle returned to verified stock fastboot in 15.5 seconds from the
   Linux boot command; lk2nd reloaded and the crash log was captured by
@@ -798,7 +800,42 @@ archive tests, ShellCheck, formatting, image/config/DT checks and independent
 source review. The actual deferred-probe helper was compiled into a host
 truth-table check for modules on/off, pre/post-initcalls and timeout -1/0/5.
 Small USB reads work; large transfers, writes, kexec, PocketFed and physical
-display output still require separate validation.
+display output were not validated by these three trials. The following
+single-change trial establishes visible display output separately.
+
+### Verified visible framebuffer
+
+With USB working, a read-only live inspection distinguished successful KMS
+setup from an actually powered panel. The CRTC and plane were active, the
+MDSS power domain and display clock gates were on, and panel reset GPIO60
+was high. However, `lcd_3v3` was disabled with zero users and its active-high
+enable GPIO46 was low.
+
+The pinned fixed-regulator driver requests output-low unless the regulator
+has `regulator-boot-on`. `regulator_ignore_unused` skips later unused-rail
+cleanup, not this probe-time action. The native DSI panel, normally the rail's
+consumer, is deliberately absent from the firmware-framebuffer profile.
+Patch 0002 now adds only `regulator-boot-on` to this supply; its fixed 3.3 V
+value and GPIO polarity are unchanged. No raw GPIO writes, `always-on`
+constraint, backlight adjustment or native display driver was added.
+
+The 4,810,752-byte candidate has SHA-256
+`0e69d2e2e346d87032d60ef5a3cac999aa41aff8a001af2eac1554509f7792dd`.
+Kernel, config, initramfs and command line were byte-identical to the prior
+normal image; the DT's sole semantic change was that boot-on property.
+The fixed-regulator schema check, including its inherited regulator schema,
+passed without diagnostics.
+
+After rebooting through stock fastboot and LK2nd to reinitialize the panel,
+PocketBoot USB returned in 2.386 seconds. Live state showed `lcd_3v3` enabled
+at 3.3 V, GPIO46 high and eMMC still present. **The owner then confirmed a
+working PocketBoot framebuffer.** This is physical confirmation, not merely
+the `POCKETBOOT_DRM_READY` marker.
+
+Touch remains the next checkpoint: the live input list contains only the
+power, reset and GPIO-key devices, with no I2C adapters. The current image
+does not enable the QUP I2C or declared Goodix touchscreen driver. This does
+not yet identify which touchscreen variant is fitted.
 
 ## First-boot milestones
 
