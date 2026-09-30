@@ -1,0 +1,49 @@
+# Evidence-only cleanup verification
+
+Repository: https://github.com/samcday/pocketboot
+Cleanup commit: 014a0decdce09eabe88595dffef4bc4b1e4a71b6
+Tested hardware-source baseline: a7d0397cc3e01e4fe2bb1bb9aa667bc88fcc8006.
+No tablet commands, image builds or hardware trials were performed for this cleanup.
+
+## Preserved evidence
+
+All eight removed documentation/tool/patch files were recovered from the
+refs/notes/evidence note on a7d0397 and checked against their original byte
+lengths and SHA-256 hashes (104631 source bytes total). The note was added
+with --no-stripspace so shell/patch/text payloads retain their exact bytes.
+The standalone USB/probe audit is on f52efe969d181c155ba4653753d296adee5b3a8f.
+The LK2nd reboot-mode context and prototype are on
+7fe558abb4e00fef84f381033c0783338d1e9436. All three were pushed to origin's
+refs/notes/evidence before this cleanup commit was published.
+
+## Commands and results
+
+- TMPDIR=<scratch> cargo test --locked --offline -p xtask: 53 passed.
+  The removed test echoed the target config; generic checked-in config loading
+  still includes this target. No replacement config-echo test was added.
+- cargo fmt --all --check: passed.
+- git diff --check: passed.
+- PYTHONPATH=tools/tests python3 -m unittest
+  test_ramoops_decode.RamoopsCLITests -v: 3 passed. The older ECC fixture
+  suite was not rerun; this fork has no generated MSM8916 kernel source.
+- Extracted the archived tool, wrapper and suite from the Git note to scratch,
+  then ran python3 -m unittest discover -s <scratch>/tools/tests
+  -p test_tb_x304f_probe_cpio.py -v: all 15 passed, including ordinary-child
+  non-PID1 refusal. No PID namespace or device-only wrapper body was run.
+- Compared each maintained kernel patch from its first 'diff --git' line
+  with the tested baseline: all seven patch bodies are byte-identical.
+- Compared both MSM8917 target TOML files with the baseline: byte-identical.
+- Runtime Rust source was not changed. The prior 190-test runtime result
+  remains in the baseline record; it is not presented as a new run here.
+
+## Boundaries
+
+The USB workaround and no-modules probe patch remain behaviorally unchanged.
+Their limitations are now explicit in patch rationale and the compact README.
+The lk2nd fork had issues disabled when issue creation was attempted; Sam
+was asked before enabling that repository feature.
+
+Local notes.rewriteRef=refs/notes/evidence was configured in this review clone.
+Other clones do not inherit that config. Rebase/amend note copying preserves
+historical evidence; it does not revalidate changed code. A GitHub squash merge
+needs explicit note transfer to the new merge commit and a separate notes push.
