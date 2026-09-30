@@ -203,6 +203,14 @@ mod expressltexx_tests {
             (boot.ramdisk_offset, boot.tags_offset),
             (0x02200000, 0x02000000)
         );
+        assert_eq!(boot.ramdisk_size, 1);
+        assert!(boot.cmdline.contains("console=ttyMSM0,115200n8"));
+        assert!(
+            !boot
+                .cmdline
+                .split_whitespace()
+                .any(|arg| arg.starts_with("mem="))
+        );
         assert!(boot.append_dtb);
         assert!(boot.preboot.is_none());
     }

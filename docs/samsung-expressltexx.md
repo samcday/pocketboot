@@ -33,7 +33,12 @@ full `qcom_defconfig`. Pocketboot and BusyBox are built into the initramfs.
   `qcom-msm8930-samsung-expressltexx.dtb`. Stock aboot supplies ATAGS; the ARM
   decompressor finds the appended DTB and merges the bootloader's RAM map.
 - Base `0x80200000`, kernel offset `0x8000`, ramdisk offset `0x02200000`,
-  tags offset `0x02000000`. No ARM64 pocketpreboot shim.
+  tags offset `0x02000000`. Preserve the one-byte external ramdisk placeholder
+  found in the hardware-booted stock wrapper; the real initramfs is built in.
+  No ARM64 pocketpreboot shim.
+- Supply an explicit UART command line. With an empty boot-image command line,
+  stock aboot injects `mem=100M console=null`, overriding the firmware RAM map
+  and exposing SMEM as normal RAM. Do not add a synthetic `mem=` limit.
 - Retain the existing simpledrm path using the framebuffer described by
   Sam's DT. This requires a bootloader-initialized display; this port does
   not switch to native DRM.
