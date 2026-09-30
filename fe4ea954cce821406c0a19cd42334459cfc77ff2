@@ -144,3 +144,11 @@ ARM32-KEXEC-SMOKE: FAIL: unknown smoke case invalid
 ARM32-KEXEC-SMOKE: case=supplied: PASS
 ARM32-KEXEC-SMOKE: case=appended: PASS
 ARM32-KEXEC-SMOKE: FAIL 1/3 cases: fallback
+
+Hosted CI confirmation for fe4ea954cce821406c0a19cd42334459cfc77ff2
+https://github.com/samcday/pocketboot/actions/runs/36682400965/job/109780608594
+Unit tests: success; completed 2026-09-30T07:15:26Z
+Test runtime and build configuration: success (2026-09-30T07:13:50Z to 2026-09-30T07:14:42Z)
+Test standalone ARM32 harness: success (2026-09-30T07:14:42Z to 2026-09-30T07:14:45Z)
+The kernel/boot-image matrix was still running when this note was added.
+Separate Claude Code Review run 36682400931 failed with result is_error:true after 437ms, one turn and empty modelUsage. The available log did not expose the cause; this is not a completed code review.
