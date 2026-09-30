@@ -1,0 +1,195 @@
+# Expressltexx fixed-address cold boot and hardware kexec evidence
+
+Repository: https://github.com/samcday/pocketboot
+Commit: cf2ebd6e790b13a1eef86a9d02c8e2caf9cb76ce
+Hardware experiment date: 2026-09-30
+Evidence finalized: 2026-09-30T01:41:39.947325+00:00
+
+Scope: Samsung Galaxy Express GT-I8730 / samsung,expressltexx, serial
+00001EB100006FAB. This note records retained hardware evidence, not a new
+hardware run after workspace restoration. No device operations were performed
+during restoration or final publication.
+
+## Source and artifact identity
+
+Kernel: https://github.com/samcday/linux.git
+  3bc07d096bddd33218b8c13b9fa30ffdaba3c050, source checkout clean.
+Device config differs from the prior hardware wrapper checkpoint fa07759 only
+by disabling ARCH_MULTIPLATFORM/AUTO_ZRELADDR and setting PHYS_OFFSET80200000.
+ARM_PATCH_PHYS_VIRT remains enabled; the loader remains SMP=n.
+No kernel source patch was used.
+
+Toolchain container:
+  ghcr.io/samcday/pocketboot-ci:df-308fa9a36a632a0c6407cd5e8b241765ff35490924769332169de1459bbf82e8
+  manifest sha256:ef66268ec095fd5f3e3849da0cae4ecb1e0e1ec08dd43ac72b01833e32f019d4
+Kernel compiler: Debian clang/LLD19.1.7, shown by the running kernel.
+
+The fixed kernel reused the exact embedded initramfs extracted from the verified
+PR48 CI artifact11065552396 / run36637806530 / commit79e41ff. Its SHA256 is
+02a6c6ff986c40fbda590c46fd9d2a6ab0eb037bce17c37a3c945b26255300ee.
+This isolates the kernel config change; userspace remained the tested ARM32
+loader implementation from base49fa745. The rebuilt usr/initramfs_inc_data
+was decompressed and checked byte-for-byte against that CPIO.
+
+Build command, in the CI container with the workspace mounted at the same path:
+  TMPDIR="$PWD/target/tmp" CARGO_TARGET_DIR="$PWD/target/container" \
+    cargo xtask build qcom/msm8930-samsung-expressltexx \
+    "$PWD/target/kernel/src/msm8930/msm8930-samsung-expressltexx" \
+    --initrd "$PWD/target/expressltexx-lab/20260930-flash/ci-initrd.cpio"
+
+Effective .config retained at target/expressltexx-lab/20260930-flash/kernel-fixed.config:
+  CONFIG_KEXEC=y
+  CONFIG_ARM_PATCH_PHYS_VIRT=y
+  CONFIG_PHYS_OFFSET=0x80200000
+  # CONFIG_ARCH_MULTIPLATFORM is not set
+  # CONFIG_SMP is not set
+  CONFIG_ARM_APPENDED_DTB=y
+  CONFIG_ARM_ATAG_DTB_COMPAT=y
+  # CONFIG_AUTO_ZRELADDR is not set
+
+Compressed-ELF checks (also rerun after restoration):
+  _start=00000000, _edata=0042a620, _end=0042a638, zreladdr=80208000 (absolute).
+  check-decompressor.py: BSS/gap24 bytes, stack4096 bytes, relocation code within file.
+  The BOOT payload exactly matched this built zImage + its board DTB.
+
+## Cold boot
+
+The user explicitly approved BOOT-only flashing and reboot. Every flash command
+was serial-gated and targeted `boot` only, mapped through sysfs PARTNAME to
+/dev/mmcblk0p7 (10MiB). The complete partition was read back before reboot and
+its candidate-length prefix matched the image byte-for-byte. Commands:
+  fastboot -s 00001EB100006FAB flash boot boot-fixed.img
+  fastboot -s 00001EB100006FAB oem cat:/dev/mmcblk0p7
+  fastboot -s 00001EB100006FAB get_staged fixed-readback.img
+  fastboot -s 00001EB100006FAB reboot
+
+No agent command wrote aboot, recovery, system or userdata. The original BOOT
+backup remains in target/expressltexx-lab/20260930-inventory/boot-before.img,
+verified by two identical reads before the first flash, SHA256
+5b42e21d005d963ad969cd3b8d5f632f221ee84753c4218614caf41092084d73.
+Rollback was not exercised. No UART port was taken over.
+
+Before this fix, AUTO_ZRELADDR selected80008000 from the PC while the appended
+DTB branch skipped validation until after cache setup. The clean UART-command-
+line boot restored RAM beginning80200000 but still lacked a Kernel code
+resource there; SoC ID0 was observed through ADB. The fixed configuration
+establishes ZRELADDR80208000 before cache setup (initial page directory80204000)
+and the real cold boot then showed Kernel code80208000 and SoC ID116. This is
+separate from aboot's mem=100M fallback, fixed in fa07759.
+
+Selected fixed cold-boot observations:
+Linux (none) 7.1.0-rc3+ #2 Wed Sep 30 01:05:24 UTC 2026 armv7l
+80200000-889fffff : System RAM
+  80208000-807ddfff : Kernel code
+===CPUS===
+0
+0
+===SOC===
+116
+
+## Two consecutive actual kexec handoffs
+
+Destination images differ from their underlying boot image ONLY in the header
+command line, adding vmalloc=0x1D600000, pocketboot.log=info and a unique
+pocketboot.handoff marker. Kernel/DTB/initramfs bytes are unchanged. The markers
+were not flashed to BOOT, so a reset to the persistent image cannot satisfy
+these destination assertions.
+
+1. Fixed-address cold kernel -> automatic-address CI kernel:
+   fastboot -s 00001EB100006FAB boot handoff-auto.img
+   USB target returned after ~3.4s; ADB showed the CI kernel build, unique marker,
+   /chosen/linux,booted-from-kexec, reset uptime, CPU0, correct RAM and SoC116.
+Linux (none) 7.1.0-rc3+ #1 Tue Sep 29 22:13:10 UTC 2026 armv7l
+earlycon=msm_serial_dm,0x16440000 console=ttyMSM0,115200n8 vmalloc=0x1D600000 pocketboot.log=info pocketboot.handoff=expressltexx-20260930-auto
+-r--r--r--    1         0 /sys/firmware/devicetree/base/chosen/linux,booted-from-kexec
+===UPTIME===
+2.25 0.78
+===CPUS===
+0
+0
+80200000-889fffff : System RAM
+  80208000-807e3fff : Kernel code
+===SOC===
+116
+
+2. That running automatic-address kernel -> fixed-address kernel:
+   fastboot -s 00001EB100006FAB stage handoff-fixed.img
+   fastboot -s 00001EB100006FAB oem kexec-load
+   adb -s 00001EB100006FAB exec-out 'cat /sys/kernel/kexec_loaded'
+     -> 1 (load-only check; kernel was not yet restarted)
+   fastboot -s 00001EB100006FAB boot handoff-fixed.img
+   Target returned after ~3.4s and the destination assertions passed again.
+
+Loader placement captured before the second transition:
+[  226.037434]  INFO pocketboot::kexec::arm: prepared ARM kexec segment segment="zImage" phys=0x80208000 bufsz=4367908 memsz=4370432
+[  226.037557]  INFO pocketboot::kexec::arm: prepared ARM kexec segment segment="initrd" phys=0x8122f000 bufsz=1 memsz=4096
+[  226.048248]  INFO pocketboot::kexec::arm: prepared ARM kexec segment segment="dtb" phys=0x81230000 bufsz=20026 memsz=20480
+
+Second destination observations:
+Linux (none) 7.1.0-rc3+ #2 Wed Sep 30 01:05:24 UTC 2026 armv7l
+earlycon=msm_serial_dm,0x16440000 console=ttyMSM0,115200n8 vmalloc=0x1D600000 pocketboot.log=info pocketboot.handoff=expressltexx-20260930-fixed
+-r--r--r--    1         0 /sys/firmware/devicetree/base/chosen/linux,booted-from-kexec
+===UPTIME===
+2.21 0.72
+===CPUS===
+0
+0
+80200000-889fffff : System RAM
+  80208000-807ddfff : Kernel code
+===SOC===
+116
+
+Both destination kernels were UP. This is Pocketboot-to-Pocketboot validation,
+not a distinct distribution boot or SMP-destination result. USB, eMMC and input
+devices enumerated; physical display/touch behavior and external SD were not
+validated. Expressatt was not touched.
+
+Known retained log limitations: the two-CPU DT emits a max-cores1 warning under
+the UP loader; maxtouch.cfg is absent but the touchscreen registers; MMCC reports
+sync_state pending on disabled/unbound display/GPU paths; no boot entries were
+found. These observations are not hidden by a blanket 'all hardware works' claim.
+
+## Artifact hashes
+boot-fixed.img: 4392960 bytes sha256 ca345c91e5fa0625e85768c0b4f8222802316b6ac3b79c351b969a564eb3a13b
+fixed-readback.img: 10485760 bytes sha256 5097189bc623493f9c8ffcbdff08fa407cc087a2673ccabac9e148f93c1ddffd
+handoff-auto.img: 4395008 bytes sha256 f683b5f73b98cf7c46a37ccb1cba4f1ecf448fbcd09360737cf93631da86b2c0
+handoff-fixed.img: 4392960 bytes sha256 be363d4acf0cd736b80471fa039a17df13e50d2c97c07320de5fe341a315188c
+ci-initrd.cpio: 2331212 bytes sha256 02a6c6ff986c40fbda590c46fd9d2a6ab0eb037bce17c37a3c945b26255300ee
+kernel-fixed.config: 80703 bytes sha256 2c893899190966ffa0e4140996be049cd5d29f32478e3e4b9c2577a4ce010eea
+fixed-cold-inventory.txt: 2627 bytes sha256 01563d61d5fd639a0bf53ccc9ce9794665f0ec8978dfcc3d99c075d683df42c8
+handoff-auto-inventory.txt: 1594 bytes sha256 a382f74a34c4c8cbe9a9e8af5701a33e33a1d4e52ad5e673e40a05b410133aef
+handoff-fixed-inventory.txt: 3647 bytes sha256 cf9b6b0bdce1163b24e940d59e4df01e976eae949c26835ac0961ae0a9b185b1
+handoff-fixed-load-dmesg.txt: 21913 bytes sha256 1ce0773730ca340f84109e138fe29cc3b53c6033ff21bfbd42156f7286f977d9
+handoff-fixed-dmesg.txt: 20439 bytes sha256 5756096be69f3895ea6d448d1cb67f1dc48a15327778053d22254b7b303eeebe
+
+## Workspace restoration and post-restore verification
+
+After the second handoff the workspace was externally replaced with an empty
+checkout and a new .git file. The complete prior directory survived as the
+adjacent pocketboot~. No cause is asserted; the timing alone does not establish
+whether the Delta update/restart caused it.
+
+With explicit user approval:
+  rsync -a --ignore-existing --exclude='/.git' ../pocketboot~/ ./
+No deletion or overwrite option was used. The new .git stayed byte-identical,
+and the source directory was left intact. All156 tracked files (including modes)
+matched the preserved tree; all63 preserved lab files matched by SHA256. Only
+three intended config/test/guide files differed from already-published fa07759.
+The clone HEAD/index were advanced to that already-published descendant without
+checking out/overwriting files. Validation wording was then updated in the two
+guides to record the measured scope and matching fixed-ZRELADDR requirement.
+
+Rerun locally after restoration (no device access):
+  TMPDIR="$PWD/target/tmp" CARGO_TARGET_DIR="$PWD/target" cargo test --locked -p xtask
+  TMPDIR="$PWD/target/tmp" cargo test --locked --manifest-path tools/arm32-kexec/Cargo.toml --example arm32-kexec-smoke
+  rustfmt --check --edition 2024 --config skip_children=true xtask/src/commands/ci_matrix.rs
+  git diff --check
+  python3 tools/arm32-kexec/check-decompressor.py target/container/kernel/qcom/msm8930-samsung-expressltexx/arch/arm/boot/compressed/vmlinux
+xtask-tests.log: test result: ok. 54 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.02s
+arm32-tests.log: test result: ok. 45 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.03s
+
+The final config and regression-test bytes were verified identical to the
+preserved hardware-tested versions. Effective config, gzip-expanded embedded
+CPIO, packaged kernel/DTB, and saved full BOOT readback were cross-checked.
+Original backups, raw logs and generated builds remain local and ignored;
+no device binaries or unfiltered bootloader command lines are committed here.

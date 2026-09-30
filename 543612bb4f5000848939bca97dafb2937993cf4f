@@ -1,0 +1,48 @@
+Validation: gzip kernel sections with appended DTBs
+Repository: https://github.com/samcday/pocketboot
+Commit: 543612bb4f5000848939bca97dafb2937993cf4f
+Sole parent/base: 79cdf784c476be70f7f58cd73b37dfaeb0bf1c6f (main)
+No Ferrari configuration, CPU-parking or boot-menu change in this PR.
+
+Root cause reproduced before this fix on CI parking artifact36504432549: flate2=1.1.9 MultiGzDecoder reports InvalidInput "invalid gzip header" after decoding12779520 bytes, because the next48897 bytes are an FDT, not another gzip member. The first member's CRC/footer is valid. The kernel section contains5083892 bytes.
+
+Fix: single-member BufRead gzip decoding in a loop retains member boundaries and validates every gzip member. Only one immediately appended v17-format-compatible FDT (optional zero trailing padding) is accepted. Header/block bounds, alignment/overlap, terminated reserve map and full tree structure are checked; unknown bytes/multiple DTBs/structural junk after FDT_END are rejected. Kernel preparation lives in KexecImage::new so both existing callers use explicit DTB > appended DTB > live fallback. Explicit DTBs do not excuse malformed kernel trailers. Raw/PE/zboot behavior is otherwise preserved; raw Image+DTB splitting is not added.
+
+Checks on final committed source:
+- cargo fmt --all -- --check; git diff --check: passed.
+- cargo test --locked --offline --workspace --features pocketpreboot/soc-msm8916:190 pocketboot tests passed,1 external-artifact test ignored in ordinary suite;17 preboot and53 xtask tests passed.
+- CARGO_TARGET_AARCH64_UNKNOWN_LINUX_MUSL_RUNNER=qemu-aarch64 cargo test --locked --offline -p pocketboot --target aarch64-unknown-linux-musl:190 passed,1 ignored.
+- cargo check --locked --offline -p pocketboot --target armv7-unknown-linux-musleabihf: passed. Existing libc::time_t and unused continue_then warnings remain.
+- The ignored inspect_supplied_android_image test was explicitly run for BOTH actual CI images, natively AND under ARM64 user-mode QEMU: all4 runs passed. The complete Android-header -> extracted kernel section -> prepared kernel/DTB path is exercised without any kexec syscall.
+
+Artifact verification used gh run download with name bootimg-qcom-msm8939-xiaomi-ferrari from each run below. Full boot.img hashes were checked, then Python independently read Androidv0 kernel_size at8, page_size at36, decompressed the section with zlib.decompressobj(31), required gzip.eof and FDT magic/totalsize matching unused_data length, and wrote expected kernel and appended.dtb files. The test compares every prepared byte against those independent expected files. Result table:
+[
+  {
+    "name": "recovery",
+    "run": "36504313638",
+    "sha256": "76bc61b4b7cee25adbf03df98f23b35a32a2a62afe37cc62c9009438ebe95766",
+    "boot_img_bytes": 5068816,
+    "kernel_section_bytes": 5064638,
+    "prepared_kernel_bytes": 10893320,
+    "dtb_bytes": 48693,
+    "native_and_arm64_qemu": "pass"
+  },
+  {
+    "name": "parking",
+    "run": "36504432549",
+    "sha256": "56cee5ca098c4ed66e3f845899cf7683ed7e738f991fdcfc051294723344caf0",
+    "boot_img_bytes": 5089296,
+    "kernel_section_bytes": 5083892,
+    "prepared_kernel_bytes": 12779520,
+    "dtb_bytes": 48897,
+    "native_and_arm64_qemu": "pass"
+  }
+]
+
+To reproduce the real-artifact check after independent extraction:
+POCKETBOOT_TEST_BOOT_IMAGE=<boot.img> POCKETBOOT_TEST_KERNEL=<decompressed-kernel> POCKETBOOT_TEST_DTB=<appended.dtb> cargo test --locked --offline -p pocketboot inspect_supplied_android_image -- --ignored --nocapture
+For ARM64, add --target aarch64-unknown-linux-musl and CARGO_TARGET_AARCH64_UNKNOWN_LINUX_MUSL_RUNNER=qemu-aarch64.
+
+Regression tests also cover synthetic Androidv0 gzip+DTB, the complete padded preboot envelope/inner BSS, Androidv2 explicit-DTB precedence, plain gzip/live fallback, multi-member gzip, bad CRC/ISIZE, truncation, bad FDT bounds/version/structure/reservation maps, multiple trees and trailing garbage. Independent review found no constructor/caller/member-boundary regression and identified the post-FDT_END check, which was added and tested before final validation.
+
+Limits: all checks are host parsing/compile or user-mode emulation. No phone, flashing, real kernel handoff or direct-OEM boot. A running pocketboot must contain this fix to parse these images; changing only the image being uploaded to an old pocketboot does not fix its decoder. Direct-OEM hardware work remains opt-in with pem120; request posted at https://github.com/pem120/linux/issues/3#issuecomment-5902266159 .
