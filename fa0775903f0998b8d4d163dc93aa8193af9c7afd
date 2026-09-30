@@ -1,0 +1,75 @@
+# Expressltexx stock-wrapper hardware evidence
+
+Commit: fa0775903f0998b8d4d163dc93aa8193af9c7afd
+UTC: 2026-09-30T00:51:25.081859+00:00
+Device: Samsung GT-I8730 / samsung,expressltexx, serial 00001EB100006FAB.
+Stock aboot reports I8730XWANE1. User explicitly approved BOOT-only flashing
+and reboot. No writes were made to aboot, recovery, system, or userdata.
+No UART port was opened/taken over; the active host UART capture belonged to
+the independent DragonBoard session.
+
+Baseline boot partition /dev/mmcblk0p7: 10485760 bytes, read twice identically,
+SHA256 5b42e21d005d963ad969cd3b8d5f632f221ee84753c4218614caf41092084d73.
+Backup retained locally under target/expressltexx-lab/20260930-inventory/.
+Old wrapper: v0, pages2048, kernel80208000, ramdisk82400000, tags82200000,
+ramdisk_size=1. Old kernel was June22 7.1.0-rc3+ SMP with CPUs0-1; its /init
+contained the explicit ARM64-only legacy kexec_load error. It had no /bin/sh.
+
+Input candidate: GitHub CI run36637806530 artifact11065552396 for
+79e41ffde38ac634e5eb4b9ebe2925c5f885f8a9. ZIP digest verified against API:
+3e77769de8013b129d854b8b4afd816058b69dd05faf48b19349064f8b7ac1b2.
+Original boot.img SHA256:
+1fa16d2c6674240d5d9dc606d78fe6b9e4ad798fa68570755d43839361fb2491.
+
+Repacked with the actual cargo xtask bootimg writer; no kernel or userspace
+rebuild/substitution. Kernel+DTB payload checked byte-identical to CI input.
+Host independent decoder checked Android addresses, page size, appended DTB,
+ramdisk_size=1, padding, and boot-image SHA1. 54 xtask tests passed.
+
+Experiment1: one-byte ramdisk but empty header command line.
+fastboot -s 00001EB100006FAB flash boot boot.img
+Read back full BOOT via oem cat:/dev/mmcblk0p7 + get_staged, verified candidate
+prefix byte-for-byte before issuing fastboot reboot. Target returned in 5.7s
+on USB devnum22, with ADB shell working and possible=online=0.
+Stock aboot injected mem=100M console=null. DT still contained the correct
+six firmware RAM banks, but /proc/iomem was80000000-863fffff; MemTotal94608kB,
+CMA0. SMEM reservation/ioremap failed. This is observed hardware behavior,
+not speculation based on wrapper format alone.
+
+Experiment2: change ONLY header command line to
+  earlycon=msm_serial_dm,0x16440000 console=ttyMSM0,115200n8
+Repack, BOOT-only flash, full readback check, cold reboot. Kernel+DTB bytes
+remain identical to experiment1. ADB returned; possible=online=0;
+/proc/iomem restored all firmware banks starting80200000; MemTotal925332kB;
+CmaTotal65536kB; active console ttyMSM0; SMEM warnings disappeared.
+Kernel code resource is still absent from this RAM map, consistent with a
+separate appended-DTB decompressor base issue. That is not claimed fixed by
+this header change and is under separate investigation. No kexec attempted.
+
+Input/display/storage observations: simpledrm registered at88a00000, four
+input devices enumerate (power key, gpio keys, touchkeys, maXTouch), eMMC and
+partitions enumerate. This is driver registration, not visual/touch-event
+validation or SD-card/OS boot proof. CPU DT count warning remains expected
+with two DT CPUs and this UP kernel.
+
+Host peculiarity: the exported Delta directory has no .git and bare git
+would resolve the user's outer checkout. Publication uses isolated metadata
+under target/publication/repository.git with an explicit worktree; outer
+checkout/index/branches were not changed. /tmp scratch quota was exhausted,
+so generated data and TMPDIR stayed under the attached worktree's target/.
+
+Artifact hashes:
+boot.img: 4395008 bytes sha256 696598fd387e42a92ee52d3bcc888606442de4bbb46d848da4ec9fb6c2765c1d
+boot-uart.img: 4395008 bytes sha256 ef536468f6c79b6222b4cd72fd07f70f27e4e3bb99e6f5e9e1f4c497df817813
+readback.img: 10485760 bytes sha256 a2614f7b20f7eace3a5f74eaa7ab71317811744357a14ac57ff613f996ad44b9
+uart-readback.img: 10485760 bytes sha256 73ccdfadc6426161c8f5e9feb68eefdbddce35fd80d33fd52ed294a3c847ddaa
+
+Selected final cold-boot serial-in-kmsg observations:
+[    0.000000] Linux version 7.1.0-rc3+ (root@e59a6135bfa1) (Debian clang version 19.1.7 (3+b1), Debian LLD 19.1.7) #1 Tue Sep 29 22:13:10 UTC 2026
+[    0.000000] OF: reserved mem: 0x80000000..0x801fffff (2048 KiB) nomap non-reusable smem@80000000
+[    0.002651] Memory: 857668K/937984K available (4811K kernel code, 544K rwdata, 1020K rodata, 1352K init, 195K bss, 14008K reserved, 65536K cma-reserved, 432128K highmem)
+[    0.084439] [drm] Initialized simpledrm 1.0.0 for 88a00000.framebuffer on minor 0
+[    0.332804] input: tm2-touchkey as /devices/platform/i2c-touchkey/i2c-0/0-0020/input/input1
+[    0.491113] atmel_mxt_ts 1-004a: Touchscreen size X479Y799
+[    0.643464] mmcblk0: mmc0:0001 SEM08G 7.28 GiB
+[    1.144107]  WARN pocketboot: no boot entries discovered
