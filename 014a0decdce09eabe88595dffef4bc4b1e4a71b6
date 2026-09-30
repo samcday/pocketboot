@@ -47,3 +47,51 @@ Local notes.rewriteRef=refs/notes/evidence was configured in this review clone.
 Other clones do not inherit that config. Rebase/amend note copying preserves
 historical evidence; it does not revalidate changed code. A GitHub squash merge
 needs explicit note transfer to the new merge commit and a separate notes push.
+
+## pmOS SD userspace-discovery audit
+
+Recorded 2026-09-30T19:40:29.677181+00:00.
+Read-only source audit at pocketboot 014a0decdce09eabe88595dffef4bc4b1e4a71b6, following pem120's report
+that PocketBoot runs but does not find pmOS on SD. No reporting-unit logs,
+card layout, image identity or boot files have been supplied yet. No edits,
+new tests/builds or hardware actions were performed for this userspace audit.
+The separate SD-host audit is in the evidence note on a7d0397 in this repo.
+
+Confirmed source behavior:
+- Discovery accepts removable mmcblk disks (bootflow.rs:377-413,1999-2033).
+- Top-level MBR selection accepts primary 0xea entries only, not active 0x83
+  (579-620). GPT accepts ESP or XBOOTLDR type GUIDs (998-1003).
+- Active 0x83 discovery is only for a nested MBR inside an outer kernel
+  partition whose PARTNAME is exactly userdata (652-759), not top-level SD.
+- ESP mounts vfat only. XBOOTLDR/nested candidates try ext4/ext2/vfat.
+  Mounts are read-only/nosuid/nodev/noexec; ext mounts use noload (1022-1090).
+- Scanners accept BLS loader/entries/*.conf or extlinux/extlinux.conf and
+  boot/extlinux/extlinux.conf (197-212,1093-1155). Labels such as pmOS_boot
+  do not select a boot partition. boot.img and loose kernel files are not
+  autodiscovered; staged fastboot Android-image boot is a separate path.
+- Config payload paths must exist and remain inside the mounted partition.
+  BLS rejects non-ARM64 architecture declarations. Extlinux supports an
+  explicit fdt/devicetree, but ignores fdtdir and includes. An entry with a
+  whitespace-separated cmdline argument beginning with $ is hidden from
+  the menu (bootflow.rs:92-101; main.rs:382-403).
+- Discovery runs once after settling (main.rs:171-207). Settle snapshots
+  exclude removable disks and can finish after 350ms quiet with internal
+  storage present, with a five-second maximum (settle.rs:12-94,378-387).
+  Removable block events can reset the quiet timer while settling is active.
+  No later hotplug rescan exists: late insertion/enumeration is a distinct
+  possible failure, not established as the cause of this report.
+
+Diagnostic caveats:
+- fastboot partition getvars filter removable disks; their absence there is
+  not proof of kernel invisibility (fastboot/commands/partitions.rs:136-141).
+- GPT/MBR rejection details are DEBUG, below this target's INFO log level.
+- UMS defaults writable; do not use it to collect this read-only evidence.
+- Current pmbootstrap API docs establish separate boot/root and pmOS labels;
+  an archived implementation used msdos/ext2/active boot partitions. Neither
+  establishes this card's actual/current layout.
+
+Next evidence, before changing code: exact image and installation method;
+card present before PocketBoot startup; missing menu entry vs failed launch;
+/proc/partitions and MMC/SDHCI/discovery logs from that tablet. If visible,
+inspect its partition type/filesystem and BLS/extlinux config/payload paths.
+Do not repartition, flip card-detect polarity or add drivers speculatively.
