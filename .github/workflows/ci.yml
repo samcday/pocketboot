@@ -84,6 +84,40 @@ jobs:
           echo "The CI Image workflow may still be running, or this PR may need a ci-ok label."
           exit 1
 
+  unit-tests:
+    name: Unit tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    needs: ci-image
+    container:
+      image: ${{ needs.ci-image.outputs.image }}
+      credentials:
+        username: ${{ github.actor }}
+        password: ${{ secrets.GITHUB_TOKEN }}
+
+    steps:
+      - name: Checkout pocketboot
+        uses: actions/checkout@v7
+        with:
+          repository: ${{ github.event.pull_request.head.repo.full_name || github.repository }}
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+
+      - name: Set up Rust cache
+        uses: actions-rust-lang/setup-rust-toolchain@v1
+        with:
+          rustflags: ""
+          cache-shared-key: pocketboot-tests-df-${{ hashFiles('.github/Dockerfile') }}
+          cache-bin: false
+
+      - name: Test runtime and build configuration
+        run: |
+          cargo test --locked -p pocketboot --bin pocketboot
+          cargo test --locked -p xtask
+
+      - name: Test standalone ARM32 harness
+        run: cargo test --locked --manifest-path tools/arm32-kexec/Cargo.toml
+
   ci-matrix:
     name: CI matrix
     runs-on: ubuntu-latest
@@ -126,6 +160,7 @@ jobs:
     needs:
       - ci-image
       - ci-matrix
+      - unit-tests
     if: needs.ci-matrix.outputs.has_builds == 'true'
     container:
       image: ${{ needs.ci-image.outputs.image }}

@@ -7,9 +7,9 @@ publish = false
 # Keep the PID 1 harness independent of pocketboot's UI/build dependencies.
 [workspace]
 
-[[example]]
+[[bin]]
 name = "arm32-kexec-smoke"
-path = "../../examples/arm32-kexec-smoke.rs"
+path = "src/main.rs"
 
 [dependencies]
 flate2 = "1"
