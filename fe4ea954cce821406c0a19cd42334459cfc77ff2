@@ -152,3 +152,5 @@ Test runtime and build configuration: success (2026-09-30T07:13:50Z to 2026-09-3
 Test standalone ARM32 harness: success (2026-09-30T07:14:42Z to 2026-09-30T07:14:45Z)
 The kernel/boot-image matrix was still running when this note was added.
 Separate Claude Code Review run 36682400931 failed with result is_error:true after 437ms, one turn and empty modelUsage. The available log did not expose the cause; this is not a completed code review.
+
+Independent review addendum: configured Kimi K3 reviewer found no actionable correctness defects in the reviewed runtime/FDT/placement changes, cross-checking Linux source 3bc07d096bddd33218b8c13b9fa30ffdaba3c050 and rerunning 207 runtime, 53 xtask and 56 standalone tests. Its isolated snapshot did not include the final deletion of the root example or the gzip/read_exact_at harness adjustment. The parent verified both in published commit fe4ea954cce821406c0a19cd42334459cfc77ff2 via git object inspection and Cargo metadata; the final three-case QEMU and negative-control evidence above was collected with those exact changes. No new finding remained from the independent review.
