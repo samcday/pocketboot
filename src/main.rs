@@ -27,6 +27,7 @@ mod reaper;
 mod runtime;
 mod settle;
 mod ui;
+mod usb_role;
 mod zboot;
 
 type Result<T> = std::result::Result<T, String>;
@@ -68,6 +69,7 @@ async fn run() -> Result<()> {
 
     kmsg::init_tracing(&cmdline);
     tracing::info!("starting up");
+    let usb_role = usb_role::Policy::from_cmdline(&cmdline)?;
     reaper::spawn();
     getty::spawn(&cmdline);
 
@@ -103,7 +105,7 @@ async fn run() -> Result<()> {
             None
         }
     };
-    let gadget = gadget::Gadget::new(serialno.clone());
+    let gadget = gadget::Gadget::new(serialno.clone()).with_usb_role(usb_role);
     let acm = cmdline.is_set(ACM_CMDLINE_PARAM);
     let fastboot_thread = gadget
         .spawn(gadget::Mode::Fastboot {

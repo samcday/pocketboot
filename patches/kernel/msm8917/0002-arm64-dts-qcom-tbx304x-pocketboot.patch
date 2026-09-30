@@ -1,5 +1,5 @@
 From: PocketBoot developers <noreply@pocketboot.org>
-Subject: [PATCH 2/5] arm64: dts: qcom: tbx304x: minimal LK2nd handoff
+Subject: [PATCH 2/7] arm64: dts: qcom: tbx304x: minimal LK2nd handoff
 
 PocketBoot-only boot policy, not a general-purpose board-port change:
 
@@ -13,6 +13,8 @@ domains and regulators instead of taking native display ownership.
 Use USB only as a peripheral for initial diagnostics. Drop the charger
 extcon and host VBUS dependencies so gadget probing does not need the
 SMBCHG driver or its battery/charging policy.
+Expose the existing role-switch API so PocketBoot can explicitly request
+device role for this extcon-free bootstrap.
 
 Keep the board port's remaining memory reservations and PSCI CPU method.
 No RAM size, CPU parking protocol or native panel assumptions are added.
@@ -59,7 +61,7 @@ diff --git a/arch/arm64/boot/dts/qcom/msm8917-lenovo-tbx304x.dts b/arch/arm64/bo
  		ramoops_mem: ramoops@8ee00000 {
  			compatible = "ramoops";
  			reg = <0x0 0x8ee00000 0x0 0x80000>;
-@@ -448,9 +425,7 @@
+@@ -448,9 +425,8 @@
  };
  
  &usb {
@@ -67,6 +69,7 @@ diff --git a/arch/arm64/boot/dts/qcom/msm8917-lenovo-tbx304x.dts b/arch/arm64/bo
 -	extcon = <&pmi8950_smbcharger>, <&pmi8950_smbcharger>;
 -	vbus-supply = <&otg_vbus>;
 +	dr_mode = "peripheral";
++	usb-role-switch;
  	status = "okay";
  };
  

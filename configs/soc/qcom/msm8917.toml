@@ -17,6 +17,8 @@ RPMSG_QCOM_SMD = true
 QCOM_SMD_RPM = true
 QCOM_CLK_SMD_RPM = true
 QCOM_RPMPD = true
+# RPM performance-state tables need OPP parsing, not CPU frequency scaling.
+PM_OPP = true
 
 # Dedicated MSM8917 clock/pinctrl drivers in the pinned msm89x7 tree
 COMMON_CLK_QCOM = true
@@ -43,6 +45,7 @@ MMC_SDHCI_MSM = true
 USB_CHIPIDEA = true
 USB_CHIPIDEA_UDC = true
 USB_CHIPIDEA_MSM = true
+USB_ROLE_SWITCH = true
 # This tree's strict merge script accepts =n for hidden symbols, but rejects
 # "# CONFIG_... is not set" when Kconfig omits the symbol (EHCI is disabled).
 USB_CHIPIDEA_HOST = { raw = "n" }

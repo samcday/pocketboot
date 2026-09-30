@@ -1,5 +1,5 @@
 From: Sam Day <me@samcday.com>
-Subject: [PATCH 4/5] clk: qcom: apcs-msm8916: get the PLL from the clock device
+Subject: [PATCH 4/7] clk: qcom: apcs-msm8916: get the PLL from the clock device
 
 The APCS mailbox driver assigns the clock device its clock-controller
 child's firmware node when one exists, or reuses the mailbox node for

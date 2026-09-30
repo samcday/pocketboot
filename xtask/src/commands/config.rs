@@ -769,7 +769,7 @@ mod tests {
         assert_eq!(source.scope, KernelSourceScope::Device);
         assert_eq!(source.remote, "https://github.com/pem120/linux-msm89x7.git");
         assert_eq!(source.sha, "a51b91b503307d35902447dd1f90db765372cf3b");
-        assert_eq!(source.patches.len(), 5);
+        assert_eq!(source.patches.len(), 7);
         for patch in &source.patches {
             assert!(workspace_root.join(patch).is_file());
         }
@@ -791,11 +791,13 @@ mod tests {
             "QCOM_APCS_IPC",
             "QCOM_SMD_RPM",
             "QCOM_RPMPD",
+            "PM_OPP",
             "REGULATOR_QCOM_SMD_RPM",
             "MMC_SDHCI_MSM",
             "USB_CHIPIDEA",
             "USB_CHIPIDEA_UDC",
             "USB_CHIPIDEA_MSM",
+            "USB_ROLE_SWITCH",
             "PHY_QCOM_USB_HS_28NM",
             "USB_CONFIGFS_ACM",
             "USB_CONFIGFS_F_FS",
@@ -813,6 +815,10 @@ mod tests {
         }
         assert!(kconfig.contains("CONFIG_NR_CPUS=4\n"));
         assert!(!kconfig.contains("CONFIG_ARM64_SPIN_TABLE_KEXEC=y"));
+        assert!(!kconfig.contains("CONFIG_MODULES=y"));
+        assert!(!kconfig.contains("CONFIG_CPU_FREQ=y"));
+        assert!(!kconfig.contains("CONFIG_QCOM_A53PLL=y"));
+        assert!(!kconfig.contains("CONFIG_QCOM_CLK_APCS_MSM8916=y"));
         assert!(!kconfig.contains("CONFIG_USB_DWC3=y"));
         assert!(!kconfig.contains("CONFIG_DRM_MSM=y"));
         assert!(!kconfig.contains("CONFIG_RUST=y"));
@@ -846,6 +852,8 @@ mod tests {
         assert!(args.contains(&"lk2nd.pass-ramoops"));
         assert!(!args.contains(&"lk2nd.pass-ramoops=zap"));
         assert!(args.contains(&"deferred_probe_timeout=5"));
+        assert!(args.contains(&"pocketboot.log=info"));
+        assert!(args.contains(&"pocketboot.usb_role=device"));
         let panic_args = args
             .iter()
             .copied()

@@ -1,9 +1,10 @@
 # TB-X304F experimental PocketBoot build
 
 This is an **LK2nd-first diagnostic target**, not direct-stock-boot support or
-a fully validated Linux port. A retained boot log confirms Linux and
-PocketBoot `/init` startup; usable USB, storage and visible framebuffer output
-remain bring-up goals. No flashing is required by the build, and no hardware
+a fully validated Linux port. Three normal RAM-boots now verify PocketBoot
+USB fastboot, automatic eMMC discovery and live log retrieval; a read-only GPT
+capture matches the original backup. Visible framebuffer output and kexec
+remain unverified. No flashing is required by the build, and no hardware
 commands are included here.
 
 ## Build
@@ -23,7 +24,7 @@ The [device config](../configs/device/qcom/msm8917-lenovo-tbx304x.toml) pins
 [`pem120/linux-msm89x7`, `lenovo-tbx304`](https://github.com/pem120/linux-msm89x7/tree/a51b91b503307d35902447dd1f90db765372cf3b)
 at `a51b91b503307d35902447dd1f90db765372cf3b` (Linux 7.0.9).
 `xtask` fetches it beneath
-`target/kernel/src/msm8917/msm8917-lenovo-tbx304x/` and applies the five
+`target/kernel/src/msm8917/msm8917-lenovo-tbx304x/` and applies the seven
 [maintained patches](../patches/kernel/msm8917/README.md). A second invocation
 recognizes the applied series. It does not reset conflicting source edits.
 
@@ -58,10 +59,10 @@ actual drivers:
 | Four Cortex-A53 CPUs, MPIDRs `0x100`–`0x103`; `enable-method = "psci"` | ARM64 PSCI, SMC conduit; no spin-table patch or preboot shim |
 | `qcom,gcc-msm8917`, `qcom,msm8917-pinctrl` | `MSM_GCC_8917`, `PINCTRL_MSM8917` (dedicated drivers in this fork) |
 | RPM IPC through APCS mailbox channel 0 | `MAILBOX`, `QCOM_APCS_IPC`; no CPU PLL ownership required by register accesses |
-| SMEM/TCSR, SMD RPM clocks, domains and regulator votes | `QCOM_SMEM`, `HWSPINLOCK_QCOM`, `RPMSG_QCOM_SMD`, `QCOM_SMD_RPM`, `QCOM_CLK_SMD_RPM`, `QCOM_RPMPD`, `REGULATOR_QCOM_SMD_RPM` |
+| SMEM/TCSR, SMD RPM clocks, domains and regulator votes | `QCOM_SMEM`, `HWSPINLOCK_QCOM`, `RPMSG_QCOM_SMD`, `QCOM_SMD_RPM`, `QCOM_CLK_SMD_RPM`, `QCOM_RPMPD`, `PM_OPP`, `REGULATOR_QCOM_SMD_RPM` |
 | PM8937/PMI8950 SPMI | PMIC arbiter, MFD and PMIC pinctrl |
 | eMMC/SD `qcom,sdhci-msm-v4` | `MMC_SDHCI_MSM`, TLMM and PM8937 RPM supply dependencies |
-| USB `qcom,ci-hdrc` | ChipIdea MSM glue and UDC, not DWC3 |
+| USB `qcom,ci-hdrc` | ChipIdea MSM glue, UDC and `USB_ROLE_SWITCH`, not DWC3 |
 | USB `qcom,usb-hs-28nm-femtophy` | `PHY_QCOM_USB_HS_28NM` and PM8937 RPM supplies, not the older `PHY_QCOM_USB_HS` |
 
 Only verified selection metadata is added for the F: APQ8017 ID 307, revision
@@ -94,13 +95,24 @@ not the nominal header address `0x80080000`.
 The current diagnostic command line is:
 
 ```text
-console=tty0 panic=-1 deferred_probe_timeout=5 loglevel=8 ignore_loglevel lk2nd.pass-simplefb lk2nd.pass-ramoops clk_ignore_unused pd_ignore_unused regulator_ignore_unused
+console=tty0 panic=-1 deferred_probe_timeout=5 pocketboot.log=info pocketboot.usb_role=device loglevel=8 ignore_loglevel lk2nd.pass-simplefb lk2nd.pass-ramoops clk_ignore_unused pd_ignore_unused regulator_ignore_unused
 ```
 
-`deferred_probe_timeout=5` makes the built-in-only kernel report outstanding
-probe reasons before the current no-UDC failure exits `/init`. The default
-zero timeout did not schedule that diagnostic work. This does not disable
-firmware dependency checking or supply a missing provider.
+`deferred_probe_timeout=5` permits a bounded wait for asynchronous RPM
+providers and reports outstanding probe reasons. The seventh patch makes
+the built-in-only kernel honor that positive timeout instead of returning
+`-ENODEV` immediately after initcalls. The default zero and negative
+built-in-only behavior, and module-enabled behavior, are preserved.
+This does not disable firmware dependency checking.
+
+`pocketboot.log=info` enables userspace bind/role/discovery messages separately
+from kernel printk filtering. `pocketboot.usb_role=device` opts into requesting
+device role after the selected UDC is bound. PocketBoot resolves the UDC's
+controller and requires exactly one role switch with the same canonical
+`device` parent; missing or ambiguous matches fail rather than writing an
+unrelated controller. Other devices make no role-switch accesses by default.
+Only `device` is supported, not host mode. This is bootstrap policy, not
+complete charger, connector or hotplug management.
 
 `panic=-1` requests immediate reboot on panic instead of the default
 `panic=0` indefinite wait used by the first four trials. It is not a watchdog
@@ -165,10 +177,10 @@ neither the shared builder nor kernel runtime was changed to bypass checks.
 The successful build had three existing PocketBoot Rust warnings
 (`libc::time_t` twice, unused `continue_then`), not kernel/DT build errors.
 
-The shared-ramoops trial now confirms Linux entry, PSCI/SMP, framebuffer-driver
-registration, PocketBoot init execution and RAM-log retention through one
-manual recovery cycle. Still unvalidated: gadget enumeration, storage I/O,
-visible framebuffer output and kexec.
+The normal image now confirms Linux entry, PSCI/SMP, framebuffer-driver
+registration, PocketBoot init, USB fastboot and eMMC read I/O across three
+RAM-boots. Retained logs survive the tested recovery path. Still unvalidated:
+visible framebuffer output, large USB transfers, storage writes and kexec.
 This kernel also lacks the existing MSM8916 series' ChipIdea SG-bounce and
 FunctionFS reset-work fixes; large fastboot uploads and gadget teardown must
 not be assumed reliable. Touch, native panel/GPU, Wi-Fi and audio are deferred.
@@ -235,4 +247,21 @@ The child-layout DT passes the targeted APCS binding check. The otherwise
 disabled clock driver was explicitly compiled as an object for compatibility
 validation, but is not linked into the hardware image. Kernel image, config,
 initramfs and command line remain byte-identical to the deferred-probe trial;
-only the DT changes. This is not CPU-frequency-scaling validation.
+only the DT changes in that candidate. This is not CPU-frequency-scaling
+validation.
+
+The recovered clock-child log then confirmed RPM regulator registration and
+exposed `-EOPNOTSUPP` when RPMPD tried to add its OPP table. `PM_OPP` is hidden
+Kconfig support, so the sixth patch selects it from the driver which requires
+it; the image contract also requires it. CPU frequency scaling, A53 PLL and
+APCS clock drivers stay disabled.
+
+A bounded diagnostic experiment proved USB device-role selection and late
+eMMC re-probing independently. Normal startup now handles the former through
+the opt-in role policy, and the seventh kernel patch removes the need for the
+latter by waiting for the late power-domain provider. The tested normal image
+is 4,810,752 bytes, SHA-256
+`45ad387ee315585badce7bee2a5e1792c7482bf907c998c1bf24a79f939710d4`.
+It contains no probe wrapper or timed diagnostic panic. See the
+[normal-boot evidence](tb-x304f-bringup.md#verified-normal-usb-and-emmc-boot)
+and the separate [lab probe guide](tb-x304f-probe.md).

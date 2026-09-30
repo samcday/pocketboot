@@ -1,0 +1,26 @@
+From: Sam Day <me@samcday.com>
+Subject: [PATCH 6/7] pmdomain: qcom: rpmpd: select OPP support
+
+RPMPD supplies performance states and registers its DT OPP tables through
+the generic power-domain core. Without PM_OPP, the table-registration
+helper is a stub returning -EOPNOTSUPP and the provider fails to probe.
+
+This is visible on a minimal MSM8917/APQ8017 kernel without CPU frequency
+scaling: the CX provider reports "Failed to add OPP table for index 0".
+Select the OPP framework for this driver's own dependency, without
+requiring an unrelated CPU-frequency driver to pull it in.
+
+Base: pem120/linux-msm89x7 a51b91b503307d35902447dd1f90db765372cf3b
+Assisted-by: LLM
+
+diff --git a/drivers/pmdomain/qcom/Kconfig b/drivers/pmdomain/qcom/Kconfig
+--- a/drivers/pmdomain/qcom/Kconfig
++++ b/drivers/pmdomain/qcom/Kconfig
+@@ -32,6 +32,7 @@
+ 	depends on QCOM_SMD_RPM
+ 	select PM_GENERIC_DOMAINS
+ 	select PM_GENERIC_DOMAINS_OF
++	select PM_OPP
+ 	help
+ 	  QCOM RPM Power domain driver to support power-domains with
+ 	  performance states. The driver communicates a performance state

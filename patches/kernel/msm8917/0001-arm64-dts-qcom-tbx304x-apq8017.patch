@@ -1,5 +1,5 @@
 From: PocketBoot developers <noreply@pocketboot.org>
-Subject: [PATCH 1/5] arm64: dts: qcom: tbx304x: include APQ8017 selection ID
+Subject: [PATCH 1/7] arm64: dts: qcom: tbx304x: include APQ8017 selection ID
 
 The Wi-Fi TB-X304F reports soc_id 307 (APQ8017) and board-id
 <0x1000b 0>. Retain the family compatible and MSM8917 ID from the board

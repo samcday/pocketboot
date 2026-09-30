@@ -1,5 +1,5 @@
 From: Sam Day <me@samcday.com>
-Subject: [PATCH 5/5] arm64: dts: qcom: msm8917: separate the APCS clock provider
+Subject: [PATCH 5/7] arm64: dts: qcom: msm8917: separate the APCS clock provider
 
 With RPM IPC using APCS mailbox channel 0, declaring the RPM-provided
 reference clock on the mailbox creates a probe dependency loop:

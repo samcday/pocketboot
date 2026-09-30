@@ -1,8 +1,8 @@
 # Lenovo Tab 4 10 TB-X304F bring-up
 
-The first goal is a repeatable PocketBoot boot with a working USB diagnostic
-path, before installing PocketFed or replacing Android. This is a bring-up
-record, not a claim that PocketBoot supports this tablet yet.
+The experimental profile now has repeatable PocketBoot RAM-boots, working USB
+fastboot diagnostics and verified eMMC reads. This is a bring-up record, not
+a fully validated tablet port or a PocketFed installation.
 
 ## Current status
 
@@ -14,10 +14,18 @@ record, not a claim that PocketBoot supports this tablet yet.
 - At the owner's explicit request, **only `boot` was erased** after verifying
   the original 64 MiB backup. A normal reboot now falls back to stock fastboot
   in about 2.1 seconds. Recovery, aboot and GPT were not changed.
-- Retained logs **confirm Linux and PocketBoot `/init` startup**, all four CPUs
-  online and simpledrm/fbcon registered. Visible display output is unverified.
-  The mailbox follow-up no longer logs the old syscon-regmap error, but still
-  discovers no disks or UDC and panics when PID 1 exits.
+- The normal image **boots PocketBoot with USB and eMMC automatically**.
+  Three RAM-boots verified `product=pocketboot`, `is-userspace=yes` and
+  `compatible=lenovo,tbx304x` in 2.062, 2.338 and 1.612 seconds from the host's
+  Linux boot invocation. No diagnostic wrapper or manual driver re-probe is
+  present in this image.
+- All 48 GPT partitions appear on the 14.6 GiB HS400 eMMC. A 17408-byte
+  read of the primary GPT through Linux and USB matched the original EDL
+  backup byte-for-byte. This validates small read-only transfers, not large
+  uploads, writes or kexec.
+- Linux starts all four CPUs and PocketBoot reports its 800x1280 DRM UI ready.
+  Visible display output still needs confirmation; native display, charging,
+  Wi-Fi and audio are not validated.
 - The target now passes `panic=-1`. With `boot` empty, one complete unattended
   panic cycle returned to verified stock fastboot in 15.5 seconds from the
   Linux boot command; lk2nd reloaded and the crash log was captured by
@@ -26,10 +34,11 @@ record, not a claim that PocketBoot supports this tablet yet.
   It cannot boot while `boot` is empty; no factory reset has been issued.
   Preserve the private original images before cleaning `target/` or removing
   the worktree.
-- A binding-based APCS clock-child candidate has now been attempted. It
-  produced neither tablet USB nor an automatic fastboot return within
-  60 seconds. Its runtime progress is unknown pending connection checks and
-  a new retained-log capture; this is not yet proof of a hard hang.
+- Normal PocketBoot reboot returned to stock fastboot in 4.041 and
+  6.301 seconds in the repeat trials. The tablet was left running PocketBoot.
+  Fastboot and ADB shells work, and USB remained configured at high speed
+  after more than 15 minutes. No additional partition was written during
+  these diagnostics.
 
 ## Verified starting state
 
@@ -706,9 +715,90 @@ LK2nd accepted one RAM-only boot in 0.384 seconds. No tablet fastboot
 interface appeared during 60.05 seconds; a subsequent host check found
 neither ADB nor a USB device on the tablet's physical port. This differs from
 the earlier 15.5-second panic return, but does not identify whether Linux
-stalled or is running without host USB. Connection and screen checks were
-requested before a manual reset for RAM-log retrieval. No additional partition
-write or automatic second kernel trial was made.
+stalled or is running without host USB. The owner saw a black screen and
+returned it to fastboot with the buttons. No additional partition write or
+automatic second kernel trial was made.
+
+The recovered raw capture has SHA-256
+`daa042ec91605751d06c54596f32478078f09d6733de00975f32e100a3059b97`.
+Its current console reaches `/init`, initializes RPM regulators and continues
+through 31.715 seconds. Both compressed dmesg slots are byte-identical to the
+previous trial and are stale, not evidence of a new panic. The new failure is
+`genpd_provider cx: error -95: Failed to add OPP table for index 0`.
+The built config lacks `PM_OPP`, and the pinned OPP helper therefore returns
+`-EOPNOTSUPP`. The sixth patch selects that framework from RPMPD without
+enabling CPU frequency scaling.
+
+### Bounded USB and storage diagnostics
+
+The separate [probe initramfs](tb-x304f-probe.md) preserves PocketBoot as PID 1,
+records bounded read-only state and requests an explicitly marked diagnostic
+panic unless cancelled. It is opt-in and not part of normal images.
+
+With `PM_OPP=y` and `pocketboot.log=info`, the RPMPD error disappeared and
+`ttyMSM0` registered. The first bounded trial positively logged
+`USB gadget bound udc=ci_hdrc.0`; sysfs nevertheless stayed `not attached`
+with speed `UNKNOWN`. No deferred devices or disks were listed. The
+deliberate panic returned to fastboot at 36.621 seconds and log capture
+completed by 37.836 seconds, without buttons.
+
+A second controlled image exposed the existing USB role-switch API, then
+requested device role through the switch whose canonical device parent matched
+the UDC. PocketBoot USB appeared and passed product/userspace/compatible checks
+plus an OEM-shell `uname -r` command at **5.471 seconds**.
+After a later snapshot confirmed RPMPD bound, a one-time re-probe of the still
+unbound `7824900.mmc` detected HS400 eMMC and all 48 partitions at 12.1 seconds.
+The automatic diagnostic recovery completed and preserved the whole log.
+
+These controls isolated two issues rather than serving as permanent workarounds:
+
+- This charger/extcon-free bootstrap needs an explicit USB device-role request.
+  The normal image now opts into `pocketboot.usb_role=device`; it writes only
+  the unique role switch matching the UDC after binding. Other targets retain
+  their existing behavior unless explicitly opted in.
+- The built-in-only kernel gave up on the late RPM power-domain provider after
+  initcalls, ignoring the requested positive probe timeout. The seventh patch
+  honors that bounded wait. Default and negative built-in timeout behavior,
+  and all module-enabled behavior, remain unchanged. No global module-loading
+  or firmware-dependency bypass was added.
+
+### Verified normal USB and eMMC boot
+
+The ordinary `cargo xtask build qcom/msm8917-lenovo-tbx304x` path produced a
+4,810,752-byte image, SHA-256
+`45ad387ee315585badce7bee2a5e1792c7482bf907c998c1bf24a79f939710d4`.
+Its initramfs contains the normal ELF `/init`, not the diagnostic wrapper;
+there are no `pocketboot.probe*` flags or manual re-probe actions.
+
+| Normal-image trial | Linux boot command to verified PocketBoot USB | eMMC |
+| --- | --- | --- |
+| 1 | 2.062 s | 30535680 sectors, 48 partitions |
+| 2 | 2.338 s | 30535680 sectors, 48 partitions |
+| 3 | 1.612 s | 30535680 sectors, 48 partitions |
+
+These are host-side RAM-boot timings from lk2nd, not cold-power-on times.
+All three trials retrieved a live kernel log over USB. The first also queried
+the 64 MiB boot partition and read the first 34 sectors of `/dev/mmcblk0`
+without writing it. The 17408-byte result matched the original GPT capture,
+SHA-256 `d71622f41619be3ac060171252de68dee0a818c322fae22ebea6ce809f8b86f2`.
+
+The later normal boots show eMMC enumeration and the device-role request
+during startup, with local flash settling automatically. They no longer
+contain the old OPP error, the SDHCI "assuming no driver" warning, or probe
+wrapper markers. Normal `fastboot reboot` returned to stock fastboot in
+4.041 and 6.301 seconds between trials; each then reloaded lk2nd and the
+same PocketBoot image without buttons.
+
+The final health check found 948.49 seconds of uptime with the UDC still
+`configured` at `high-speed`. An explicitly selected ADB shell also returned
+the expected kernel release. PocketBoot was left running after these checks.
+
+Validation also includes 190 PocketBoot tests, 54 build-tool tests, 15 probe
+archive tests, ShellCheck, formatting, image/config/DT checks and independent
+source review. The actual deferred-probe helper was compiled into a host
+truth-table check for modules on/off, pre/post-initcalls and timeout -1/0/5.
+Small USB reads work; large transfers, writes, kexec, PocketFed and physical
+display output still require separate validation.
 
 ## First-boot milestones
 

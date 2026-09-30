@@ -8,8 +8,9 @@ Only the `msm8917-lenovo-tbx304x` device config selects this series.
    bootloader selection ID, preserving the source board's family identity.
 2. `0002-arm64-dts-qcom-tbx304x-pocketboot.patch` is PocketBoot-only policy:
    let LK2nd supply the actual simplefb node/reservation and make USB
-   peripheral-only without charger/extcon dependencies. It is not intended
-   as a general-purpose upstream board change.
+   peripheral-only with an explicit role-switch API instead of charger/extcon
+   dependencies. PocketBoot opts into device role for this target. This is not
+   intended as a general-purpose upstream board change.
 3. `0003-arm64-dts-qcom-msm8917-rpm-mailbox.patch` moves RPM IPC from the
    legacy APCS syscon path to mailbox channel 0, preserving offset 8/bit 0.
    This avoids a dependency on the CPU PLL provider and explicit PLL gating
@@ -21,6 +22,14 @@ Only the `msm8917-lenovo-tbx304x` device config selects this series.
    APCS clock inputs and provider into that child and updates CPU phandles.
    RPMCC can then depend on the mailbox without the mailbox depending on RPMCC.
    CPU PLL, APCS mux and CPU-frequency drivers remain disabled for bring-up.
+6. `0006-pmdomain-qcom-rpmpd-select-opp.patch` selects the OPP framework
+   required by RPMPD performance-state tables. Without it, the minimal kernel
+   reaches RPM regulator registration but RPMPD fails with `-EOPNOTSUPP`.
+   This does not enable CPU frequency scaling.
+7. `0007-driver-core-honor-builtin-probe-timeout.patch` honors an explicit
+   deferred-probe timeout with modules disabled, so asynchronously created
+   RPM power-domain providers can appear before SDHCI gives up. The default
+   zero-timeout and module-enabled behavior remain unchanged.
 
 Apply through `cargo xtask kernel-src qcom/msm8917-lenovo-tbx304x`; do not
 manually modify another kernel checkout. `xtask` applies the ordered series
@@ -29,9 +38,9 @@ revisions need a fresh generated source tree or deliberate reconciliation;
 the builder never resets conflicting source edits.
 
 See [build instructions and compatibility limits](../../../docs/tb-x304f-build.md).
-Compilation and DT inspection passed. The shared-ramoops trial's
-[recovered log](../../../docs/tb-x304f-bringup.md#recovered-boot-evidence-2026-09-30)
-confirms Linux, all four CPUs, simpledrm/fbcon registration and PocketBoot
-`/init` startup. That image had no UDC or discovered disks and eventually
-panicked after PID 1 exited; a usable display/USB/storage session is not yet
-established.
+Compilation and DT inspection passed. The
+[normal-image trials](../../../docs/tb-x304f-bringup.md#verified-normal-usb-and-emmc-boot)
+confirm Linux, all four CPUs, simpledrm/fbcon registration, PocketBoot USB
+fastboot and automatic eMMC discovery. A small read-only GPT transfer matched
+the original backup. Visible display output, large transfers, writes and
+kexec remain separate validation work.
