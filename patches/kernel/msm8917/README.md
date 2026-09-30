@@ -14,6 +14,13 @@ Only the `msm8917-lenovo-tbx304x` device config selects this series.
    legacy APCS syscon path to mailbox channel 0, preserving offset 8/bit 0.
    This avoids a dependency on the CPU PLL provider and explicit PLL gating
    through the syscon regmap; it does not enable CPU frequency scaling.
+4. `0004-clk-qcom-apcs-msm8916-use-clock-device.patch` gets the PLL input
+   from the clock device's firmware node, supporting both the dedicated child
+   and the legacy mailbox-node layout.
+5. `0005-arm64-dts-qcom-msm8917-apcs-clock-child.patch` moves the unchanged
+   APCS clock inputs and provider into that child and updates CPU phandles.
+   RPMCC can then depend on the mailbox without the mailbox depending on RPMCC.
+   CPU PLL, APCS mux and CPU-frequency drivers remain disabled for bring-up.
 
 Apply through `cargo xtask kernel-src qcom/msm8917-lenovo-tbx304x`; do not
 manually modify another kernel checkout. `xtask` applies the ordered series

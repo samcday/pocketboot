@@ -1,5 +1,5 @@
 From: Sam Day <me@samcday.com>
-Subject: [PATCH 3/3] arm64: dts: qcom: msm8917: use APCS mailbox for RPM
+Subject: [PATCH 3/5] arm64: dts: qcom: msm8917: use APCS mailbox for RPM
 
 The legacy qcom,ipc path creates a syscon regmap for APCS and acquires
 its first clock, the CPU PLL. Without the PLL provider, RPM SMD setup

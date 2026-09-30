@@ -23,7 +23,7 @@ The [device config](../configs/device/qcom/msm8917-lenovo-tbx304x.toml) pins
 [`pem120/linux-msm89x7`, `lenovo-tbx304`](https://github.com/pem120/linux-msm89x7/tree/a51b91b503307d35902447dd1f90db765372cf3b)
 at `a51b91b503307d35902447dd1f90db765372cf3b` (Linux 7.0.9).
 `xtask` fetches it beneath
-`target/kernel/src/msm8917/msm8917-lenovo-tbx304x/` and applies the three
+`target/kernel/src/msm8917/msm8917-lenovo-tbx304x/` and applies the five
 [maintained patches](../patches/kernel/msm8917/README.md). A second invocation
 recognizes the applied series. It does not reset conflicting source edits.
 
@@ -221,3 +221,18 @@ The follow-up instead replaces that legacy IPC property with
 offset 8/bit 0 through its own regmap without attaching a clock. Neither the
 CPU PLL nor CPU frequency scaling is enabled. The linked bring-up record
 distinguishes this source-level fix from subsequent hardware results.
+
+The deferred-probe log then exposed the remaining APCS-to-RPMCC dependency.
+The final two patches use the binding's `clock-controller` child: move the
+unchanged clock inputs and provider out of the mailbox node, and point all
+four CPU clock consumers at that child. The clock driver's PLL lookup uses
+the clock device, whose firmware node is either this child or the legacy
+mailbox node. Its register map and clock name still come from the parent.
+This preserves the original reference-clock source rather than substituting
+an unverified fixed-XO input, and keeps global firmware dependency checking.
+
+The child-layout DT passes the targeted APCS binding check. The otherwise
+disabled clock driver was explicitly compiled as an object for compatibility
+validation, but is not linked into the hardware image. Kernel image, config,
+initramfs and command line remain byte-identical to the deferred-probe trial;
+only the DT changes. This is not CPU-frequency-scaling validation.

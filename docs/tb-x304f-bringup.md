@@ -26,6 +26,10 @@ record, not a claim that PocketBoot supports this tablet yet.
   It cannot boot while `boot` is empty; no factory reset has been issued.
   Preserve the private original images before cleaning `target/` or removing
   the worktree.
+- A binding-based APCS clock-child candidate has now been attempted. It
+  produced neither tablet USB nor an automatic fastboot return within
+  60 seconds. Its runtime progress is unknown pending connection checks and
+  a new retained-log capture; this is not yet proof of a hard hang.
 
 ## Verified starting state
 
@@ -672,6 +676,39 @@ RPM's clock controller. RPM-managed supplies then block the USB PHY and both
 SDHCI controllers. The next change must address this specific relationship,
 not globally disable firmware dependency checking. LK2nd remained responsive
 after retrieving this trial's evidence.
+
+### APCS clock-child trial
+
+The binding-supported follow-up separates the mailbox from its clock
+controller instead of replacing the RPM reference with an unverified fixed-XO
+input. Clock inputs, names and `#clock-cells` move to a `clock-controller`
+child; all four CPU clock phandles follow it. The mailbox driver creates the
+clock platform device with that child's firmware node, retaining the old
+mailbox firmware node for legacy layouts. A companion patch makes the clock
+driver's PLL lookup use its own device, not the parent; the shared register map
+and existing clock name remain on the parent.
+
+Source review found no blockers. The five-patch series applies cleanly and
+idempotently; all 54 build-tool tests, formatting and whitespace checks pass.
+The compiled DT passes the targeted `qcom,apcs-kpss-global` schema. Binary
+checks confirm that the clock child preserves the exact provider phandles and
+specifiers, CPU consumers point to the child and RPM still uses mailbox
+channel 0. The clock driver was compiled explicitly as an object, but remains
+disabled and unlinked in the trial kernel; CPU PLL and frequency scaling
+remain disabled too.
+
+The 4,784,128-byte candidate has SHA-256
+`99d1a1dec947cab96f3759db0e1012b90179007ba20e3d06c781b1dd500cbf41`.
+Kernel image, config, initramfs and command line are byte-identical to the
+deferred-probe diagnostic trial. Only the DT changes in the boot payload.
+
+LK2nd accepted one RAM-only boot in 0.384 seconds. No tablet fastboot
+interface appeared during 60.05 seconds; a subsequent host check found
+neither ADB nor a USB device on the tablet's physical port. This differs from
+the earlier 15.5-second panic return, but does not identify whether Linux
+stalled or is running without host USB. Connection and screen checks were
+requested before a manual reset for RAM-log retrieval. No additional partition
+write or automatic second kernel trial was made.
 
 ## First-boot milestones
 

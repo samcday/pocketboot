@@ -1,0 +1,74 @@
+From: Sam Day <me@samcday.com>
+Subject: [PATCH 5/5] arm64: dts: qcom: msm8917: separate the APCS clock provider
+
+With RPM IPC using APCS mailbox channel 0, declaring the RPM-provided
+reference clock on the mailbox creates a probe dependency loop:
+RPM needs APCS, but APCS waits for RPMCC.
+
+Move the clock inputs and provider into the clock-controller child
+supported by the APCS binding and mailbox driver. Keep the existing
+PLL, auxiliary and RPM reference clocks unchanged, and point the four
+CPU clock consumers to the child. The mailbox can then register before
+RPMCC without disabling firmware dependency checking or taking ownership
+of the firmware's CPU clock configuration.
+
+Base: pem120/linux-msm89x7 a51b91b503307d35902447dd1f90db765372cf3b
+Assisted-by: LLM
+
+diff --git a/arch/arm64/boot/dts/qcom/msm8917.dtsi b/arch/arm64/boot/dts/qcom/msm8917.dtsi
+--- a/arch/arm64/boot/dts/qcom/msm8917.dtsi
++++ b/arch/arm64/boot/dts/qcom/msm8917.dtsi
+@@ -42,7 +42,7 @@
+ 			device_type = "cpu";
+ 			next-level-cache = <&l2_0>;
+ 			enable-method = "psci";
+-			clocks = <&apcs>;
++			clocks = <&apcs_clk>;
+ 			operating-points-v2 = <&cpu_opp_table>;
+ 			#cooling-cells = <2>;
+ 			power-domains = <&cpu_pd0>;
+@@ -61,7 +61,7 @@
+ 			device_type = "cpu";
+ 			next-level-cache = <&l2_0>;
+ 			enable-method = "psci";
+-			clocks = <&apcs>;
++			clocks = <&apcs_clk>;
+ 			operating-points-v2 = <&cpu_opp_table>;
+ 			#cooling-cells = <2>;
+ 			power-domains = <&cpu_pd1>;
+@@ -74,7 +74,7 @@
+ 			device_type = "cpu";
+ 			next-level-cache = <&l2_0>;
+ 			enable-method = "psci";
+-			clocks = <&apcs>;
++			clocks = <&apcs_clk>;
+ 			operating-points-v2 = <&cpu_opp_table>;
+ 			#cooling-cells = <2>;
+ 			power-domains = <&cpu_pd2>;
+@@ -87,7 +87,7 @@
+ 			device_type = "cpu";
+ 			next-level-cache = <&l2_0>;
+ 			enable-method = "psci";
+-			clocks = <&apcs>;
++			clocks = <&apcs_clk>;
+ 			operating-points-v2 = <&cpu_opp_table>;
+ 			#cooling-cells = <2>;
+ 			power-domains = <&cpu_pd3>;
+@@ -1952,9 +1952,14 @@
+ 			compatible = "qcom,msm8939-apcs-kpss-global", "syscon";
+ 			reg = <0x0b011000 0x1000>;
+ 			#mbox-cells = <1>;
+-			clocks = <&a53pll>, <&gcc GPLL0_EARLY>, <&rpmcc RPM_SMD_XO_CLK_SRC>;
+-			clock-names = "pll", "aux", "ref";
+-			#clock-cells = <0>;
++
++			apcs_clk: clock-controller {
++				clocks = <&a53pll>,
++					 <&gcc GPLL0_EARLY>,
++					 <&rpmcc RPM_SMD_XO_CLK_SRC>;
++				clock-names = "pll", "aux", "ref";
++				#clock-cells = <0>;
++			};
+ 		};
+ 
+ 		a53pll: clock@b016000 {
