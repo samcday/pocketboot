@@ -845,6 +845,12 @@ mod tests {
         let args = bootimg.cmdline.split_whitespace().collect::<Vec<_>>();
         assert!(args.contains(&"lk2nd.pass-ramoops"));
         assert!(!args.contains(&"lk2nd.pass-ramoops=zap"));
+        let panic_args = args
+            .iter()
+            .copied()
+            .filter(|arg| arg.starts_with("panic="))
+            .collect::<Vec<_>>();
+        assert_eq!(panic_args, ["panic=-1"]);
     }
 
     #[test]

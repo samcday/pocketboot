@@ -8,32 +8,24 @@ record, not a claim that PocketBoot supports this tablet yet.
 
 - Stock fastboot confirms unlocked; secure boot remains enabled and critical
   partitions remain locked.
-- A 301072-byte lk2nd image has booted transiently from stock fastboot, with
-  USB commands, NT35521S display handoff, log retrieval, and screenshot
-  capture working. Nothing was installed into `boot` or `aboot`.
-- Stock Android now asks for its startup/decryption password. No factory
-  reset has been issued; Android is not needed for the transient boot path.
-- The original PON-mode lk2nd returned to Android instead of stock fastboot.
-  The device-scoped IMEM build now returns to stock fastboot in 2.08 seconds.
-  This is a working soft-reboot path from lk2nd, not recovery from a hung
-  Linux kernel; button recovery is still needed for the latter.
-- Both the initial PocketBoot image and its framebuffer-console follow-up
-  were accepted by lk2nd, but neither produced tablet USB within 45 seconds.
-  Both screens were black when checked later; those attempts did not establish
-  Linux entry or userspace startup.
-- The shared-ramoops profile's recovered log now **confirms Linux and
-  PocketBoot `/init` startup**, with all four CPUs online and simpledrm/fbcon
-  registered. Visible display output is still unverified.
-- That boot discovered no disks and no USB device controller (UDC). Gadget
-  setup failed, followed by PID 1 exiting and a kernel panic at 12.3 seconds.
-  USB, storage, and a usable PocketBoot session remain bring-up work.
-- The 512 KiB RAM-log window survived this manual recovery to stock fastboot
-  and the subsequent small lk2nd RAM-boot. The complete raw capture is saved
-  privately, before another kernel boot; retention is not guaranteed for every
-  reset or power loss.
-- A fourth, mailbox-only RPM IPC trial was accepted by lk2nd but again
-  produced no tablet USB within 45 seconds. Button recovery and its retained
-  log capture are pending; the absence of USB does not locate the new failure.
+- LK2nd RAM-boots with working USB commands, NT35521S display handoff, logs
+  and screenshots. Its device-scoped IMEM build can return to stock fastboot.
+  No replacement image is installed in `boot` or `aboot`.
+- At the owner's explicit request, **only `boot` was erased** after verifying
+  the original 64 MiB backup. A normal reboot now falls back to stock fastboot
+  in about 2.1 seconds. Recovery, aboot and GPT were not changed.
+- Retained logs **confirm Linux and PocketBoot `/init` startup**, all four CPUs
+  online and simpledrm/fbcon registered. Visible display output is unverified.
+  The mailbox follow-up no longer logs the old syscon-regmap error, but still
+  discovers no disks or UDC and panics when PID 1 exits.
+- The target now passes `panic=-1`. With `boot` empty, one complete unattended
+  panic cycle returned to verified stock fastboot in 15.5 seconds from the
+  Linux boot command; lk2nd reloaded and the crash log was captured by
+  16.7 seconds. This covers the observed panic, not arbitrary hard hangs.
+- Stock Android previously stopped at its startup/decryption password.
+  It cannot boot while `boot` is empty; no factory reset has been issued.
+  Preserve the private original images before cleaning `target/` or removing
+  the worktree.
 
 ## Verified starting state
 
@@ -591,9 +583,66 @@ remain disabled.
 After verifying the known IMEM lk2nd identity and the preserved prior capture,
 one transient `fastboot boot` trial returned `OKAY` in 0.384 seconds.
 No USB device reappeared on the tablet's port during 45.4 seconds of
-observation. The new kernel's progress and screen state are unconfirmed
-pending manual return to stock fastboot and another bounded RAM-log capture.
-No image was flashed and no automatic second kernel attempt was made.
+observation. No image was flashed and no automatic second kernel attempt
+was made.
+
+The subsequent 512 KiB capture has SHA-256
+`77a291516370e02fcb62d9f51025ecbe43e51d46d0c731ac971952aee6a5a445`.
+Its 18399-byte console identifies the expected `7.0.9+ #5` build and shows
+`/init`, zero discovered disks, no UDC and an init-exit panic at 12.442 seconds.
+The old syscon-regmap error is absent, but that alone does not prove successful
+RPM initialization. All 33 region headers are valid; `dmesg-1` is byte-identical
+to the prior trial's record and must not be mistaken for a new crash.
+
+### Automatic panic recovery with an empty boot partition
+
+The first four attempts omitted `panic=`, leaving the kernel's default
+`panic=0` indefinite wait. The owner requested `panic=-1` so a panic requests
+immediate reboot. The target config and its contract test now require exactly
+that setting. This is not a watchdog for arbitrary hangs.
+
+The repackaged image is 4,784,128 bytes, SHA-256
+`b77a860331ba78b4aa735222e4eb96cb23d70367816f74c9c9af25cbea9d5ea7`.
+Every byte outside the command-line fields matches the mailbox trial image;
+kernel, DTB and initramfs are unchanged. All 54 build-tool tests, formatting
+and image checks passed. Before changing any partition, this image reset
+automatically and returned to stock Android USB at 30.417 seconds, without
+ADB or fastboot. After manual recovery, its RAM window had no valid records.
+Thus `panic=-1` alone did not establish a useful unattended diagnostic loop.
+
+The owner then explicitly authorized erasing **only `boot`** to test stock
+aboot's invalid-boot fallback. Before issuing the erase, the original
+`boot`, `recovery`, `aboot` and `abootbak` backups were rehashed against their
+read-only manifest. The original boot image is 67108864 bytes, SHA-256
+`a1480a980d664213c67d98b89e69d406b11cebee1b81ab046b4bc61cd7f85db9`.
+The command was issued from verified **stock** fastboot, not lk2nd, after
+checking the target serial/USB port, unlock state and 64 MiB partition size.
+`fastboot erase boot` returned `OKAY`; recovery, aboot, GPT and other partitions
+were not written. A normal `fastboot reboot` returned to stock fastboot in
+2.17 seconds, still unlocked, untampered and critical-locked.
+
+The same panic-enabled image was then tested once more:
+
+1. RAM-boot the known IMEM lk2nd image, verify it, and RAM-boot PocketBoot.
+2. Linux reaches the same no-UDC/init-exit panic at 12.454 seconds.
+3. Without buttons, stock fastboot returns and is verified at **15.501 seconds**
+   from the host's Linux boot invocation.
+4. RAM-boot lk2nd again and retrieve the bounded RAM window by **16.729 seconds**.
+   The console contains `panic=-1`, the expected kernel and the current panic.
+
+The post-reset raw capture is 524288 bytes, SHA-256
+`783e3a6fd91f9d524f656ffd7938d7243307728796ef67f48056bc2778c7f005`.
+All 33 headers decode, with a 17489-byte console and two compressed dmesg
+records. LK2nd remains responsive after retrieval. This verifies one complete
+panic/reboot/log-retrieval cycle with `boot` empty; USB/storage bring-up and
+recovery from non-panic hangs remain separate work.
+
+The original boot backup remains private and read-only at
+`target/tb-x304f-lab/original-partitions/boot.img`. Preserve it outside this
+worktree before any cleanup. Restoring it would require explicitly flashing
+it through stock fastboot and would remove this empty-boot fallback; restoration
+has not been performed or tested. The pre-existing Android decryption/password
+issue is separate from restoring the boot image.
 
 ## First-boot milestones
 

@@ -94,8 +94,18 @@ not the nominal header address `0x80080000`.
 The current diagnostic command line is:
 
 ```text
-console=tty0 loglevel=8 ignore_loglevel lk2nd.pass-simplefb lk2nd.pass-ramoops clk_ignore_unused pd_ignore_unused regulator_ignore_unused
+console=tty0 panic=-1 loglevel=8 ignore_loglevel lk2nd.pass-simplefb lk2nd.pass-ramoops clk_ignore_unused pd_ignore_unused regulator_ignore_unused
 ```
+
+`panic=-1` requests immediate reboot on panic instead of the default
+`panic=0` indefinite wait used by the first four trials. It is not a watchdog
+for arbitrary hangs and does not itself request bootloader mode. Verify the
+actual USB return mode and retained-log survival separately; a reboot into
+stock Android still needs manual recovery for this RAM-only workflow.
+On the development unit, an owner-authorized erase of `boot` now makes stock
+aboot fall back to fastboot. One panic/reboot/log-capture cycle is verified;
+see the [recovery record](tb-x304f-bringup.md#automatic-panic-recovery-with-an-empty-boot-partition).
+The build does not erase anything or assume this state on another tablet.
 
 LK2nd passes the boot image command line through `boot_linux()` to
 `update_device_tree()` and its registered handlers.
@@ -157,7 +167,8 @@ visible framebuffer output and kexec.
 This kernel also lacks the existing MSM8916 series' ChipIdea SG-bounce and
 FunctionFS reset-work fixes; large fastboot uploads and gadget teardown must
 not be assumed reliable. Touch, native panel/GPU, Wi-Fi and audio are deferred.
-Panic/reboot is not an established unattended recovery path.
+One unattended panic recovery is verified with `panic=-1` and an explicitly
+erased `boot` partition; this does not cover arbitrary hard hangs.
 
 The first hardware trial was accepted by LK2nd, but no tablet USB interface
 appeared within 45 seconds. That trial did not establish Linux entry or
