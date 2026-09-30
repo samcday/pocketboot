@@ -10,8 +10,9 @@ Only the `msm8917-lenovo-tbx304x` device config selects this series.
    let LK2nd supply the actual simplefb node/reservation, preserve its enabled
    LCD supply during fixed-regulator probe, and make USB peripheral-only with
    an explicit role-switch API instead of charger/extcon dependencies.
-   PocketBoot opts into device role for this target. This is not intended as
-   a general-purpose upstream board change.
+   The device-role request supplies software session-valid state: it is a
+   bootstrap workaround, not an intrinsic requirement of peripheral mode.
+   This is not intended as a general-purpose upstream board change.
 3. `0003-arm64-dts-qcom-msm8917-rpm-mailbox.patch` moves RPM IPC from the
    legacy APCS syscon path to mailbox channel 0, preserving offset 8/bit 0.
    This avoids a dependency on the CPU PLL provider and explicit PLL gating
@@ -30,7 +31,8 @@ Only the `msm8917-lenovo-tbx304x` device config selects this series.
 7. `0007-driver-core-honor-builtin-probe-timeout.patch` honors an explicit
    deferred-probe timeout with modules disabled, so asynchronously created
    RPM power-domain providers can appear before SDHCI gives up. The default
-   zero-timeout and module-enabled behavior remain unchanged.
+   nonpositive-timeout and module-enabled behavior remain unchanged. This
+   does not change the earlier no-modules fw_devlink/sync_state milestones.
 
 Apply through `cargo xtask kernel-src qcom/msm8917-lenovo-tbx304x`; do not
 manually modify another kernel checkout. `xtask` applies the ordered series
@@ -38,13 +40,21 @@ atomically and recognizes an already-applied series. Changed patches or base
 revisions need a fresh generated source tree or deliberate reconciliation;
 the builder never resets conflicting source edits.
 
-See [build instructions and compatibility limits](../../../docs/tb-x304f-build.md).
-Compilation and DT inspection passed. The
-[normal-image trials](../../../docs/tb-x304f-bringup.md#verified-normal-usb-and-emmc-boot)
-confirm Linux, all four CPUs, simpledrm/fbcon registration, PocketBoot USB
-fastboot and automatic eMMC discovery. A small read-only GPT transfer matched
-the original backup. The subsequent
-[LCD boot-on trial](../../../docs/tb-x304f-bringup.md#verified-visible-framebuffer)
-has owner-confirmed visible UI. The config-only touch trial also confirms
-Goodix probe and input registration. Physical touch response/orientation,
-large transfers, writes and kexec remain separate validation work.
+Build with `cargo xtask build qcom/msm8917-lenovo-tbx304x`. The image targets
+LK2nd's ARM64 handoff, not direct stock boot. It retains firmware-owned display
+and CPU clock state; charging and complete peripheral power management are
+out of scope. USB-role handling is still a workaround. Large transfers,
+storage writes and kexec/PocketFed handoff remain unvalidated.
+
+The bring-up record, image hashes, recovery constraints and retired lab
+tools are preserved in `refs/notes/evidence` on the bring-up commits:
+
+```sh
+git fetch origin refs/notes/evidence:refs/notes/evidence
+git log --notes=evidence -- configs/device/qcom/msm8917-lenovo-tbx304x.toml
+```
+
+Notes are separate from source history. Configure
+`git config notes.rewriteRef refs/notes/evidence` in each checkout that rebases
+or amends this work, and explicitly carry the relevant note onto a squash
+merge commit before pushing `refs/notes/evidence`.

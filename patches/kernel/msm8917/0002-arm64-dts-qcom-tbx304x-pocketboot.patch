@@ -21,6 +21,9 @@ extcon and host VBUS dependencies so gadget probing does not need the
 SMBCHG driver or its battery/charging policy.
 Expose the existing role-switch API so PocketBoot can explicitly request
 device role for this extcon-free bootstrap.
+That request supplies software session-valid state; peripheral mode alone
+does not assert VBUS. This is a bootstrap workaround pending a proper
+connector/VBUS path, not a general peripheral-mode requirement.
 
 Keep the board port's remaining memory reservations and PSCI CPU method.
 No RAM size or CPU parking protocol changes are added. Native panel

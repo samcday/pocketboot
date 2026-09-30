@@ -13,6 +13,10 @@ including the default zero: return -ENODEV after initcalls. A positive
 timeout uses the existing timeout work and returns -ENODEV after expiry.
 Module-enabled behavior is unchanged.
 
+This only changes the missing-provider result. It does not postpone the
+MODULES=n fw_devlink_drivers_done()/fw_devlink_probing_done() calls or
+make the wider sync_state policy equivalent to a module-enabled kernel.
+
 Base: pem120/linux-msm89x7 a51b91b503307d35902447dd1f90db765372cf3b
 Assisted-by: LLM
 
