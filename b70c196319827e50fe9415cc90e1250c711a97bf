@@ -1,0 +1,146 @@
+ARM32 kexec PR #47 ultrareview follow-up
+Date: 2026-09-30T07:11:55.833842+00:00
+Repository: https://github.com/samcday/pocketboot
+Validated tree: fe4ea954cce821406c0a19cd42334459cfc77ff2
+Commits: 73b7853 (boot discovery), b70c196 (loader/FDT), fe4ea95 (harness/CI/docs).
+No device was flashed or booted during this review round. Earlier phone evidence
+on device-layer commits is historical, not validation of these new changes.
+
+Build identities
+- Kernel source: 3bc07d096bddd33218b8c13b9fa30ffdaba3c050, Linux 7.1.0-rc3+.
+- Source cache: target/kernel/src/msm8930/msm8930-samsung-expressltexx.
+- Kernel configuration: tools/arm32-kexec/kernel.config, allnoconfig, UP ARM virt,
+  EFI/EFI_STUB, ARM_APPENDED_DTB, MEMFD_CREATE; LLVM 19.1.7.
+- CI container: ghcr.io/samcday/pocketboot-ci:df-308fa9a36a632a0c6407cd5e8b241765ff35490924769332169de1459bbf82e8
+  digest sha256:ef66268ec095fd5f3e3849da0cae4ecb1e0e1ec08dd43ac72b01833e32f019d4.
+- Native and container Rust: rustc 1.96.0 (ac68faa20 2026-05-25).
+- QEMU: 11.0.93 (qemu-11.1.0-0.2.rc3.fc45), ARM virt, cortex-a15, 1 CPU, 256 MiB.
+
+Commands and results
+TMPDIR="$PWD/target/tmp" cargo test --locked -p pocketboot --bin pocketboot
+  207 passed. Includes bootflow filtering/real-filesystem DTB lookup and both
+  architectures' shared FDT regression coverage.
+TMPDIR="$PWD/target/tmp" cargo test --locked -p xtask
+  53 passed at the base stack layer (no device-layer configuration changes).
+TMPDIR="$PWD/target/tmp" cargo test --locked --manifest-path tools/arm32-kexec/Cargo.toml
+  56 passed; rerun after the final gzip-fixture adjustment.
+
+Container build (workspace mounted at its same absolute path):
+podman run --rm --userns=keep-id --security-opt label=disable \
+  -v "$PWD:$PWD" -w "$PWD" \
+  -e CARGO_HOME="$PWD/target/arm32-kexec-qemu/cargo-home" \
+  -e TMPDIR="$PWD/target/tmp" -e SMOKE_MODE=build -e JOBS=12 \
+  ghcr.io/samcday/pocketboot-ci:df-308fa9a36a632a0c6407cd5e8b241765ff35490924769332169de1459bbf82e8 \
+  bash tools/arm32-kexec/run.sh \
+  "$PWD/target/kernel/src/msm8930/msm8930-samsung-expressltexx" LLVM=1
+  PASS. Decompressor check: BSS/gap=24 bytes, stack=4096 bytes;
+  relocation code within the image envelope. Static ARMv7 musl PID 1 built.
+  Initial attempt used the image's non-writable cargo cache with keep-id and
+  failed with EACCES; setting the workspace CARGO_HOME above resolved it.
+
+SMOKE_MODE=run bash tools/arm32-kexec/run.sh
+  PASS all three two-kernel cases, without a kernel source argument:
+  fallback = raw EFI zImage and live DTB;
+  supplied = raw EFI zImage+appended DTB, overridden by explicit stale DTB;
+  appended = gzip-wrapped EFI zImage+DTB, production memfd preparation and
+  appended-tree selection. Each destination checks the distinct initrd sentinel,
+  changed cmdline, live RAM graft, booted-from-kexec property and DTB-source marker.
+
+Negative control: QEMU_SYSTEM_ARM pointed to a Bash wrapper replacing only
+'pocketboot.smoke.case=fallback' with 'pocketboot.smoke.case=invalid' in its
+arguments before exec qemu-system-arm. Run with SMOKE_MODE=run. The first guest
+printed FAIL and powered off; supplied and appended still booted and passed.
+negative-control exit=1 elapsed=2s
+This demonstrates real guest failure termination and host failure aggregation,
+not a mocked PASS string. No host reboot was invoked.
+
+Other checks
+- cargo fmt --all -- --check; standalone cargo fmt -- --check; git diff --check;
+  shellcheck and bash -n on run.sh; Python py_compile: pass.
+- rhysd/actionlint on .github/workflows/ci.yml: pass.
+- cargo metadata confirms the root package no longer auto-discovers the harness.
+- Strict Clippy (-D warnings) is not clean on Rust 1.96: 28 runtime lint errors
+  and 6 in the standalone module inclusion. All reported source sites predate
+  this review round (dead code, collapsible_if, manual_is_multiple_of, etc.);
+  no global lint cleanup or lint suppression was bundled.
+- The new GitHub Actions unit-tests job had not run when this local evidence
+  was recorded; its status must be read independently after publication.
+
+Contract limits / review decisions
+- The six-word size tag does not prove DT-aware AUTO_ZRELADDR. On a non-128-MiB
+  aligned RAM base, require the Linux v5.12+ algorithm (or verified backport),
+  or a matching fixed ZRELADDR. Docs now make this explicit. No version-banner
+  heuristic is claimed to prove the property at runtime.
+- no-map subtraction respects the supplied tree's enabled no-map children and
+  the mandatory equal root/reserved-memory cell widths plus ranges presence
+  checked by Linux __reserved_mem_check_root. Parent status is ignored by the
+  flat-DT scanner; the spin-table contract retains its stricter parent gate.
+  Tests cover 1/2 cells, partial overlaps, disabled children, ignored malformed
+  parent layouts, retained target header entries and live-only reservations.
+- Whole-workspace kernel memsz zero-fill protects the relocated appended-DTB
+  probe; unit tests seed stale FDT magic at that probe. QEMU confirms handoff,
+  not arbitrary decompressor contracts or phone cache/coherency.
+- Ambiguous/transient live reservations remain conservatively reserved.
+- Higher zImage placement and broad shared-loader/FDT-parser refactors are
+  deferred optimizations, not required to establish this bounded handoff.
+
+SHA-256 build outputs
+9a033544f181c0223450f82b74fb690a9084de9e58dac2628e642dfce7ed6de7  target/arm32-kexec-qemu/kernel/.config
+315659d1c5b22ac349821f166102c0bdca30b19d88cf0ee713c99b26dda5067a  target/arm32-kexec-qemu/kernel/arch/arm/boot/zImage
+b51704b7d5251f7098b4e4a9d10ce5356b8b3ba76c46871408f4a1311dd6c0c1  target/arm32-kexec-qemu/kernel/arch/arm/boot/compressed/vmlinux
+b1a29c8000c4dbe75e7102781e7b11646d159031d26813d0a521d5fa096f4569  target/arm32-kexec-qemu/rust/armv7-unknown-linux-musleabihf/release/arm32-kexec-smoke
+1b97337e9fb4850f7887204952d16568b4d4c727e35fce07828a2228356e35ff  target/arm32-kexec-qemu/destination-appended.zImage.gz
+
+Relevant serial windows (positive run)
+
+--- fallback ---
+Linux version 7.1.0-rc3+ (pocketboot@smoke) (Debian clang version 19.1.7 (3+b1), Debian LLD 19.1.7) #1 Thu Jan 1 00:00:00 UTC 1970
+Kernel command line: console=ttyAMA0 rdinit=/init panic=-1 pocketboot.smoke.stage=source pocketboot.smoke.case=fallback
+ARM32-KEXEC-SMOKE: LOAD case=fallback
+ INFO arm32_kexec_smoke::kexec: using current DTB from /sys/firmware/fdt
+ INFO arm32_kexec_smoke::kexec::arm: prepared ARM kexec segment segment="zImage" phys=0x40008000 bufsz=1262080 memsz=5554176
+ INFO arm32_kexec_smoke::kexec::arm: prepared ARM kexec segment segment="initrd" phys=0x40554000 bufsz=368331 memsz=368640
+ INFO arm32_kexec_smoke::kexec::arm: prepared ARM kexec segment segment="dtb" phys=0x40600000 bufsz=7954 memsz=8192
+kexec_core: Starting new kernel
+Linux version 7.1.0-rc3+ (pocketboot@smoke) (Debian clang version 19.1.7 (3+b1), Debian LLD 19.1.7) #1 Thu Jan 1 00:00:00 UTC 1970
+Kernel command line: console=ttyAMA0 rdinit=/init panic=-1 pocketboot.smoke.stage=destination pocketboot.smoke.case=fallback
+ARM32-KEXEC-SMOKE: PASS case=fallback
+reboot: Power down
+
+--- supplied ---
+Linux version 7.1.0-rc3+ (pocketboot@smoke) (Debian clang version 19.1.7 (3+b1), Debian LLD 19.1.7) #1 Thu Jan 1 00:00:00 UTC 1970
+Kernel command line: console=ttyAMA0 rdinit=/init panic=-1 pocketboot.smoke.stage=source pocketboot.smoke.case=supplied
+ARM32-KEXEC-SMOKE: LOAD case=supplied
+ INFO arm32_kexec_smoke::kexec: using DTB from staged boot image
+ INFO arm32_kexec_smoke::kexec: grafted live memory and native CPU handoff contract into supplied DTB bytes=7679
+ INFO arm32_kexec_smoke::kexec::arm: prepared ARM kexec segment segment="zImage" phys=0x40008000 bufsz=1262080 memsz=5554176
+ INFO arm32_kexec_smoke::kexec::arm: prepared ARM kexec segment segment="initrd" phys=0x40554000 bufsz=368331 memsz=368640
+ INFO arm32_kexec_smoke::kexec::arm: prepared ARM kexec segment segment="dtb" phys=0x40600000 bufsz=7916 memsz=8192
+kexec_core: Starting new kernel
+Linux version 7.1.0-rc3+ (pocketboot@smoke) (Debian clang version 19.1.7 (3+b1), Debian LLD 19.1.7) #1 Thu Jan 1 00:00:00 UTC 1970
+Kernel command line: console=ttyAMA0 rdinit=/init panic=-1 pocketboot.smoke.stage=destination pocketboot.smoke.case=supplied
+ARM32-KEXEC-SMOKE: PASS case=supplied
+reboot: Power down
+
+--- appended ---
+Linux version 7.1.0-rc3+ (pocketboot@smoke) (Debian clang version 19.1.7 (3+b1), Debian LLD 19.1.7) #1 Thu Jan 1 00:00:00 UTC 1970
+Kernel command line: console=ttyAMA0 rdinit=/init panic=-1 pocketboot.smoke.stage=source pocketboot.smoke.case=appended
+ARM32-KEXEC-SMOKE: LOAD case=appended
+ INFO arm32_kexec_smoke::kexec: decompressing gzip kernel image bytes=1227813
+ INFO arm32_kexec_smoke::kexec: decompressed gzip kernel image compressed_bytes=1227813 bytes=1269759 elapsed_ms=23
+ INFO arm32_kexec_smoke::kexec: using DTB appended to ARM zImage
+ INFO arm32_kexec_smoke::kexec: grafted live memory and native CPU handoff contract into supplied DTB bytes=7679
+ INFO arm32_kexec_smoke::kexec::arm: prepared ARM kexec segment segment="zImage" phys=0x40008000 bufsz=1262080 memsz=5554176
+ INFO arm32_kexec_smoke::kexec::arm: prepared ARM kexec segment segment="initrd" phys=0x40554000 bufsz=368331 memsz=368640
+ INFO arm32_kexec_smoke::kexec::arm: prepared ARM kexec segment segment="dtb" phys=0x40600000 bufsz=7916 memsz=8192
+kexec_core: Starting new kernel
+Linux version 7.1.0-rc3+ (pocketboot@smoke) (Debian clang version 19.1.7 (3+b1), Debian LLD 19.1.7) #1 Thu Jan 1 00:00:00 UTC 1970
+Kernel command line: console=ttyAMA0 rdinit=/init panic=-1 pocketboot.smoke.stage=destination pocketboot.smoke.case=appended
+ARM32-KEXEC-SMOKE: PASS case=appended
+reboot: Power down
+
+Negative-control summary
+ARM32-KEXEC-SMOKE: FAIL: unknown smoke case invalid
+ARM32-KEXEC-SMOKE: case=supplied: PASS
+ARM32-KEXEC-SMOKE: case=appended: PASS
+ARM32-KEXEC-SMOKE: FAIL 1/3 cases: fallback
