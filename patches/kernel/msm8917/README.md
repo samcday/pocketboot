@@ -45,5 +45,6 @@ confirm Linux, all four CPUs, simpledrm/fbcon registration, PocketBoot USB
 fastboot and automatic eMMC discovery. A small read-only GPT transfer matched
 the original backup. The subsequent
 [LCD boot-on trial](../../../docs/tb-x304f-bringup.md#verified-visible-framebuffer)
-has owner-confirmed visible UI. Touch, large transfers, writes and kexec
-remain separate validation work.
+has owner-confirmed visible UI. The config-only touch trial also confirms
+Goodix probe and input registration. Physical touch response/orientation,
+large transfers, writes and kexec remain separate validation work.

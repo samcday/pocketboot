@@ -41,6 +41,9 @@ MMC_SDHCI = true
 MMC_SDHCI_PLTFM = true
 MMC_SDHCI_MSM = true
 
+# BLSP QUP I2C uses its PIO fallback while DMA support is disabled.
+I2C_QUP = true
+
 # qcom,ci-hdrc + qcom,usb-hs-28nm-femtophy, not DWC3/QUSB2
 USB_CHIPIDEA = true
 USB_CHIPIDEA_UDC = true

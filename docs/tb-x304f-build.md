@@ -4,9 +4,9 @@ This is an **LK2nd-first diagnostic target**, not direct-stock-boot support or
 a fully validated Linux port. Three normal RAM-boots now verify PocketBoot
 USB fastboot, automatic eMMC discovery and live log retrieval; a read-only GPT
 capture matches the original backup. A subsequent LCD-supply fix has
-owner-confirmed visible framebuffer output. Touch and kexec remain unverified.
-No flashing is required by the build, and no hardware commands are included
-here.
+owner-confirmed visible framebuffer output. Goodix input registration is also
+verified; physical touch response, orientation and kexec remain unverified.
+No flashing is required by the build, and no hardware commands are included here.
 
 ## Build
 
@@ -63,8 +63,25 @@ actual drivers:
 | SMEM/TCSR, SMD RPM clocks, domains and regulator votes | `QCOM_SMEM`, `HWSPINLOCK_QCOM`, `RPMSG_QCOM_SMD`, `QCOM_SMD_RPM`, `QCOM_CLK_SMD_RPM`, `QCOM_RPMPD`, `PM_OPP`, `REGULATOR_QCOM_SMD_RPM` |
 | PM8937/PMI8950 SPMI | PMIC arbiter, MFD and PMIC pinctrl |
 | eMMC/SD `qcom,sdhci-msm-v4` | `MMC_SDHCI_MSM`, TLMM and PM8937 RPM supply dependencies |
+| BLSP QUP I2C, including touch bus `78b7000` | `I2C_QUP`, using PIO while DMA support is disabled |
+| Board DT's `goodix,gt911` at `0x5d` | `TOUCHSCREEN_GOODIX`, existing controller configuration and `INPUT_EVDEV` |
 | USB `qcom,ci-hdrc` | ChipIdea MSM glue, UDC and `USB_ROLE_SWITCH`, not DWC3 |
 | USB `qcom,usb-hs-28nm-femtophy` | `PHY_QCOM_USB_HS_28NM` and PM8937 RPM supplies, not the older `PHY_QCOM_USB_HS` |
+
+Touch bring-up initially enables only QUP and Goodix, leaving the DT unchanged.
+The private stock-F DT contains both Goodix and Focaltech alternatives; it
+does not identify the fitted controller. The successful runtime probe now
+identifies Goodix ID 9111 on the development unit. The stock DT describes a
+different Goodix I/O supply (L6 rather than the public port's L5); successful
+probe with firmware-preserving flags does not resolve that wiring discrepancy
+or establish independent touch power management.
+
+With DMA support disabled, QUP falls back to PIO. Enabling the DMA engine
+without its referenced BAM provider would instead defer probing. The pinned
+Goodix driver leaves reset untouched and does not load optional disk config
+when `irq-gpios` is absent. Adding that property is not an isolated fix: it
+also changes reset/address-selection behavior and firmware-loader requirements.
+Neither firmware upload nor a GPIO reset change is part of this first trial.
 
 Only verified selection metadata is added for the F: APQ8017 ID 307, revision
 0, alongside the existing MSM8917 ID 303. Board ID remains `<0x1000b 0>`.
@@ -185,11 +202,12 @@ The successful build had three existing PocketBoot Rust warnings
 The normal image now confirms Linux entry, PSCI/SMP, framebuffer-driver
 registration, PocketBoot init, USB fastboot and eMMC read I/O across three
 RAM-boots. The subsequent LCD boot-on trial also confirms visible UI.
-Retained logs survive the tested recovery path. Still unvalidated:
-touch, large USB transfers, storage writes and kexec.
+The two-driver touch trial confirms Goodix probe and PocketBoot input-device
+discovery. Retained logs survive the tested recovery path. Still unvalidated:
+physical touch response/orientation, large USB transfers, storage writes and kexec.
 This kernel also lacks the existing MSM8916 series' ChipIdea SG-bounce and
 FunctionFS reset-work fixes; large fastboot uploads and gadget teardown must
-not be assumed reliable. Touch, native panel/GPU, Wi-Fi and audio are deferred.
+not be assumed reliable. Native panel/GPU, Wi-Fi and audio are deferred.
 One unattended panic recovery is verified with `panic=-1` and an explicitly
 erased `boot` partition; this does not cover arbitrary hard hangs.
 
@@ -276,3 +294,10 @@ The LCD boot-on candidate is also 4,810,752 bytes, SHA-256
 `0e69d2e2e346d87032d60ef5a3cac999aa41aff8a001af2eac1554509f7792dd`.
 Only its DT changed from that normal image. The owner confirmed a working
 framebuffer; see the [display evidence](tb-x304f-bringup.md#verified-visible-framebuffer).
+
+The touch-driver candidate is 4,823,040 bytes, SHA-256
+`942ab820c51a608a33772d240c9f5d12d2dc29183d49533dd4202030141f3378`.
+Only QUP I2C and Goodix changed in the effective kernel config; the DT,
+initramfs and command line stayed unchanged. The driver reports ID 9111 and
+version 4011, and PocketBoot opens its event device. See the
+[input-registration evidence and remaining check](tb-x304f-bringup.md#goodix-input-registration).

@@ -26,8 +26,10 @@ installation.
   uploads, writes or kexec.
 - Linux starts all four CPUs and PocketBoot reports its 800x1280 DRM UI ready.
   The owner confirmed visible framebuffer output after preserving the
-  firmware-enabled LCD rail during fixed-regulator probe. Touch is not yet
-  working; native display, charging, Wi-Fi and audio are not validated.
+  firmware-enabled LCD rail during fixed-regulator probe. Goodix now probes
+  and PocketBoot opens its input device; physical touch response and
+  orientation still await confirmation. Native display, charging, Wi-Fi and
+  audio are not validated.
 - The target now passes `panic=-1`. With `boot` empty, one complete unattended
   panic cycle returned to verified stock fastboot in 15.5 seconds from the
   Linux boot command; lk2nd reloaded and the crash log was captured by
@@ -832,10 +834,43 @@ at 3.3 V, GPIO46 high and eMMC still present. **The owner then confirmed a
 working PocketBoot framebuffer.** This is physical confirmation, not merely
 the `POCKETBOOT_DRM_READY` marker.
 
-Touch remains the next checkpoint: the live input list contains only the
-power, reset and GPIO-key devices, with no I2C adapters. The current image
-does not enable the QUP I2C or declared Goodix touchscreen driver. This does
-not yet identify which touchscreen variant is fitted.
+That LCD-only image exposed just the power, reset and GPIO-key input devices,
+with no I2C adapters: it did not enable QUP I2C or the declared Goodix driver.
+The next trial addressed those missing drivers separately.
+
+### Goodix input registration
+
+The touch candidate enables only `I2C_QUP` and `TOUCHSCREEN_GOODIX`. Its
+effective kernel-config diff contains exactly those two n-to-y changes; the
+DT, command line and normal initramfs remain byte-identical to the visible-LCD
+image. DMA, firmware loading and CPU clock/frequency drivers remain disabled.
+There are no reset, supply, polarity or firmware changes and no I2C bus scan.
+
+The 4,823,040-byte image has SHA-256
+`942ab820c51a608a33772d240c9f5d12d2dc29183d49533dd4202030141f3378`.
+After the normal stock-fastboot/LK2nd RAM-boot sequence, PocketBoot USB identity
+was verified in 2.310 seconds. QUP registered two adapters; the touchscreen
+on controller `78b7000` appeared as `1-005d` and bound to `Goodix-TS`:
+
+```text
+[    0.819294] Goodix-TS 1-005d: ID 9111, version: 4011
+[    1.042386] input: Goodix Capacitive TouchScreen as /devices/platform/soc@0/78b7000.i2c/i2c-1/1-005d/input/input3
+[    1.319442] INFO pocketboot::ui: opened touch input device path=/dev/input/event3
+```
+
+This identifies a responding Goodix on the development unit rather than
+inferring the fitted controller from the stock DT's alternative nodes.
+GPIO65 has the touchscreen IRQ. The QUP `tx channel not available` messages
+are the expected DMA-disabled PIO fallback, not probe failures.
+At 52 seconds the driver remained bound, without further touch/I2C errors.
+USB was configured at high speed, eMMC still reported 30535680 sectors, and
+the LCD rail remained enabled at 3.3 V.
+
+The full build, 190 PocketBoot tests, 54 build-tool tests, formatting and
+whitespace checks passed; independent exact-pin driver review found no
+blocker. **Input registration is verified; physical touch response and
+coordinate orientation still need the owner's check.** No partition writes
+were performed, and the candidate was left running for that check.
 
 ## First-boot milestones
 

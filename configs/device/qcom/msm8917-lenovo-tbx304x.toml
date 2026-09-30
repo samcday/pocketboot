@@ -20,6 +20,9 @@ patches = [
 REGULATOR_FIXED_VOLTAGE = true
 INPUT_PM8941_PWRKEY = true
 
+# Probe the board DT's Goodix device using its inherited controller config.
+TOUCHSCREEN_GOODIX = true
+
 # console=tty0 needs an fbdev client and fbcon, not just a simpledrm device.
 # Show normal kernel diagnostics once the inherited framebuffer probes.
 DRM_FBDEV_EMULATION = true
