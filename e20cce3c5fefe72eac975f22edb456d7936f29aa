@@ -1,0 +1,54 @@
+# Native GitHub Stack alignment evidence
+
+Repository: https://github.com/samcday/pocketboot
+Commit: e20cce3c5fefe72eac975f22edb456d7936f29aa
+UTC: 2026-09-30T04:23:25.549019+00:00
+
+Converted the previously unregistered sibling PR arrangement into native Stack54:
+  main -> #47 astra/arm32-kexec -> #48 astra/expressltexx-build -> #49 astra/expressatt-build
+
+The Expressatt branch was advanced by a merge with parents:
+  98021578aa945e420455ff4afe66336e704fe15a (previous Expressatt)
+  cf2ebd6e790b13a1eef86a9d02c8e2caf9cb76ce (Expressltexx)
+Both previous tips remain ancestors. No published history was rewritten, no
+force-push was used, and the ARM32/Expressltexx head SHAs were unchanged.
+
+Resolved only the README link insertion and adjacent test-module conflicts.
+Byte-for-byte checks established that:
+- Both devices' complete config, SoC config and guide files match their prior layers.
+- Expressatt's overlay is unchanged.
+- ci_matrix.rs equals the complete Expressltexx version followed by the original
+  Expressatt test module, unchanged.
+- The README lists both original device guide links.
+
+Validation:
+  TMPDIR="$PWD/target/tmp" CARGO_TARGET_DIR="$PWD/target" cargo test --locked -p xtask
+  rustfmt --check --edition 2024 --config skip_children=true xtask/src/commands/ci_matrix.rs
+  git diff --cached --check
+test result: ok. 55 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.02s
+
+Registration command (using installed github/gh-stack v0.1.1):
+  gh stack link --remote origin --base main \
+    https://github.com/samcday/pocketboot/pull/47 \
+    https://github.com/samcday/pocketboot/pull/48 \
+    https://github.com/samcday/pocketboot/pull/49
+CLI result: updated PR49 base to astra/expressltexx-build; created stack with
+3 PRs (stack54).
+
+Authoritative verification: GET /repos/samcday/pocketboot/stacks/54 returned
+an open native stack with PRs47,48,49 in that order and bases main,
+astra/arm32-kexec, astra/expressltexx-build. All remained draft. PR49's GitHub
+review diff is only its intended six files (README, three Expressatt configs/
+overlay, Expressatt guide, and ci_matrix.rs); lower-layer changes are inherited.
+
+Configured the clone-local gh-stack.remote=origin (not the local backlink),
+then imported via gh stack checkout https://github.com/samcday/pocketboot/pull/48.
+gh stack view --json agrees with the remote chain and reports needsRebase=false
+for all three branches. The checkout was returned to Expressltexx and is clean.
+PR descriptions were corrected to describe native Stack54, replacing the old
+sibling-graph explanation. No device operations or kernel recipe changes occurred.
+
+Current stack head identities:
+  #47 astra/arm32-kexec 49fa74522b93de44bc1c80d526b540a715cb6cf1
+  #48 astra/expressltexx-build cf2ebd6e790b13a1eef86a9d02c8e2caf9cb76ce
+  #49 astra/expressatt-build e20cce3c5fefe72eac975f22edb456d7936f29aa
