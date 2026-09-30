@@ -1,0 +1,50 @@
+# Evidence: xtask qemu-boot-policy port (2cab31f)
+
+Same host/toolchain/QEMU kernel as the 6add2e1 note. Run 2026-09-30 on 2cab31f with the
+image built by `cargo xtask qemu target/kernel/src/msm8916 --build-only` (pocketboot from
+6add2e1; the xtask commit touches xtask/ and tools/ only).
+
+    cargo fmt --all -- --check                      OK
+    cargo test --offline -p xtask                   61 passed (8 new: marker parsers, generation split, latency)
+    cargo clippy --offline -p xtask --all-targets   no warnings in qemu.rs / qemu_boot_policy.rs
+    cargo xtask qemu-boot-policy target/kernel/src/msm8916
+
+PASS autoboot
+  ok   gen1 decides autoboot
+  ok   kexec starts
+  ok   gen1 never logs 'UI thread spawned'
+  ok   gen1 never logs 'USB gadget thread spawned'
+  ok   gen1 never logs 'battery watcher thread spawned'
+  ok   gen2 menu via pocketboot.menu
+  ok   gen1 starting up -> kexec: 782 ms
+PASS volume-down-hold
+  ok   decision is menu/volume-down
+  ok   watcher logged break-in
+  ok   no kexec
+  ok   UI started
+PASS empty-disk
+  ok   decision is menu/no-bootable-entry
+  ok   PID 1 still alive
+PASS broken-default
+  ok   autoboot attempted
+  ok   falls back to menu/boot-failed: kernel is not a raw arm64 Image
+  ok   PID 1 still alive
+  ok   no kexec
+PASS cmdline-menu
+  ok   decision is menu/cmdline
+  ok   discovery still completes
+  ok   no kexec
+  ok   no break-in watcher
+exit=0
+
+volume-down-hold rerun after the QMP-socket cleanup fix: PASS; no socket left in $TMPDIR,
+no qemu-system-aarch64 left running.
+
+Error paths exercised by the implementer before the fixes above (not re-run after): missing
+host tools -> "missing host tools: qemu-system-aarch64 (install qemu-system-aarch64 or set
+QEMU), mkfs.vfat (install dosfstools), mmd (install mtools), mcopy (install mtools), sgdisk
+(install gdisk)"; a fake QEMU logging the wrong decision -> FAIL line, exit 1, child killed.
+
+Latency note: gen1 "starting up" -> "Starting new kernel" varies 638-1880 ms across runs under
+TCG (the Python and xtask parsers agree on the same log); the harness reports it, it is not
+asserted.
