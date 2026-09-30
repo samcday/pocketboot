@@ -1,0 +1,22 @@
+From: PocketBoot developers <noreply@pocketboot.org>
+Subject: [PATCH 1/7] arm64: dts: qcom: tbx304x: include APQ8017 selection ID
+
+The Wi-Fi TB-X304F reports soc_id 307 (APQ8017) and board-id
+<0x1000b 0>. Retain the family compatible and MSM8917 ID from the board
+port, adding only the verified APQ8017 ID. This is bootloader selection
+metadata, not a claim that every peripheral on the F variant is validated.
+
+Base: pem120/linux-msm89x7 a51b91b503307d35902447dd1f90db765372cf3b
+
+diff --git a/arch/arm64/boot/dts/qcom/msm8917-lenovo-tbx304x.dts b/arch/arm64/boot/dts/qcom/msm8917-lenovo-tbx304x.dts
+--- a/arch/arm64/boot/dts/qcom/msm8917-lenovo-tbx304x.dts
++++ b/arch/arm64/boot/dts/qcom/msm8917-lenovo-tbx304x.dts
+@@ -16,7 +16,7 @@
+ 	compatible = "lenovo,tbx304x", "qcom,msm8917";
+ 	model = "Lenovo Tab 4 10 (tbx304x)";
+ 	qcom,board-id = <0x1000b 0>;
+-	qcom,msm-id = <QCOM_ID_MSM8917 0>;
++	qcom,msm-id = <QCOM_ID_MSM8917 0>, <QCOM_ID_APQ8017 0>;
+ 
+ 	aliases {
+ 		mmc0 = &sdhc_1;

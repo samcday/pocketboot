@@ -1,0 +1,69 @@
+name = "Lenovo Tab 4 10 TB-X304F (experimental APQ8017)"
+
+# Keep the board port's canonical DT name and lenovo,tbx304x identity.
+# Only the F/APQ8017 variant is the intended initial PocketBoot trial.
+[kernel-source]
+remote = "https://github.com/pem120/linux-msm89x7.git"
+# lenovo-tbx304 branch: Linux 7.0.9 plus the TB-X304X board port
+sha = "a51b91b503307d35902447dd1f90db765372cf3b"
+patches = [
+    "patches/kernel/msm8917/0001-arm64-dts-qcom-tbx304x-apq8017.patch",
+    "patches/kernel/msm8917/0002-arm64-dts-qcom-tbx304x-pocketboot.patch",
+    "patches/kernel/msm8917/0003-arm64-dts-qcom-msm8917-rpm-mailbox.patch",
+    "patches/kernel/msm8917/0004-clk-qcom-apcs-msm8916-use-clock-device.patch",
+    "patches/kernel/msm8917/0005-arm64-dts-qcom-msm8917-apcs-clock-child.patch",
+    "patches/kernel/msm8917/0006-pmdomain-qcom-rpmpd-select-opp.patch",
+    "patches/kernel/msm8917/0007-driver-core-honor-builtin-probe-timeout.patch",
+]
+
+[kconfig]
+REGULATOR_FIXED_VOLTAGE = true
+INPUT_PM8941_PWRKEY = true
+
+# Probe the board DT's Goodix device using its inherited controller config.
+TOUCHSCREEN_GOODIX = true
+
+# console=tty0 needs an fbdev client and fbcon, not just a simpledrm device.
+# Show normal kernel diagnostics once the inherited framebuffer probes.
+DRM_FBDEV_EMULATION = true
+DRM_CLIENT_DEFAULT_FBDEV = true
+FRAMEBUFFER_CONSOLE = true
+
+# Retain printk output once the RAM-backed pstore console registers.
+PSTORE_CONSOLE = true
+
+# First boot needs no native display/GPU, remoteproc firmware or charger policy.
+# simpledrm consumes the framebuffer created by LK2nd, not the native DSI panel.
+# Use =n for hidden symbols: this tree's strict merge script distinguishes it
+# from "# CONFIG_... is not set" when the effective .config omits a symbol.
+DRM_MSM = { raw = "n" }
+SOUND = false
+WLAN = { raw = "n" }
+BT = false
+CHARGER_QCOM_SMBCHG = false
+BATTERY_PMI8994_FG = false
+
+# Keep the kernel C-only and use a text panic screen for this lean target.
+# PocketBoot /init is still Rust; this only disables in-kernel Rust/QR encoding.
+RUST = false
+DRM_PANIC_SCREEN_QR_CODE = { raw = "n" }
+DRM_PANIC_SCREEN = { string = "kmsg" }
+
+[bootimg]
+header_version = 0
+page_size = 2048
+kernel_image = "Image.gz"
+append_dtb = true
+base = 0x80000000
+# LK2nd msm8952's ARM64 defaults, NOT the stock ARM32 kernel/ramdisk offsets.
+# LK2nd further aligns the kernel using the decompressed Image's text_offset.
+kernel_offset = 0x00080000
+ramdisk_offset = 0x03600000
+tags_offset = 0x03400000
+second_offset = 0
+dtb_offset = 0
+# Built-in initramfs; no separate ramdisk, preboot shim or QCDT table.
+# Share LK2nd's mapped ramoops window; never use =zap during retained-log trials.
+# Reboot immediately on panic rather than waiting forever; this is not a hang watchdog.
+# Wait for asynchronous RPM suppliers and select device role without charger/extcon.
+cmdline = "console=tty0 panic=-1 deferred_probe_timeout=5 pocketboot.log=info pocketboot.usb_role=device loglevel=8 ignore_loglevel lk2nd.pass-simplefb lk2nd.pass-ramoops clk_ignore_unused pd_ignore_unused regulator_ignore_unused"

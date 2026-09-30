@@ -732,6 +732,7 @@ mod tests {
             "qcom/msm8930-samsung-expressltexx",
             "qcom/msm8916-samsung-a5u-eur",
             "qcom/msm8916-samsung-gt510",
+            "qcom/msm8917-lenovo-tbx304x",
             "qcom/msm8953-xiaomi-daisy",
             "qcom/sdm670-google-sargo",
             "qcom/sdm845-google-crosshatch",

@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
-"""Decode an lk2nd 512 KiB raw ramoops capture with the pinned Linux RS codec.
+"""Decode an lk2nd 512 KiB raw ramoops capture.
 
 Read-only offline tool. Preserve raw captures: ECC cannot guarantee recovery
 outside its correction bound. Invalid records are reported, never silently used.
+ECC decoding uses the supplied kernel's RS codec; --ecc 0 needs no kernel or C compiler.
 """
 import argparse
 import ctypes
@@ -105,13 +106,18 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--input', type=Path, required=True)
     parser.add_argument('--output', type=Path, required=True)
-    parser.add_argument('--kernel', type=Path, required=True)
+    parser.add_argument('--kernel', type=Path, help='kernel source, required with nonzero ECC')
     parser.add_argument('--ecc', type=int, default=64, choices=[0, 16, 32, 64])
     args = parser.parse_args()
+    if args.ecc and args.kernel is None:
+        parser.error('--kernel is required when --ecc is nonzero')
     args.output.mkdir(parents=True, exist_ok=False)
-    with tempfile.TemporaryDirectory() as tmp:
-        codec = Codec(args.kernel, tmp)
-        result = decode_capture(args.input.read_bytes(), args.ecc, codec, args.output)
+    if args.ecc:
+        with tempfile.TemporaryDirectory() as tmp:
+            codec = Codec(args.kernel, tmp)
+            result = decode_capture(args.input.read_bytes(), args.ecc, codec, args.output)
+    else:
+        result = decode_capture(args.input.read_bytes(), 0, None, args.output)
     print(json.dumps(result, indent=2))
 
 
