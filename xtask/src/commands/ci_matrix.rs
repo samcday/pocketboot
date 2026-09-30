@@ -195,6 +195,14 @@ mod expressltexx_tests {
                 .lines()
                 .any(|line| line == "# CONFIG_SMP is not set")
         );
+        for expected in [
+            "# CONFIG_ARCH_MULTIPLATFORM is not set",
+            "# CONFIG_AUTO_ZRELADDR is not set",
+            "CONFIG_PHYS_OFFSET=0x80200000",
+            "CONFIG_ARM_PATCH_PHYS_VIRT=y",
+        ] {
+            assert!(contents.lines().any(|line| line == expected), "{expected}");
+        }
         let boot = config.bootimg.unwrap();
         assert_eq!((boot.header_version, boot.page_size), (0, 2048));
         assert_eq!(boot.kernel_image, "zImage");

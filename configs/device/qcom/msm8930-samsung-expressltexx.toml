@@ -12,6 +12,13 @@ dtb_stem = "qcom-msm8930-samsung-expressltexx"
 target = "armv7-unknown-linux-musleabihf"
 
 [kconfig]
+# Appended-DTB AUTO_ZRELADDR skips RAM validation before ATAG conversion,
+# choosing 0x80008000 and placing its page tables in SMEM. This is a
+# board-specific image: use the known RAM base without patching head.S.
+ARCH_MULTIPLATFORM = false
+AUTO_ZRELADDR = false
+PHYS_OFFSET = { hex = 0x80200000 }
+
 # PM8917's direct L31 rail powers maXTouch; it is not an RPM regulator.
 REGULATOR_QCOM_PM8917 = true
 TOUCHSCREEN_ATMEL_MXT = true

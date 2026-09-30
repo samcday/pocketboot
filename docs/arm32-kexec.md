@@ -1,8 +1,9 @@
 # ARM32 kexec bring-up
 
 Initial ARMv7 handoff is implemented and tested with two-kernel QEMU boots.
-No phone handoff is claimed. Expressltexx and Expressatt use different kernel
-trees and remain independent device PRs.
+[Expressltexx](samsung-expressltexx.md#hardware-validation) has also completed
+two consecutive Pocketboot-to-Pocketboot handoffs on hardware. Expressatt
+uses a different kernel tree and remains independently unvalidated.
 
 ## Supported first-pass contract
 
@@ -12,9 +13,12 @@ trees and remain independent device PRs.
   and older size-less zImages are rejected rather than guessed. The existing
   payload-preparation path can unwrap a gzip-wrapped **zImage**.
 - A destination kernel built for the same platform, using the normal Linux
-  DT-aware `AUTO_ZRELADDR` decompressor. The DT and `/proc/iomem` must agree
-  on the lowest RAM bank, aligned to 2 MiB. Crash-kernel usable-memory
-  overrides and nested/disabled memory banks are not supported.
+  DT-aware `AUTO_ZRELADDR` decompressor, or a fixed `ZRELADDR` matching the
+  lowest RAM bank plus `TEXT_OFFSET`. For a fixed-address build, verify that
+  linker symbol in `arch/arm/boot/compressed/vmlinux`; its value is not in
+  the zImage size tag. The DT and `/proc/iomem` must agree on the lowest RAM
+  bank, aligned to 2 MiB. Crash-kernel usable-memory overrides and
+  nested/disabled memory banks are not supported.
 - All submitted segments and the decompressor workspace fit in the first
   128 MiB PC-derived boot window. Keeping initrd/DTB there is a deliberately
   conservative first-pass limit, not a general Linux ABI requirement:
