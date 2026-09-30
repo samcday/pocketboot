@@ -48,6 +48,11 @@ enum XtaskCommand {
     Bootimg(commands::bootimg::BootImgArgs),
     #[command(about = "build and boot pocketboot under qemu-system-aarch64")]
     Qemu(commands::qemu::QemuArgs),
+    #[command(
+        name = "qemu-boot-policy",
+        about = "check the autoboot / menu policy end to end under QEMU"
+    )]
+    QemuBootPolicy(commands::qemu_boot_policy::QemuBootPolicyArgs),
 }
 
 fn run() -> Result<()> {
@@ -61,5 +66,6 @@ fn run() -> Result<()> {
         XtaskCommand::Preboot(args) => commands::preboot::run(args),
         XtaskCommand::Bootimg(args) => commands::bootimg::run(args),
         XtaskCommand::Qemu(args) => commands::qemu::run(args),
+        XtaskCommand::QemuBootPolicy(args) => commands::qemu_boot_policy::run(args),
     }
 }
