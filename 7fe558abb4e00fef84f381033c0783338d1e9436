@@ -1,0 +1,90 @@
+# TB-X304F LK2nd reboot-mode evidence
+
+Recorded in samcday/pocketboot commit
+7fe558abb4e00fef84f381033c0783338d1e9436; later consolidated at
+a7d0397cc3e01e4fe2bb1bb9aa667bc88fcc8006.
+This concerns LK2nd's reboot-bootloader path, not Linux panic restart.
+
+## Device and build
+
+Lenovo TB-X304F / APQ8017, QRD SKU5, NT35521S video panel.
+Stock fastboot was unlocked; secure=yes, critical-unlocked=false.
+LK2nd source: msm8916-mainline/lk2nd
+517bb38a409d4ac982f09e83a046e4dc71be5029, target lk2nd-msm8952.
+The APQ8017 QRD-SKU5 match addition was present in the tested images.
+This has not been tested on the original author's unit or Xiaomi ferrari.
+
+## Observations
+
+The default MSM8952 PON/hard-reset build accepted a serial-selected
+fastboot reboot bootloader but the tablet returned to Android USB
+17ef:7bc7 without ADB, not stock fastboot.
+
+The lab override below retained USE_PON_REBOOT_REG=1 by default and allowed
+an explicit USE_PON_REBOOT_REG=0 build, selecting LK's existing IMEM cookie
+and warm-reset implementation. The build invocation was:
+
+    make -j16 TOOLCHAIN_PREFIX=arm-none-eabi- \
+        LK2ND_DTBS=msm8917-qrd-sku5.dtb \
+        LK2ND_FORCE_FASTBOOT=1 DEBUG_FBCON=0 USE_PON_REBOOT_REG=0 \
+        LK2ND_VERSION=517bb38-tbx304f-lab-imem lk2nd-msm8952
+
+Image: 299024 bytes, SHA-256
+132ce182d877b42c1645c84f6108202039736b253b9d543929ca257ef2f98d1d.
+A controlled reboot-bootloader test from that running LK2nd image returned
+to verified stock product=MSM8917 in 2.08 seconds; the image RAM-booted again.
+The no-override and explicit-zero generated build settings were checked.
+No replacement bootloader was flashed. These results support investigating
+the protocol selection but are not a controlled proof of every reset-mode
+interaction or a claim about other MSM8952 boards.
+
+## Source rationale and limits
+
+The Lenovo downstream reset path writes bootloader cookie 0x77665500 to IMEM;
+the board removes qcom,store-hard-reset-reason, pointing at a warm-reset
+path rather than a retained PON hard-reset reason. Sources inspected:
+https://github.com/lenovo-devs/android_kernel_lenovo_msm8953/blob/lineage-16.0-tbx304/drivers/power/reset/msm-poweroff.c
+https://github.com/lenovo-devs/android_kernel_lenovo_msm8953/blob/lineage-16.0-tbx304/arch/arm/boot/dts/qcom/tbx304/tbx304-msm-pm8937.dtsi
+
+This does not establish stock aboot's complete mode-selection logic.
+Linux emergency restart uses a different path: panic=-1 alone later returned
+to Android while stock boot was intact. An owner-authorized erase of only
+boot subsequently supplied a fastboot fallback. That later workaround must
+not be presented as LK2nd reboot-mode validation.
+
+Follow-up belongs in samcday/lk2nd: reproduce both protocols from a fixed
+build, determine a suitable board-scoped selection, preserve other boards'
+default behavior, and test reboot/reboot-bootloader/recovery separately.
+PocketBoot should not carry an LK2nd patch stack for this investigation.
+
+## Archived prototype (not an upstream-ready fix)
+
+~~~~diff
+Subject: [PATCH] project: msm8952: allow selecting the IMEM restart protocol
+
+Bootstrap experiment for lk2nd 517bb38a409d4ac982f09e83a046e4dc71be5029.
+Keep the existing PON default for other builds. The TB-X304F lab build can
+select USE_PON_REBOOT_REG=0 to use LK's existing IMEM cookie and warm-reset
+path for bootloader/recovery requests.
+
+The Lenovo TB-X304 kernel writes 0x77665500 to IMEM for "bootloader" and
+deletes qcom,store-hard-reset-reason from the board's PON node. In contrast,
+the default LK2nd PON/hard-reset path returned this unit to Android when
+asked to reboot to its bootloader. This override follows that source
+evidence. The TB-X304F lab build with value 0 subsequently returned to stock
+fastboot in 2.08 seconds in a controlled reboot-bootloader test.
+
+diff --git a/project/msm8952.mk b/project/msm8952.mk
+--- a/project/msm8952.mk
++++ b/project/msm8952.mk
+@@ -137,7 +137,8 @@
+ 
+ #Use PON register for reboot reason
+ ENABLE_REBOOT_MODULE := 1
+-DEFINES += USE_PON_REBOOT_REG=1
++USE_PON_REBOOT_REG ?= 1
++DEFINES += USE_PON_REBOOT_REG=$(USE_PON_REBOOT_REG)
+ 
+ # Enable unit test FW
+ ifeq ($(ENABLE_UNITTEST_FW),1)
+~~~~
