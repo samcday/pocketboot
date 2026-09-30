@@ -4,16 +4,17 @@
 //! The syscall entry is the zImage itself; a segment starting with the FDT
 //! magic makes machine_kexec_prepare() select that segment as r2.
 
-use std::io;
+use std::{borrow::Cow, io};
 
-use super::{PAGE_SIZE, fdt, memory::*, page_align};
+use super::{PAGE_SIZE, fdt, is_raw_arm_zimage, memory::*, page_align};
 
-const ZIMAGE_MAGIC: u32 = 0x016f2818;
 const EXTENSION_MAGIC: u32 = 0x45454545;
 const KERNEL_SIZE_TAG: u32 = 0x5a534c4b;
 const TEXT_OFFSET: u64 = 0x8000;
 const BOOT_WINDOW: u64 = 128 * 1024 * 1024;
 const MAX_DTB_SIZE: usize = 2 * 1024 * 1024;
+// Non-LPAE ARM initially maps only two 1 MiB sections around r2.
+const DTB_ALIGNMENT: u64 = 1024 * 1024;
 // Supported decompressor contract, not a field in the zImage header.
 // The tested Linux gzip decompressors have 24 bytes of BSS. See the scope
 // and symbol-validation requirement in docs/arm32-kexec.md.
@@ -27,7 +28,7 @@ struct ZImage {
 
 impl ZImage {
     fn parse(kernel: &[u8]) -> io::Result<Self> {
-        if kernel.len() < 60 || le32(kernel, 0x24)? != ZIMAGE_MAGIC {
+        if !is_raw_arm_zimage(kernel) {
             return invalid("ARM32 handoff requires a zImage, not a raw Image or ARM64 image");
         }
         let start = le32(kernel, 0x28)?;
@@ -95,21 +96,34 @@ impl ZImage {
     }
 }
 
-struct Segment {
+pub(super) fn appended_dtb(kernel: &[u8]) -> io::Result<Option<&[u8]>> {
+    let image = ZImage::parse(kernel)?;
+    let tail = &kernel[image.len..];
+    if !tail.starts_with(&0xd00dfeedu32.to_be_bytes()) {
+        return Ok(None);
+    }
+    let size = fdt::blob_size(tail)?;
+    if tail[size..].iter().any(|byte| *byte != 0) {
+        return invalid("multiple appended DTBs or trailing data; supply an explicit DTB");
+    }
+    Ok(Some(&tail[..size]))
+}
+
+struct Segment<'a> {
     name: &'static str,
-    data: Vec<u8>,
+    data: Cow<'a, [u8]>,
     range: PhysRange,
 }
 
-struct Plan {
+struct Plan<'a> {
     entry: u64,
-    segments: Vec<Segment>,
+    segments: Vec<Segment<'a>>,
 }
 
-impl Plan {
+impl<'a> Plan<'a> {
     fn build(
-        kernel: &[u8],
-        initrd: Option<&[u8]>,
+        kernel: &'a [u8],
+        initrd: Option<&'a [u8]>,
         dtb: &[u8],
         cmdline: &str,
         iomem: &str,
@@ -128,15 +142,13 @@ impl Plan {
         {
             return invalid("ARM32 needs an agreed, 2 MiB-aligned DTB/System RAM base");
         }
-        // AUTO_ZRELADDR starts with pc & 0xf8000000. Never move the
-        // decompressor into another 128 MiB window to dodge a reservation.
+        // AUTO_ZRELADDR starts with pc & 0xf8000000. An unaligned bank
+        // requires the v5.12+ DT-aware decompressor (or matching fixed
+        // ZRELADDR); the size tag alone cannot prove that build contract.
+        // Never move into another 128 MiB window to dodge a reservation.
         let limit = checked_add(align_down(base, BOOT_WINDOW), BOOT_WINDOW)?.min(u32::MAX as u64);
         let entry = checked_add(base, TEXT_OFFSET)?;
         let run_end = page_align(checked_add(entry, image.run_size)?)?;
-        let workspace = PhysRange {
-            start: base,
-            end: run_end,
-        };
         let mut usable = parse_iomem(iomem);
         for (start, end) in fdt::reserved_ranges(dtb)? {
             subtract_range(&mut usable, PhysRange { start, end });
@@ -150,26 +162,27 @@ impl Plan {
                 "ARM zImage decompression area is reserved or outside the first 128 MiB",
             );
         }
-        let mut occupied = vec![workspace];
+        // min=run_end keeps later payloads out of the entire workspace.
+        let mut occupied = Vec::new();
         // Strip any appended DTB. Otherwise ARM_APPENDED_DTB can override the
-        // patched DTB passed in r2. The zero tail also prevents stale RAM at
-        // _edata from looking like an appended FDT.
-        let mut data = kernel[..image.len].to_vec();
-        data.extend_from_slice(&[0; 4]);
+        // patched DTB passed in r2. A four-byte tail alone is insufficient:
+        // head.S can probe _edata again after relocating itself. Make kexec
+        // zero-fill the entire supported workspace beyond the image, so both
+        // probes see zeros even where the previous kernel left a DTB.
         let mut segments = vec![Segment {
             name: "zImage",
             range: PhysRange {
                 start: entry,
-                end: entry + page_align(data.len() as u64)?,
+                end: run_end,
             },
-            data,
+            data: Cow::Borrowed(&kernel[..image.len]),
         }];
         // Keep this first implementation entirely in the boot window.
         // That is deliberately stricter than Linux's general boot protocol:
         // /proc/iomem alone cannot tell us the destination kernel's lowmem end.
-        let mut place = |size: usize| -> io::Result<PhysRange> {
+        let mut place = |size: usize, alignment: u64| -> io::Result<PhysRange> {
             let size = page_align(size as u64)?;
-            let start = find_region(&usable, &occupied, size, PAGE_SIZE, run_end, limit)
+            let start = find_region(&usable, &occupied, size, alignment, run_end, limit)
                 .ok_or_else(|| bad("no ARM boot-window RAM for initrd/DTB"))?;
             let range = PhysRange {
                 start,
@@ -180,11 +193,11 @@ impl Plan {
         };
         let initrd_range = match initrd.filter(|data| !data.is_empty()) {
             Some(data) => {
-                let range = place(data.len())?;
+                let range = place(data.len(), PAGE_SIZE)?;
                 let bytes_end = checked_add(range.start, data.len() as u64)?;
                 segments.push(Segment {
                     name: "initrd",
-                    data: data.to_vec(),
+                    data: Cow::Borrowed(data),
                     range,
                 });
                 Some((range.start, bytes_end))
@@ -195,10 +208,10 @@ impl Plan {
         if data.len() > MAX_DTB_SIZE {
             return invalid("ARM destination DTB exceeds 2 MiB");
         }
-        let range = place(data.len())?;
+        let range = place(data.len(), DTB_ALIGNMENT)?;
         segments.push(Segment {
             name: "dtb",
-            data,
+            data: Cow::Owned(data),
             range,
         });
         Ok(Self { entry, segments })
@@ -302,6 +315,7 @@ fn invalid<T>(message: &str) -> io::Result<T> {
 
 #[cfg(test)]
 mod tests {
+    use super::super::ARM_ZIMAGE_MAGIC as ZIMAGE_MAGIC;
     use super::*;
 
     fn image() -> Vec<u8> {
@@ -419,9 +433,10 @@ mod tests {
         let plan = Plan::build(&kernel, Some(&[1; 8193]), &dtb(&[]), "test", RAM).unwrap();
         assert_eq!(plan.entry, 0x80208000);
         assert_eq!(plan.segments.len(), 3);
-        assert_eq!(plan.segments[0].data.len(), 4100);
-        assert_eq!(&plan.segments[0].data[4096..], &[0; 4]);
-        assert_eq!(plan.segments[0].range.end - plan.entry, 8192);
+        assert_eq!(plan.segments[0].name, "zImage");
+        assert_eq!(plan.segments[0].data.len(), 4096);
+        assert_eq!(plan.segments[0].data.as_ptr(), kernel.as_ptr());
+        assert_eq!(plan.segments[0].range.end - plan.entry, 0x424000);
         assert_eq!(plan.segments[1].range.start, 0x8062c000);
         assert_eq!(plan.segments[2].data[..4], [0xd0, 0x0d, 0xfe, 0xed]);
         for (i, segment) in plan.segments.iter().enumerate() {
@@ -432,6 +447,38 @@ mod tests {
                 assert!(!segment.range.overlaps(other.range));
             }
         }
+    }
+
+    #[test]
+    fn zero_fill_covers_the_relocated_appended_dtb_probe() {
+        let kernel = image(); // Its _edata is 32-byte aligned.
+        let plan = Plan::build(&kernel, None, &dtb(&[]), "", RAM).unwrap();
+        let segment = &plan.segments[0];
+        let memsz = (segment.range.end - segment.range.start) as usize;
+        let relocated_edata = 0x400000 + kernel.len();
+        assert!(relocated_edata + 4 <= memsz);
+        // Model kexec's copy plus zero-fill over stale destination contents.
+        let mut memory = vec![0xd0; memsz];
+        memory[relocated_edata..relocated_edata + 4].copy_from_slice(&0xd00dfeedu32.to_be_bytes());
+        memory[..segment.data.len()].copy_from_slice(&segment.data);
+        memory[segment.data.len()..].fill(0);
+        assert_eq!(&memory[kernel.len()..kernel.len() + 4], &[0; 4]);
+        assert_eq!(&memory[relocated_edata..relocated_edata + 4], &[0; 4]);
+    }
+
+    #[test]
+    fn selects_a_single_bounded_appended_dtb() {
+        let blob = dtb(&[]);
+        let mut kernel = image();
+        assert!(appended_dtb(&kernel).unwrap().is_none());
+        kernel.extend_from_slice(&blob);
+        kernel.extend_from_slice(&[0; 8]);
+        assert_eq!(appended_dtb(&kernel).unwrap(), Some(blob.as_slice()));
+        kernel.extend_from_slice(&blob);
+        assert!(appended_dtb(&kernel).is_err());
+        let mut truncated = image();
+        truncated.extend_from_slice(&blob[..blob.len() - 1]);
+        assert!(appended_dtb(&truncated).is_err());
     }
 
     #[test]
@@ -454,8 +501,9 @@ mod tests {
 
     #[test]
     fn initrd_placement_skips_reservations_and_obeys_the_boot_window() {
+        let kernel = image();
         let plan = Plan::build(
-            &image(),
+            &kernel,
             Some(&[1; 4096]),
             &dtb(&[(0x8062c000, 0x1000)]),
             "",
@@ -463,7 +511,7 @@ mod tests {
         )
         .unwrap();
         assert_eq!(plan.segments[1].range.start, 0x8062d000);
-        let tiny = "80200000-8062cfff : System RAM";
+        let tiny = "80200000-8062bfff : System RAM";
         assert!(Plan::build(&image(), Some(&[1; 4096]), &dtb(&[]), "", tiny).is_err());
         let mut huge = image();
         huge[76..80].copy_from_slice(&0x8000000u32.to_le_bytes());
@@ -481,9 +529,40 @@ mod tests {
     }
 
     #[test]
+    fn metadata_cannot_escape_above_the_boot_window_even_when_ram_exists() {
+        let kernel = image();
+        let tree = dtb(&[(0x8062c000, 0x88000000 - 0x8062c000)]);
+        for initrd in [None, Some(&[1; 4096][..])] {
+            let error = Plan::build(&kernel, initrd, &tree, "", RAM).err().unwrap();
+            assert!(error.to_string().contains("no ARM boot-window RAM"));
+        }
+    }
+
+    #[test]
+    fn large_dtb_fits_in_the_two_early_mapped_sections() {
+        let kernel = image();
+        let mut tree = dtb(&[]);
+        // Unused strings are legal and retained by /chosen patching.
+        let strings = u32::from_be_bytes(tree[32..36].try_into().unwrap());
+        tree.resize(tree.len() + 0x180000, 0);
+        let total = tree.len() as u32;
+        tree[4..8].copy_from_slice(&total.to_be_bytes());
+        tree[32..36].copy_from_slice(&(strings + 0x180000).to_be_bytes());
+        // Without section alignment this puts r2 just below a section boundary.
+        let initrd = vec![1; 0xd3000];
+        let plan = Plan::build(&kernel, Some(&initrd), &tree, "", RAM).unwrap();
+        let dtb = plan.segments.last().unwrap();
+        assert_eq!(dtb.name, "dtb");
+        assert!(dtb.data.len() > DTB_ALIGNMENT as usize);
+        assert_eq!(dtb.range.start % DTB_ALIGNMENT, 0);
+        assert!(dtb.range.end <= dtb.range.start + 2 * DTB_ALIGNMENT);
+    }
+
+    #[test]
     fn absent_or_empty_initrd_uses_only_kernel_and_dtb_segments() {
+        let kernel = image();
         for initrd in [None, Some(&[][..])] {
-            let plan = Plan::build(&image(), initrd, &dtb(&[]), "", RAM).unwrap();
+            let plan = Plan::build(&kernel, initrd, &dtb(&[]), "", RAM).unwrap();
             assert_eq!(plan.segments.len(), 2);
         }
     }
