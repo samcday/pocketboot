@@ -2172,3 +2172,47 @@ diff --git a/project/msm8952.mk b/project/msm8952.mk
  ifeq ($(ENABLE_UNITTEST_FW),1)
 ~~~~
 <!-- END patches/lk2nd/tb-x304f-imem-restart.patch -->
+
+## SD-host configuration audit after pem120 pmOS report
+
+Recorded 2026-09-30T19:33:39.837719+00:00.
+Source inspected: pocketboot 014a0decdce09eabe88595dffef4bc4b1e4a71b6
+(review cleanup; configs/kernel patches unchanged from this image).
+Kernel pin: pem120/linux-msm89x7 a51b91b503307d35902447dd1f90db765372cf3b.
+Existing Sam-unit image: 4,823,040 bytes, SHA-256
+942ab820c51a608a33772d240c9f5d12d2dc29183d49533dd4202030141f3378.
+No build, new device command, GPIO write, filesystem mount, flash, or card
+partition change was performed for this audit.
+
+Report: pem120 says PocketBoot works on his Lenovo Tab 4 10 but does not find
+pmOS on SD. His exact image, partition table, boot files and kernel log have
+not yet been supplied. Do not substitute Sam's saved hardware results for his.
+
+Inspection used the generated pinned board/SoC DTS, the image's saved
+kernel.config and candidate.dtb, and saved dmesg/binding-health captures.
+Kconfig was checked with rg; the actual DT with fdtget; upstream line numbers
+with git show of the exact kernel pin. fdtget decimal values use -t u (not -t d).
+
+Findings:
+- MMC, MMC_BLOCK, MMC_SDHCI, MMC_SDHCI_PLTFM, MMC_SDHCI_MSM,
+  PINCTRL_MSM8917, REGULATOR_QCOM_SMD_RPM, QCOM_RPMPD and PM_OPP are built in.
+  MODULES is disabled: there is no missing module-loading step.
+- MBR/GPT partition parsing, FAT/VFAT and EXT4 with EXT2 compatibility are
+  built in. That does not establish support for arbitrary boot layouts.
+- The built SDCC2 node /soc@0/mmc@7864900 is enabled, with a 4-bit bus,
+  GPIO67 card detect, dedicated SD clock/command/data pinctrl, RPM l11/l12
+  supplies and the VDDCX RPM power domain. The public board's SD overlay is
+  at msm8917-lenovo-tbx304x.dts:377-386 in the kernel pin.
+- The private stock-F DT and built DT both encode GPIO67, flags 0, for card
+  detect. This is a derived property comparison, not independent electrical
+  verification and not a justification to change polarity.
+- Saved Sam-unit console: at 1.147645 s, mmc1 registers on 7864900.mmc using
+  ADMA 64-bit. The saved 52-second health capture retains that host and its
+  GPIO67 card-detect IRQ. It does not show successful enumeration of an SD
+  card and cannot establish card detection on pem120's unit.
+
+Conclusion: the shared SD driver and board plumbing are present. Need the
+reporting unit's /proc/partitions and MMC/SDHCI/discovery log with its card
+inserted before boot to distinguish host/card failure from boot-layout or
+scan-timing failure. Do not add drivers or alter the DT merely from the
+absence of a pmOS menu entry. Userspace discovery audit is separate.
