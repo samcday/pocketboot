@@ -1,0 +1,2174 @@
+# TB-X304F bring-up evidence and retired lab tooling
+
+Repository: https://github.com/samcday/pocketboot
+Tested source snapshot: a7d0397cc3e01e4fe2bb1bb9aa667bc88fcc8006.
+Kernel: pem120/linux-msm89x7 a51b91b503307d35902447dd1f90db765372cf3b,
+Linux 7.0.9; normal PocketBoot/BusyBox initramfs, LK2nd-first RAM boot.
+Device: Lenovo TB-X304F / APQ8017. These results do not certify other variants.
+
+## Conclusions and scope
+
+The normal profile reaches USB fastboot/ADB and HS400 eMMC without a probe
+wrapper or manual re-probe. Small GPT readback matched the original backup.
+The owner confirmed the firmware framebuffer is visible. The final driver-only
+trial identifies Goodix ID 9111 / version 4011 and PocketBoot opens event3;
+Sam subsequently reported "Looking good", but no measured orientation or
+multi-touch campaign is recorded. Large transfers, storage writes, kexec,
+PocketFed and complete power/charging policy remain unvalidated.
+
+Latest image: 4823040 bytes, SHA-256
+942ab820c51a608a33772d240c9f5d12d2dc29183d49533dd4202030141f3378.
+The two touch Kconfig changes were I2C_QUP=y and TOUCHSCREEN_GOODIX=y; DT,
+command line and normal initramfs matched the known-working display image.
+Full image build, 190 PocketBoot tests and 54 xtask tests passed before review.
+The separate probe archive suite had 15 host-only tests; it is archived below.
+
+The following files are preserved byte-for-byte from that snapshot at Sam's
+request, rather than maintained as permanent project documentation/tooling.
+Historical statements inside them describe the checkpoint at which they were
+written; later sections supersede earlier hypotheses. The probe wrapper is
+lab-only and intentionally panics after its guards/deadline: do not run it on
+a host, in a PID namespace, or as an ordinary persistent image.
+
+These are already-public sanitized records and source, not raw partition/RAM
+captures. The private original-partition backups are NOT stored in this note.
+Keep those backups outside any worktree before cleanup. The owner-authorized
+boot erase is historical device state, not a command performed by the build.
+
+## Archive
+
+Each fenced payload has its original repository path, byte count and SHA-256.
+The four-tilde fences and archive markers are packaging, not file contents.
+
+## Archived file: docs/tb-x304f-bringup.md
+
+Bytes: 52074; SHA-256: `e6687b2eb024e861b046af96b1dc30abfdb947996b14733ea437ab6ae8cb83dc`.
+
+<!-- BEGIN docs/tb-x304f-bringup.md -->
+~~~~text
+# Lenovo Tab 4 10 TB-X304F bring-up
+
+The experimental profile now has repeatable PocketBoot RAM-boots, working USB
+fastboot diagnostics, verified eMMC reads and owner-confirmed visible UI.
+This is a bring-up record, not a fully validated tablet port or a PocketFed
+installation.
+
+## Current status
+
+- Stock fastboot confirms unlocked; secure boot remains enabled and critical
+  partitions remain locked.
+- LK2nd RAM-boots with working USB commands, NT35521S display handoff, logs
+  and screenshots. Its device-scoped IMEM build can return to stock fastboot.
+  No replacement image is installed in `boot` or `aboot`.
+- At the owner's explicit request, **only `boot` was erased** after verifying
+  the original 64 MiB backup. A normal reboot now falls back to stock fastboot
+  in about 2.1 seconds. Recovery, aboot and GPT were not changed.
+- The normal image **boots PocketBoot with USB and eMMC automatically**.
+  Three RAM-boots verified `product=pocketboot`, `is-userspace=yes` and
+  `compatible=lenovo,tbx304x` in 2.062, 2.338 and 1.612 seconds from the host's
+  Linux boot invocation. No diagnostic wrapper or manual driver re-probe is
+  present in this image.
+- All 48 GPT partitions appear on the 14.6 GiB HS400 eMMC. A 17408-byte
+  read of the primary GPT through Linux and USB matched the original EDL
+  backup byte-for-byte. This validates small read-only transfers, not large
+  uploads, writes or kexec.
+- Linux starts all four CPUs and PocketBoot reports its 800x1280 DRM UI ready.
+  The owner confirmed visible framebuffer output after preserving the
+  firmware-enabled LCD rail during fixed-regulator probe. Goodix now probes
+  and PocketBoot opens its input device; physical touch response and
+  orientation still await confirmation. Native display, charging, Wi-Fi and
+  audio are not validated.
+- The target now passes `panic=-1`. With `boot` empty, one complete unattended
+  panic cycle returned to verified stock fastboot in 15.5 seconds from the
+  Linux boot command; lk2nd reloaded and the crash log was captured by
+  16.7 seconds. This covers the observed panic, not arbitrary hard hangs.
+- Stock Android previously stopped at its startup/decryption password.
+  It cannot boot while `boot` is empty; no factory reset has been issued.
+  Preserve the private original images before cleaning `target/` or removing
+  the worktree.
+- Normal PocketBoot reboot returned to stock fastboot in 4.041 and
+  6.301 seconds in the repeat trials. The tablet was left running PocketBoot.
+  Fastboot and ADB shells work, and USB remained configured at high speed
+  after more than 15 minutes. No additional partition was written during
+  these diagnostics.
+
+## Verified starting state
+
+Read-only queries against one stock TB-X304F on 2026-09-29 returned:
+
+| Query | Result |
+| --- | --- |
+| `getvar product` | `MSM8917` |
+| `getvar secure` | `yes` |
+| `getvar unlocked` | `no` |
+| `oem device-info` | Tampered, unlocked, and critical unlocked all `false` |
+| `flashing get_unlock_ability` | `0` |
+| `getvar max-download-size` | `0x1ff00000` (511 MiB) |
+| `getvar partition-size:boot` | `0x4000000` (64 MiB) |
+| `getvar partition-size:recovery` | `0x4000000` (64 MiB) |
+| `getvar partition-size:aboot` | `0x100000` (1 MiB) |
+| `getvar partition-size:devinfo` | `0x100000` (1 MiB) |
+| `getvar partition-size:config` | `0x8000` (32 KiB) |
+
+The bootloader version, display-panel field, and `partition-size:frp` were
+empty. An empty value with an `OKAY` response is not evidence that a partition
+is absent. These results do not identify the Android firmware version or the
+partition layout well enough to authorize a write.
+
+This is the pre-unlock baseline. The disabled Android OEM-unlock control
+corresponds to unlock ability being disabled in the bootloader.
+
+## Authorized unlock attempt
+
+The owner has authorized unlocking this expendable development unit, including
+data loss and bricking risk. That authorization covers the EDL workaround;
+preserving original partitions and verifying the edit remain technical
+requirements, not additional consent gates.
+
+The first attempts on 2026-09-29 established:
+
+| Operation | Result |
+| --- | --- |
+| Stock `fastboot flashing unlock` | Rejected: `oem unlock is not allowed` |
+| Stock `fastboot oem edl` | Rejected: `unknown command` |
+| Stock `fastboot oem reboot-edl` | Rejected: `unknown command` |
+| Stock `fastboot reboot` | Returned to Android, USB `17ef:7bc7` |
+
+All fastboot commands selected the tablet's serial explicitly. Lock-state
+queries after the rejected normal unlock still showed locked and untampered.
+After the owner enabled USB debugging and authorized the host, stock Android
+provided the following identity:
+
+| Source | Result |
+| --- | --- |
+| Android model/build | TB-X304F, `TB-X304F_S001016_190329_ROW`, Android 8.1.0 |
+| `soc0/machine`, `soc0/soc_id` | `APQ8017`, `307` |
+| Stock DT `qcom,msm-id` | `<303 0 307 0 308 0 309 0>` |
+| Stock DT `qcom,board-id` | `<0x1000b 0>` |
+| Selected panel in DT bootargs | `qcom,mdss_dsi_nt35521s_wxga_video` |
+
+Serial-selected `adb reboot edl` successfully entered `05c6:9008` on the same
+physical USB port. A Sahara-only query matched both the HWID and full signing
+root hash of the programmer below; the programmer was then accepted.
+
+Before writing, the full `devinfo`, `aboot`, `abootbak`, `boot`, `recovery`,
+`config`, and `misc` partitions were saved. Two independent `devinfo` reads
+matched; both GPT copies were saved and their header/table CRCs verified.
+Original files and SHA-256 manifests are retained read-only under the ignored,
+host-local `target/tb-x304f-lab/original-partitions/`. These backups are not in
+the PR and must be preserved before removing this worktree or cleaning
+`target/`; they have not been copied to a separate recovery location.
+
+The original `devinfo` began with `ANDROID-BOOT!` and had DWORD values
+`0, 0, 0, 1` at offsets `0x10`, `0x14`, `0x18`, and `0x1c`. The staged image
+changed **only byte `0x10`, from `0` to `1`**. It left `0x18` unchanged instead
+of copying the second edit in the guide. An immediate pre-write read still
+matched the original; after writing the 1 MiB `devinfo` image, a full readback
+matched the staged image byte-for-byte. No boot, recovery, bootloader, config,
+or GPT partition was written.
+
+After the Firehose reset attempt the tablet returned as Android USB
+`17ef:7bc7`, without ADB. The reset command also logged a default-sector-size
+mismatch before USB disconnected. The owner observed **"To start Android,
+enter your password"**, despite not having set a password. This is the
+post-unlock condition described in the guide, not an ADB authorization prompt.
+Stock recovery's factory data reset is the documented route back to usable
+Android; it has deliberately not been performed for this Linux bootstrap.
+
+After the owner forced the tablet back to stock fastboot, the bootloader
+confirmed `Device unlocked: true`, `Device critical unlocked: false`, and
+`Device tampered: false`. Its getvars returned `unlocked=yes`, `secure=yes`,
+and still `get_unlock_ability=0`. The disabled unlock-ability setting is not
+the current lock state. This confirms the one-byte edit worked on this unit,
+without changing the critical-unlock flag or writing bootloader partitions.
+
+## Read-only preflight
+
+Keep each tablet's serial and USB-port mapping in host-local lab notes, not in
+the public repository. Explicitly select the intended tablet for every
+command, even when only one tablet appears connected. Do not select the first
+device in an enumeration: the lab also contains other fastboot targets.
+
+With `SERIAL` set to the intended tablet's fastboot serial:
+
+```sh
+(
+    : "${SERIAL:?Set SERIAL to the intended tablet's fastboot serial}"
+    preflight_status=0
+    for variable in product secure unlocked max-download-size \
+        partition-size:boot partition-size:recovery partition-size:aboot \
+        partition-size:devinfo partition-size:config partition-size:frp
+    do
+        timeout 5s fastboot -s "$SERIAL" getvar "$variable" || preflight_status=1
+    done
+    timeout 5s fastboot -s "$SERIAL" oem device-info || preflight_status=1
+    timeout 5s fastboot -s "$SERIAL" flashing get_unlock_ability || preflight_status=1
+    exit "$preflight_status"
+)
+```
+
+These are queries only. Record failures and empty fields rather than guessing
+their meaning. A failed query does not skip the remaining diagnostics; the
+subshell returns nonzero if any query fails. `MSM8917` is a generic platform
+identity, not enough to tell two tablets apart or prove the exact Lenovo model.
+
+Lenovo's [platform specification][lenovo-spec] identifies the Wi-Fi TB-X304F
+as **APQ8017** and the LTE TB-X304L as **MSM8917** (Snapdragon 425, four
+Cortex-A53 cores). Do not select an LTE programmer, firmware image, or board
+DT from the stock fastboot product string.
+
+## Unlock gate
+
+The [TB-X304F/L greyed-out OEM-unlock guide][unlock-guide] describes a direct
+EDL/Firehose `devinfo` rewrite, **not** a normal user-confirmed fastboot unlock.
+The linked archived BLUnlocker scripts independently confirm the partition
+operations: [dump_devinfo.bat][devinfo-read] uses `emmcdl -d devinfo` to read
+the partition into a host file; [unlock.bat][devinfo-write] uses
+`emmcdl -b devinfo devinfo.img` to write that file back. The write script prints
+"Bootloader Unlocked" without checking the command's exit status.
+
+Although the live XDA page returned a web challenge, its [archived
+illustration][devinfo-illustration] was recovered. It circles the bytes at
+offsets **`0x10` and `0x18`**, both set to **`0x01`**, in a file starting with
+`ANDROID-BOOT!`. The image SHA-256 is
+`08854b18206856a5dcc9690625c72235f6e428bad68ff3e46bf422f61c03fe14`.
+
+This verifies what the guide depicts, not every firmware's partition layout.
+In particular, do not label `0x18` as "critical unlocked": known LK
+layouts use that position for different fields. Inspect the original dump
+and preserve all unrelated bytes rather than transplanting the guide's data
+or invoking a generic unlock helper that can choose a different partition.
+
+The guide offers model-specific Firehose attachments; this session used the
+stock-package programmer described below. Restoring the original partition
+has not been tested. The scripts contain no
+explicit data-wipe or fuse operation, but the guide describes a possible
+recovery data-format step if the modified device boots to a password prompt.
+Treat all user data as at risk.
+
+Before using this workaround:
+
+1. Obtain the owner's explicit permission for bootloader unlocking and the
+   possible factory reset; back up anything they want to keep.
+2. Verify the full procedure and its applicability to the exact model and
+   firmware. A search snippet or a similarly named Lenovo tablet is not
+   sufficient.
+3. Identify the exact TB-X304F-compatible programmer and recovery firmware.
+   Establish a verified readback path and preserve a byte-identical original
+   `devinfo` backup before proposing edits. Keep device-unique data and raw
+   backups private.
+4. Ensure the owner's authorization covers the low-level partition write;
+   honor authorization already given for this operation. Do not erase a
+   protection partition, overwrite bootloader stages, or transplant another
+   tablet's partition image as an experiment.
+5. Re-query the lock state after the unlock/reset. Do not infer success from
+   the host command's exit status alone.
+
+The one-byte write was followed by a successful stock-fastboot unlock check
+on this unit; recovery of stock Android remains a separate step.
+Unlocking the bootloader is not the same operation as disabling secure-boot
+fuses; do not attempt fuse changes.
+
+### Accepted programmer
+
+The XDA TB-X304F programmer attachment is ID `5156731`; the archived page
+lists it, but the ZIP itself was not recovered. Instead, the programmer was
+extracted from [this third-party mirror's TB-X304F firmware package][stock-zip]:
+
+- Archive: `TB-X304F_S001017_2211021443_Q21000_ROW_GB.zip`.
+- Member: `TB-X304F_S001017_2211021443_Q21000_ROW_GB/image/prog_emmc_firehose_8917_ddr.mbn`.
+- Size: 375580 bytes; SHA-256:
+  `9dadea461c392fb993831b5af3cfcfe7067ab7caef9919b5269887a01ad85ea2`.
+- Parsed certificate HWID: `000550E100000000` (APQ8017), OEM/model `0000`.
+- Parsed root-certificate hash:
+  `92242cf8f6fad111a0b0e2aef2fceb6932ac73d2451037cdc6059da3a4f6dd9d`.
+
+HTTP range reads retrieved the ZIP directory and this member; its ZIP CRC
+was checked. The whole archive was not downloaded or hash-verified, and the
+mirror is not a Lenovo-origin download. On this unit, Sahara reported exactly
+the HWID and full PK hash above, and successfully loaded this programmer.
+Firehose reported eMMC with 512-byte sectors and 30535680 total sectors.
+
+The host's installed `edl` launcher failed because its Python package was
+missing. Running `python3 ~/src/edl/edl.py --help` from the source checkout at
+`51e11022455d26bcf0b8305b930c474e9b3c81ad` worked, as did its offline
+`fhloaderparse.py`. Neither the checkout nor the system installation was
+modified. Run tools from an ignored local artifact directory and pass
+`PYTHONDONTWRITEBYTECODE=1` when using an unattached source checkout.
+
+Do not trust that client's `gpt` success message alone: at this revision the
+file-writing statements are commented out, so it says "Dumped" without
+creating the files. This session instead read sectors explicitly, then
+checked both GPT header CRCs, both entry-array CRCs, and matching entries.
+The verified files are `gpt/gpt-main-with-mbr.bin` and
+`gpt/gpt-backup-full.bin` in the private backup directory. The backup reserves
+32 sectors for its entry array even though the 48 entries occupy only 12;
+derive its starting LBA from the backup header, not from entry count alone.
+
+## Existing lk2nd support
+
+Source audit on 2026-09-29 found a useful distinction between the local
+checkout, the latest release, and upstream development:
+
+- The inspected local `~/src/lk2nd` checkout at `4a88d4cc9` has no TB-X304
+  device definition.
+- Upstream [commit 517bb38][lk2nd-tbx304x] adds **Lenovo Tab 4 10x (TB-X304x)**
+  in `lk2nd/device/dts/msm8952/msm8917-qrd-sku5.dts`, built by the
+  `lk2nd-msm8952` target. Its root uses `qcom,msm-id = <QCOM_ID_MSM8917 0>`
+  and `qcom,board-id = <QCOM_BOARD_ID(QRD, 1, 0) 0>`. Its board definition
+  selects `lenovo,tbx304x`, the `msm8917-lenovo-tbx304x` kernel DTB, and
+  NT35521S, NT35521S-BOE, or JD9364-BOE panel variants.
+- [Release 23.1][lk2nd-release] predates that addition. Its generic
+  `lk2nd-msm8952.img` is not evidence of TB-X304 support: it lacks the QRD SKU5
+  DTB. The MSM8917 MTP DTB is not a substitute for the tablet's QRD selection.
+- The earlier [PR #664][lk2nd-pr] was closed during cleanup of unrelated
+  formatting changes, not a final rejection of device support; the clean
+  addition landed later.
+
+The stock identity now confirms that the panel/board match, but upstream's
+root SoC list omits APQ8017. The small
+[bootstrap patch](../patches/lk2nd/tb-x304f-apq8017.patch) adds APQ8017 while
+retaining MSM8917; no other lk2nd source changes were needed for the initial
+bootstrap. The addition was present from the first tested build; an
+unmodified control image has not been tested. This is positive evidence for
+the patched image, not an observed failure of the unmodified image or proof
+that this unit differs from the original device-support author's tablet.
+
+A candidate was built from a source archive of commit `517bb38`, under
+`target/tb-x304f-lab/`, leaving `~/src/lk2nd` untouched. Apply the bootstrap
+patch with `patch -p1` in that extracted source, then build there:
+
+```sh
+make -j16 TOOLCHAIN_PREFIX=arm-none-eabi- \
+    LK2ND_DTBS=msm8917-qrd-sku5.dtb \
+    LK2ND_FORCE_FASTBOOT=1 DEBUG_FBCON=1 \
+    LK2ND_VERSION=517bb38-tbx304f-lab lk2nd-msm8952
+```
+
+The output `build-lk2nd-msm8952/lk2nd.img` is 301072 bytes, SHA-256
+`394ae757926f15bd38e2901c29033075ae76ba870cf523250787947371b6889a`.
+Its appended DT was checked for SoC IDs `<303 0 307 0>` and board ID
+`<0x1000b 0>`, and checked to be present inside the Android boot image.
+The DT filter takes the basename for this target: prefixing it with
+`msm8952/` silently filtered out every appended DT in an earlier build.
+
+The forced-fastboot build is for **transient bootstrap**, not installation.
+Never flash its `emmc_appsboot.mbn` output over the signed stock `aboot`.
+
+### Verified transient boot
+
+Stock fastboot accepted this image using `fastboot boot`. The host's download
+and boot command completed in about 0.024 seconds. Retrieved lk2nd logs show
+device detection at 80 ms, framebuffer detection at 100 ms, and fastboot
+processing commands at 600 ms; these are lk2nd's own startup timestamps, not
+a measured complete boot-cycle duration.
+
+The running image reported:
+
+| Getvar | Result |
+| --- | --- |
+| `product` | `lk2nd-msm8952` |
+| `lk2nd:version` | `517bb38-tbx304f-lab` |
+| `lk2nd:model` | `Lenovo Tab 4 10 (TB-X304X)` |
+| `lk2nd:compatible` | `lenovo,tbx304x` |
+| `lk2nd:panel` | `qcom,mdss_dsi_nt35521s_wxga_video` |
+
+The `TB-X304X` label comes from the reused family definition; the unit was
+independently identified as a TB-X304F. Use **`lk2nd:version`**, not
+`version-bootloader` or `lk2nd-version`, to identify this build. An initial
+watcher checked the wrong variable and timed out even though lk2nd had booted.
+
+The stock-initialized framebuffer is 800x1280 RGB888, base `0x90001000`,
+stride 2400. USB screenshot capture succeeded. The handed-in DT reports
+two 1 GiB RAM banks at `0x80000000` and `0xc0000000`.
+
+Once `product=lk2nd-msm8952` is confirmed on the explicitly selected device,
+retrieve diagnostics without writing a partition:
+
+```sh
+(
+    : "${SERIAL:?Set SERIAL to the intended tablet's fastboot serial}"
+    : "${OUT:?Set OUT to a private host-local artifact directory}"
+    umask 077
+    mkdir -p "$OUT" || exit
+    timeout 5s fastboot -s "$SERIAL" getvar lk2nd:version || exit
+    timeout 5s fastboot -s "$SERIAL" oem log || exit
+    timeout 10s fastboot -s "$SERIAL" get_staged "$OUT/lk2nd.log" || exit
+    timeout 5s fastboot -s "$SERIAL" oem screenshot || exit
+    timeout 15s fastboot -s "$SERIAL" get_staged "$OUT/lk2nd.ppm"
+)
+```
+
+The framebuffer-debug build draws logs over its menu. A quieter candidate
+was also built with `DEBUG_FBCON=0` and
+`LK2ND_VERSION=517bb38-tbx304f-lab-quiet`, SHA-256
+`68454f94e33c5af86e7ac241a91c194c35df4f6a5cc53c63cf0033fc64efef86`;
+it has not been booted yet.
+
+The subsequent return-path test accepted `fastboot reboot bootloader` but
+landed in stock Android (`17ef:7bc7`, no ADB), not stock fastboot. Do not
+describe the loop as unattended or assume that command is a recovery path
+on this firmware.
+
+### Quiet build and IMEM restart experiment
+
+The [restart-protocol patch](../patches/lk2nd/tb-x304f-imem-restart.patch)
+makes `USE_PON_REBOOT_REG` overridable while preserving the default value of
+`1` for other builds. The Lenovo kernel's [restart path][lenovo-restart]
+writes the `0x77665500` bootloader cookie to IMEM. Its
+[board PON description][lenovo-pon] deletes `qcom,store-hard-reset-reason`,
+selecting the warm-reset path rather than relying on a retained PON reason.
+That differs from this lk2nd target's original PON/hard-reset configuration.
+This is source evidence for a candidate fix, not verification of stock
+aboot's mode-selection implementation.
+
+After applying both lk2nd patches to the same source archive, build:
+
+```sh
+make -j16 TOOLCHAIN_PREFIX=arm-none-eabi- \
+    LK2ND_DTBS=msm8917-qrd-sku5.dtb \
+    LK2ND_FORCE_FASTBOOT=1 DEBUG_FBCON=0 USE_PON_REBOOT_REG=0 \
+    LK2ND_VERSION=517bb38-tbx304f-lab-imem lk2nd-msm8952
+```
+
+Both compile-time cases were checked: without an override the generated
+config still sets `USE_PON_REBOOT_REG=1`; this invocation sets it to `0`.
+The resulting image is 299024 bytes, SHA-256
+`132ce182d877b42c1645c84f6108202039736b253b9d543929ca257ef2f98d1d`.
+It RAM-booted from stock fastboot and returned the expected product, version,
+and panel in 0.849 seconds from the host's boot invocation. Its screenshot
+shows a readable menu without debug text drawn over it.
+
+LK2nd reported `MPIDR=0x80000100` and `MIDR=0x410fd034`, consistent with
+the board port's boot CPU. A later controlled `fastboot reboot bootloader`
+test returned to stock `product=MSM8917` in **2.08 seconds**, with unlocked
+state preserved. The same lk2nd image then RAM-booted again successfully.
+This verifies the requested mode transition from a running lk2nd, not Linux
+panic handling or recovery from an arbitrary hang.
+
+A preceding `oem debug readl 0x8ee00000` probe reset lk2nd and returned to
+stock fastboot without capturing any RAM-log data. Do not repeat it: that
+command directly dereferences an lk2nd virtual address; a Linux DT physical
+reservation does not establish an lk2nd mapping. The reset alone is not
+evidence that the Linux reserved region is protected or invalid. Use the
+supported `oem ramoops` path with a matching handoff instead.
+
+## Kernel and boot-image prerequisites
+
+The lk2nd addition is a bootloader port, not a Linux board port. Upstream Linux
+has [MSM8917 SoC support][linux-msm8917], but this audit did not find a
+TB-X304F board DT in upstream Linux or a TB-X304F-specific postmarketOS device
+profile. PocketBoot now has experimental SoC/device configurations using
+the separate board-port source below.
+
+An existing mainline-oriented board port was subsequently found in
+[`pem120/linux-msm89x7`][pem120-dts], branch `lenovo-tbx304`, commit
+`a51b91b503307d35902447dd1f90db765372cf3b`. It provides
+`msm8917-lenovo-tbx304x.dts` for the MSM8917 TB-X304L/X, not yet a validated
+APQ8017/TB-X304F target. This is the starting point to adapt and test rather
+than writing a board port from scratch. The
+[downstream TBX304 kernel DTS][downstream-dts] remains a stock reference.
+
+Also distinguish [lk2nd's 512 KiB partition offset][lk2nd-boot] from an Android
+boot-header kernel load offset: the former reserves the start of `boot` for
+lk2nd when it is installed persistently. It is not a PocketBoot kernel load
+address. Derive this tablet's image layout from verified sources, not another
+Qualcomm device's configuration.
+
+## First PocketBoot trial
+
+The [experimental build target](tb-x304f-build.md) is now
+`qcom/msm8917-lenovo-tbx304x`. Its 4,734,976-byte image has SHA-256
+`54d72e13b8f4d57bf9d751f446fa9ed6f9f22f820bf171074edc12f04fcdff36`.
+It packages the pinned kernel with built-in PocketBoot/BusyBox initramfs,
+APQ8017 selection metadata, peripheral-only USB, and LK2nd-supplied simplefb.
+
+From the quiet IMEM lk2nd build, the first `fastboot boot` returned `OKAY`
+for download (0.148 s) and boot (0.230 s), total 0.381 s. Afterward no USB
+device appeared on the tablet's physical port within 45 seconds. There was
+no PocketBoot fastboot/ADB/ACM identity to query. A host boot acknowledgement
+does not establish Linux entry or userspace startup; neither was confirmed
+for this first image.
+The owner observed a black screen later, without watching the handoff, and
+returned it to fastboot with the buttons. No image was flashed and no factory
+reset was performed.
+
+Static comparison against the stock image found no proven CPU/PSCI, GIC,
+packaging, or USB-config defect. It did identify a diagnostic gap: the first
+image requested `console=tty0` but had no framebuffer console. A blank or
+unchanged screen would therefore not prove that Linux never ran.
+
+The next candidate enables the fbdev DRM client and framebuffer console
+without changing the DTB or initramfs. It is 4,784,128 bytes, SHA-256
+`c707c18b92da380fdc2bfe9158c7c10e33cc09acda09957da186a52fdd03124b`.
+Build, generated-config, and image-layout checks passed. Its second trial
+was accepted by lk2nd in 0.383 seconds but again produced no tablet USB
+within 45 seconds; the owner again saw a black screen later and returned it
+to fastboot. The enabled console only helps after simpledrm probes, so this
+does not locate the failure before or after Linux entry.
+
+Instead of depending on a live view of the screen, the next logging profile
+enables `PSTORE_CONSOLE`. The rebuilt config and kernel include that frontend.
+Its region must be shared with lk2nd's supported ramoops exporter; RAM-log
+retention through the actual button-reset sequence was unverified when this
+candidate was built. The recovered evidence below now demonstrates it for one
+trial.
+
+### Shared-region RAM logging trial
+
+The source audit explains why directly reading `0x8ee00000` from lk2nd was
+not a safe retrieval method: that aligned physical RAM address lies outside
+this build's mapped virtual ranges. An lk2nd translation fault is consistent
+with the reset, not proof that the physical region is unusable by Linux.
+
+The supported exporter instead uses the end of scratch:
+
+- Scratch base `0xa0100000`, size `0x1ff00000` (511 MiB), ending at
+  `0xc0000000`. The live `max-download-size` query matched this size.
+- The final 512 KiB is `0xbff80000` through `0xbfffffff`, inside lk2nd's
+  identity-mapped scratch area.
+- The first 256 KiB contains 32 dump records of 8 KiB; the last 256 KiB is
+  the console. ECC is zero in this lk2nd build.
+- This is separate from the small image downloads, kernel/tags, framebuffer
+  and inherited firmware reservations. A sufficiently large download can
+  still overwrite it; the advertised maximum does not protect the log tail.
+
+The current image enables `PSTORE_CONSOLE` and passes the **bare**
+`lk2nd.pass-ramoops` flag. LK2nd uses it to rewrite the existing kernel
+ramoops node to this shared region. Never use `lk2nd.pass-ramoops=zap` when
+preserving evidence: it clears the window. The kernel must still reach
+ramoops/console registration, and the final handed-off DT is not yet captured.
+
+The fixed-size `oem ramoops raw` export was tested before the trial: it
+returned exactly 524288 bytes, with no valid pre-trial records, and lk2nd
+remained responsive. The raw baseline and decoder metadata are private.
+Use this bounded raw export rather than `oem ramoops console`, which trusts
+the record's stored size, or the source's FIXME-marked dump decoder.
+
+The shared-region image is 4,784,128 bytes, SHA-256
+`c0da6ec5c7c287b94a0e1e814e0f1517da6e091fd75bba3e9c0a43e738bd24d2`.
+LK2nd accepted its download and boot in 0.384 seconds; there was still no
+tablet USB interface within 45 seconds. On 2026-09-30 the owner reported a
+blank screen with possibly lit backlight, uncertain in bright ambient light,
+and a return to fastboot. Backlight alone would not establish Linux progress:
+it could remain enabled from the bootloader. The post-reset capture below
+provides the first direct evidence of this kernel and userspace running.
+
+After button recovery into stock fastboot, RAM-boot only the known lk2nd
+image, verify its identity, and retrieve **before another kernel boot**.
+For the verified lk2nd image, run from this repository:
+
+```sh
+(
+    : "${SERIAL:?Set SERIAL to the intended tablet's fastboot serial}"
+    umask 077
+    mkdir -p target/tb-x304f-lab || exit
+    OUT="$(mktemp -d target/tb-x304f-lab/ramoops.XXXXXX)" || exit
+    timeout 5s fastboot -s "$SERIAL" oem ramoops raw || exit
+    timeout 15s fastboot -s "$SERIAL" get_staged "$OUT/ramoops.raw" || exit
+    python3 tools/ramoops_decode.py \
+        --input "$OUT/ramoops.raw" --output "$OUT/decoded" --ecc 0 || exit
+    printf 'Private capture: %s\n' "$OUT"
+)
+```
+
+`--ecc 0` needs neither a kernel tree nor a host C compiler. Inspect
+`decoded.json` for invalid records rather than equating CLI success with a
+valid kernel log. Preserve the raw file and compare against the pre-trial
+baseline and expected kernel version. Power loss, reset behavior, cache state
+or later bootloader activity can destroy evidence; an empty capture does not
+prove that Linux never ran. `oem log` is only the current lk2nd session's log
+and cannot recover its pre-reset handoff messages.
+
+### Recovered boot evidence (2026-09-30)
+
+After USB contact was restored, stock fastboot still reported unlocked. Only
+the known quiet IMEM lk2nd image was RAM-booted, with its SHA-256, version,
+board compatible and panel verified. Its bounded exporter returned all
+524288 bytes before any further kernel boot. The raw file is retained
+read-only under the private `target/tb-x304f-lab/ramoops-shared/` directory,
+SHA-256 `c78edcd6635a8b746cc55000cb8bf045e20db9538bd4ab11eaf47c84d4330216`.
+
+The ECC0 decoder accepted all 33 region headers. It recovered an 18241-byte
+console and two compressed dmesg records; the other 30 dump records were
+empty. This differs from the pre-trial baseline, which had no valid headers.
+The console identifies Linux `7.0.9+ #2`, the expected build time and the
+shared-ramoops command line. Selected evidence:
+
+```text
+[    0.005453] smp: Brought up 1 node, 4 CPUs
+[    0.023263] ramoops: using 0x80000@0xbff80000, ecc: 0
+[    0.139817] simple-framebuffer 90001000.framebuffer: [drm] fb0: simpledrmdrmfb frame buffer device
+[    0.199061] Run /init as init process
+[    5.210396]  WARN pocketboot: local flash settle timed out elapsed_ms=5003 disks=0 partitions=0 events=0 snapshot_changes=0 snapshot=none
+[   11.282308] ERROR pocketboot::gadget: USB gadget failed error=Custom { kind: NotFound, error: "no USB device controller (UDC) available" }
+[   12.322267] Kernel panic - not syncing: Attempted to kill init! exitcode=0x00000000
+```
+
+This establishes successful kernel handoff, SMP, framebuffer-driver
+registration, RAM-console logging and PocketBoot userspace execution, not a
+working display or USB gadget. The absence of a registered UDC is a
+device-side problem to investigate separately from intermittent cable contact.
+Storage also remained undiscovered. Check their driver/provider dependencies
+before changing boot addresses or the CPU handoff.
+
+Two FunctionFS unmount warnings pass through `ffs_fs_kill_sb()` and
+`cancel_work_sync()` during gadget cleanup. They are separate from the missing
+controller; the capture does not establish that they caused its absence.
+The final panic is PID 1 exiting, not evidence of an early kernel-entry fault.
+LK2nd remained responsive after retrieval. No subsequent kernel was booted
+as part of this capture.
+
+### RPM mailbox follow-up
+
+The recovered log also contains RPM SMD-edge errors:
+`failed to get regmap from syscon: -517`. The legacy `qcom,ipc` path tries to
+acquire the APCS node's first clock, the CPU PLL, whose driver is absent.
+Enabling that driver alone is not a suitable workaround: the syscon regmap
+would explicitly enable/disable it during register accesses. USB and SDHCI
+supplies are RPM-managed; enabling the unrelated direct-SPMI regulator driver
+would not provide them either. Both config-only candidates were withheld
+before hardware use; see the [source analysis](tb-x304f-build.md).
+
+The third maintained kernel patch instead replaces RPM's
+`qcom,ipc = <&apcs 8 0>` with `mboxes = <&apcs 0>`. The already-enabled APCS
+mailbox driver preserves offset 8/bit 0 using its own clockless regmap.
+Its provider may still be delayed by firmware device-link dependencies, so
+this is not a guarantee of successful RPM/USB/storage probing.
+
+The three-patch series applied cleanly and a second source invocation was
+idempotent. All 54 build-tool tests, formatting and whitespace checks passed.
+The rebuilt `7.0.9+ #5` image is 4,784,128 bytes, SHA-256
+`36f0efdbd774586f79cd3591cf178cf1838bad98f8cf3eb3657840f651816b7d`.
+Decompiling its DTB and the previous image's DTB confirmed that the IPC
+property is the only DT change. The initramfs and command line are unchanged;
+CPU PLL, APCS mux, CPU frequency scaling and direct-SPMI regulator drivers
+remain disabled.
+
+After verifying the known IMEM lk2nd identity and the preserved prior capture,
+one transient `fastboot boot` trial returned `OKAY` in 0.384 seconds.
+No USB device reappeared on the tablet's port during 45.4 seconds of
+observation. No image was flashed and no automatic second kernel attempt
+was made.
+
+The subsequent 512 KiB capture has SHA-256
+`77a291516370e02fcb62d9f51025ecbe43e51d46d0c731ac971952aee6a5a445`.
+Its 18399-byte console identifies the expected `7.0.9+ #5` build and shows
+`/init`, zero discovered disks, no UDC and an init-exit panic at 12.442 seconds.
+The old syscon-regmap error is absent, but that alone does not prove successful
+RPM initialization. All 33 region headers are valid; `dmesg-1` is byte-identical
+to the prior trial's record and must not be mistaken for a new crash.
+
+### Automatic panic recovery with an empty boot partition
+
+The first four attempts omitted `panic=`, leaving the kernel's default
+`panic=0` indefinite wait. The owner requested `panic=-1` so a panic requests
+immediate reboot. The target config and its contract test now require exactly
+that setting. This is not a watchdog for arbitrary hangs.
+
+The repackaged image is 4,784,128 bytes, SHA-256
+`b77a860331ba78b4aa735222e4eb96cb23d70367816f74c9c9af25cbea9d5ea7`.
+Every byte outside the command-line fields matches the mailbox trial image;
+kernel, DTB and initramfs are unchanged. All 54 build-tool tests, formatting
+and image checks passed. Before changing any partition, this image reset
+automatically and returned to stock Android USB at 30.417 seconds, without
+ADB or fastboot. After manual recovery, its RAM window had no valid records.
+Thus `panic=-1` alone did not establish a useful unattended diagnostic loop.
+
+The owner then explicitly authorized erasing **only `boot`** to test stock
+aboot's invalid-boot fallback. Before issuing the erase, the original
+`boot`, `recovery`, `aboot` and `abootbak` backups were rehashed against their
+read-only manifest. The original boot image is 67108864 bytes, SHA-256
+`a1480a980d664213c67d98b89e69d406b11cebee1b81ab046b4bc61cd7f85db9`.
+The command was issued from verified **stock** fastboot, not lk2nd, after
+checking the target serial/USB port, unlock state and 64 MiB partition size.
+`fastboot erase boot` returned `OKAY`; recovery, aboot, GPT and other partitions
+were not written. A normal `fastboot reboot` returned to stock fastboot in
+2.17 seconds, still unlocked, untampered and critical-locked.
+
+The same panic-enabled image was then tested once more:
+
+1. RAM-boot the known IMEM lk2nd image, verify it, and RAM-boot PocketBoot.
+2. Linux reaches the same no-UDC/init-exit panic at 12.454 seconds.
+3. Without buttons, stock fastboot returns and is verified at **15.501 seconds**
+   from the host's Linux boot invocation.
+4. RAM-boot lk2nd again and retrieve the bounded RAM window by **16.729 seconds**.
+   The console contains `panic=-1`, the expected kernel and the current panic.
+
+The post-reset raw capture is 524288 bytes, SHA-256
+`783e3a6fd91f9d524f656ffd7938d7243307728796ef67f48056bc2778c7f005`.
+All 33 headers decode, with a 17489-byte console and two compressed dmesg
+records. LK2nd remains responsive after retrieval. This verifies one complete
+panic/reboot/log-retrieval cycle with `boot` empty; USB/storage bring-up and
+recovery from non-panic hangs remain separate work.
+
+The original boot backup remains private and read-only at
+`target/tb-x304f-lab/original-partitions/boot.img`. Preserve it outside this
+worktree before any cleanup. Restoring it would require explicitly flashing
+it through stock fastboot and would remove this empty-boot fallback; restoration
+has not been performed or tested. The pre-existing Android decryption/password
+issue is separate from restoring the boot image.
+
+### Deferred-probe evidence
+
+Adding only `deferred_probe_timeout=5` exposed the outstanding suppliers before
+the init-exit panic. Kernel, DTB and initramfs bytes were unchanged. The
+4,784,128-byte image has SHA-256
+`25b8a7b1a86ebaa9a371c7c4a08efeec0319358feea7d8546e1338f8f408f58d`.
+The automatic loop returned to stock fastboot in 15.52 seconds and completed
+RAM-log retrieval by 16.74 seconds. All 33 record headers decode; the private
+raw capture has SHA-256
+`1740df71a496921d785ea29a15084a6475cb97f613ac5f5d9c7688c786b727d0`.
+
+The log identifies the actual dependency loop, rather than a guessed missing
+regulator driver:
+
+```text
+[    5.347368] platform remoteproc: deferred probe pending: qcom-rpm-proc: Failed to register smd-edge
+[    5.374193] platform b011000.mailbox: deferred probe pending: platform: wait for supplier /remoteproc/smd-edge/rpm-requests/clock-controller
+[    5.401534] platform 6c000.phy: deferred probe pending: platform: wait for supplier /remoteproc/smd-edge/rpm-requests/regulators-0/l13
+[    5.429437] platform 78db000.usb: deferred probe pending: platform: supplier 6c000.phy not ready
+[    5.443715] platform 7824900.mmc: deferred probe pending: platform: wait for supplier /remoteproc/smd-edge/rpm-requests/regulators-0/l5
+[    5.471880] platform 7864900.mmc: deferred probe pending: platform: wait for supplier /remoteproc/smd-edge/rpm-requests/regulators-0/l12
+```
+
+RPM needs APCS mailbox channel 0; APCS's declared `ref` input points back to
+RPM's clock controller. RPM-managed supplies then block the USB PHY and both
+SDHCI controllers. The next change must address this specific relationship,
+not globally disable firmware dependency checking. LK2nd remained responsive
+after retrieving this trial's evidence.
+
+### APCS clock-child trial
+
+The binding-supported follow-up separates the mailbox from its clock
+controller instead of replacing the RPM reference with an unverified fixed-XO
+input. Clock inputs, names and `#clock-cells` move to a `clock-controller`
+child; all four CPU clock phandles follow it. The mailbox driver creates the
+clock platform device with that child's firmware node, retaining the old
+mailbox firmware node for legacy layouts. A companion patch makes the clock
+driver's PLL lookup use its own device, not the parent; the shared register map
+and existing clock name remain on the parent.
+
+Source review found no blockers. The five-patch series applies cleanly and
+idempotently; all 54 build-tool tests, formatting and whitespace checks pass.
+The compiled DT passes the targeted `qcom,apcs-kpss-global` schema. Binary
+checks confirm that the clock child preserves the exact provider phandles and
+specifiers, CPU consumers point to the child and RPM still uses mailbox
+channel 0. The clock driver was compiled explicitly as an object, but remains
+disabled and unlinked in the trial kernel; CPU PLL and frequency scaling
+remain disabled too.
+
+The 4,784,128-byte candidate has SHA-256
+`99d1a1dec947cab96f3759db0e1012b90179007ba20e3d06c781b1dd500cbf41`.
+Kernel image, config, initramfs and command line are byte-identical to the
+deferred-probe diagnostic trial. Only the DT changes in the boot payload.
+
+LK2nd accepted one RAM-only boot in 0.384 seconds. No tablet fastboot
+interface appeared during 60.05 seconds; a subsequent host check found
+neither ADB nor a USB device on the tablet's physical port. This differs from
+the earlier 15.5-second panic return, but does not identify whether Linux
+stalled or is running without host USB. The owner saw a black screen and
+returned it to fastboot with the buttons. No additional partition write or
+automatic second kernel trial was made.
+
+The recovered raw capture has SHA-256
+`daa042ec91605751d06c54596f32478078f09d6733de00975f32e100a3059b97`.
+Its current console reaches `/init`, initializes RPM regulators and continues
+through 31.715 seconds. Both compressed dmesg slots are byte-identical to the
+previous trial and are stale, not evidence of a new panic. The new failure is
+`genpd_provider cx: error -95: Failed to add OPP table for index 0`.
+The built config lacks `PM_OPP`, and the pinned OPP helper therefore returns
+`-EOPNOTSUPP`. The sixth patch selects that framework from RPMPD without
+enabling CPU frequency scaling.
+
+### Bounded USB and storage diagnostics
+
+The separate [probe initramfs](tb-x304f-probe.md) preserves PocketBoot as PID 1,
+records bounded read-only state and requests an explicitly marked diagnostic
+panic unless cancelled. It is opt-in and not part of normal images.
+
+With `PM_OPP=y` and `pocketboot.log=info`, the RPMPD error disappeared and
+`ttyMSM0` registered. The first bounded trial positively logged
+`USB gadget bound udc=ci_hdrc.0`; sysfs nevertheless stayed `not attached`
+with speed `UNKNOWN`. No deferred devices or disks were listed. The
+deliberate panic returned to fastboot at 36.621 seconds and log capture
+completed by 37.836 seconds, without buttons.
+
+A second controlled image exposed the existing USB role-switch API, then
+requested device role through the switch whose canonical device parent matched
+the UDC. PocketBoot USB appeared and passed product/userspace/compatible checks
+plus an OEM-shell `uname -r` command at **5.471 seconds**.
+After a later snapshot confirmed RPMPD bound, a one-time re-probe of the still
+unbound `7824900.mmc` detected HS400 eMMC and all 48 partitions at 12.1 seconds.
+The automatic diagnostic recovery completed and preserved the whole log.
+
+These controls isolated two issues rather than serving as permanent workarounds:
+
+- This charger/extcon-free bootstrap needs an explicit USB device-role request.
+  The normal image now opts into `pocketboot.usb_role=device`; it writes only
+  the unique role switch matching the UDC after binding. Other targets retain
+  their existing behavior unless explicitly opted in.
+- The built-in-only kernel gave up on the late RPM power-domain provider after
+  initcalls, ignoring the requested positive probe timeout. The seventh patch
+  honors that bounded wait. Default and negative built-in timeout behavior,
+  and all module-enabled behavior, remain unchanged. No global module-loading
+  or firmware-dependency bypass was added.
+
+### Verified normal USB and eMMC boot
+
+The ordinary `cargo xtask build qcom/msm8917-lenovo-tbx304x` path produced a
+4,810,752-byte image, SHA-256
+`45ad387ee315585badce7bee2a5e1792c7482bf907c998c1bf24a79f939710d4`.
+Its initramfs contains the normal ELF `/init`, not the diagnostic wrapper;
+there are no `pocketboot.probe*` flags or manual re-probe actions.
+
+| Normal-image trial | Linux boot command to verified PocketBoot USB | eMMC |
+| --- | --- | --- |
+| 1 | 2.062 s | 30535680 sectors, 48 partitions |
+| 2 | 2.338 s | 30535680 sectors, 48 partitions |
+| 3 | 1.612 s | 30535680 sectors, 48 partitions |
+
+These are host-side RAM-boot timings from lk2nd, not cold-power-on times.
+All three trials retrieved a live kernel log over USB. The first also queried
+the 64 MiB boot partition and read the first 34 sectors of `/dev/mmcblk0`
+without writing it. The 17408-byte result matched the original GPT capture,
+SHA-256 `d71622f41619be3ac060171252de68dee0a818c322fae22ebea6ce809f8b86f2`.
+
+The later normal boots show eMMC enumeration and the device-role request
+during startup, with local flash settling automatically. They no longer
+contain the old OPP error, the SDHCI "assuming no driver" warning, or probe
+wrapper markers. Normal `fastboot reboot` returned to stock fastboot in
+4.041 and 6.301 seconds between trials; each then reloaded lk2nd and the
+same PocketBoot image without buttons.
+
+The final health check found 948.49 seconds of uptime with the UDC still
+`configured` at `high-speed`. An explicitly selected ADB shell also returned
+the expected kernel release. PocketBoot was left running after these checks.
+
+Validation also includes 190 PocketBoot tests, 54 build-tool tests, 15 probe
+archive tests, ShellCheck, formatting, image/config/DT checks and independent
+source review. The actual deferred-probe helper was compiled into a host
+truth-table check for modules on/off, pre/post-initcalls and timeout -1/0/5.
+Small USB reads work; large transfers, writes, kexec, PocketFed and physical
+display output were not validated by these three trials. The following
+single-change trial establishes visible display output separately.
+
+### Verified visible framebuffer
+
+With USB working, a read-only live inspection distinguished successful KMS
+setup from an actually powered panel. The CRTC and plane were active, the
+MDSS power domain and display clock gates were on, and panel reset GPIO60
+was high. However, `lcd_3v3` was disabled with zero users and its active-high
+enable GPIO46 was low.
+
+The pinned fixed-regulator driver requests output-low unless the regulator
+has `regulator-boot-on`. `regulator_ignore_unused` skips later unused-rail
+cleanup, not this probe-time action. The native DSI panel, normally the rail's
+consumer, is deliberately absent from the firmware-framebuffer profile.
+Patch 0002 now adds only `regulator-boot-on` to this supply; its fixed 3.3 V
+value and GPIO polarity are unchanged. No raw GPIO writes, `always-on`
+constraint, backlight adjustment or native display driver was added.
+
+The 4,810,752-byte candidate has SHA-256
+`0e69d2e2e346d87032d60ef5a3cac999aa41aff8a001af2eac1554509f7792dd`.
+Kernel, config, initramfs and command line were byte-identical to the prior
+normal image; the DT's sole semantic change was that boot-on property.
+The fixed-regulator schema check, including its inherited regulator schema,
+passed without diagnostics.
+
+After rebooting through stock fastboot and LK2nd to reinitialize the panel,
+PocketBoot USB returned in 2.386 seconds. Live state showed `lcd_3v3` enabled
+at 3.3 V, GPIO46 high and eMMC still present. **The owner then confirmed a
+working PocketBoot framebuffer.** This is physical confirmation, not merely
+the `POCKETBOOT_DRM_READY` marker.
+
+That LCD-only image exposed just the power, reset and GPIO-key input devices,
+with no I2C adapters: it did not enable QUP I2C or the declared Goodix driver.
+The next trial addressed those missing drivers separately.
+
+### Goodix input registration
+
+The touch candidate enables only `I2C_QUP` and `TOUCHSCREEN_GOODIX`. Its
+effective kernel-config diff contains exactly those two n-to-y changes; the
+DT, command line and normal initramfs remain byte-identical to the visible-LCD
+image. DMA, firmware loading and CPU clock/frequency drivers remain disabled.
+There are no reset, supply, polarity or firmware changes and no I2C bus scan.
+
+The 4,823,040-byte image has SHA-256
+`942ab820c51a608a33772d240c9f5d12d2dc29183d49533dd4202030141f3378`.
+After the normal stock-fastboot/LK2nd RAM-boot sequence, PocketBoot USB identity
+was verified in 2.310 seconds. QUP registered two adapters; the touchscreen
+on controller `78b7000` appeared as `1-005d` and bound to `Goodix-TS`:
+
+```text
+[    0.819294] Goodix-TS 1-005d: ID 9111, version: 4011
+[    1.042386] input: Goodix Capacitive TouchScreen as /devices/platform/soc@0/78b7000.i2c/i2c-1/1-005d/input/input3
+[    1.319442] INFO pocketboot::ui: opened touch input device path=/dev/input/event3
+```
+
+This identifies a responding Goodix on the development unit rather than
+inferring the fitted controller from the stock DT's alternative nodes.
+GPIO65 has the touchscreen IRQ. The QUP `tx channel not available` messages
+are the expected DMA-disabled PIO fallback, not probe failures.
+At 52 seconds the driver remained bound, without further touch/I2C errors.
+USB was configured at high speed, eMMC still reported 30535680 sectors, and
+the LCD rail remained enabled at 3.3 V.
+
+The full build, 190 PocketBoot tests, 54 build-tool tests, formatting and
+whitespace checks passed; independent exact-pin driver review found no
+blocker. **Input registration is verified; physical touch response and
+coordinate orientation still need the owner's check.** No partition writes
+were performed, and the candidate was left running for that check.
+
+## First-boot milestones
+
+Keep unlock/recovery, the first mainline boot, and the later PocketFed install
+as separate steps:
+
+1. **Recovery route:** verify physical recovery/fastboot entry and how to
+   recover a hung boot before trying an experimental image. Preserve a way
+   back to stock.
+2. **Bootstrap:** inspect existing [lk2nd][] device support and its exact
+   build/image requirements. Prefer a transient boot where the stock
+   bootloader supports it; do not assume that `fastboot boot` works, or
+   silently fall back to flashing `boot`.
+3. **PocketBoot:** select the exact board DT and kernel source, add the minimal
+   SoC/device configuration, and validate the boot-image layout. A related
+   Qualcomm config is a reference, not evidence of compatibility.
+4. **Observable boot:** require PocketBoot's USB fastboot identity
+   (`product=pocketboot`, `is-userspace=yes`, and the expected board
+   `compatible`), then retrieve a kernel log. A lit display alone does not
+   prove a working kernel or a usable iteration loop.
+5. **Handoff:** only after repeatable boots and recovery, validate kexec and
+   then a PocketFed deployment. Preserve the fastboot recovery path while
+   doing so.
+
+For every trial, retain the source revision, build configuration, image
+SHA-256, boot entry path, elapsed time, observed result, and recovery action.
+Publish concise sanitized evidence, not personal device data or raw backups.
+
+## Lab setup constraints
+
+Start with an explicitly addressed USB connection and a person available to
+operate the tablet's buttons. Record stock fastboot, Android/ADB, lk2nd,
+PocketBoot, and EDL identities only as those modes are actually observed;
+serials can differ between modes.
+
+The [DB410c relay setup][lab-relay] switches external board power. This tablet
+has an internal battery: switching USB VBUS is not a verified hard-reset
+mechanism. Do not reuse the DB410c relay channel or assume any spare channel
+is wired to the tablet. Button/reset automation needs a separately verified
+wiring and recovery procedure.
+
+Reuse the parallel PocketBoot work rather than building another recovery
+path: [PR #44][menu-pr] provides volume-down/menu entry and
+[PR #42][recovery-pr] provides failed-load recovery and retained pstore
+diagnostics. Both were draft at this audit; #42 is stacked on the extlinux
+work, not directly on `main`. Neither establishes this tablet's key input,
+USB re-enumeration, or ramoops memory layout, and neither guarantees recovery
+from a hard hang.
+
+`~/src/lk2nd` can be inspected without attaching it to a Delta thread. Attach
+it before making changes there; prefer existing device support over a new
+fork. A reusable agent skill can follow once the device-control and recovery
+contract has actually been tested.
+
+[unlock-guide]: https://xdaforums.com/t/guide-unlock-bootloader-of-lenovo-tab-4-10-with-oem-unlock-greyed-out-tb-x304f-l-and-other-qcom-tablets.4201857/
+[lenovo-spec]: https://psref.lenovo.com/syspool/Sys/PDF/Lenovo_Tablets/TAB4_10/TAB4_10_Spec.PDF
+[devinfo-read]: https://github.com/Naveen3Singh/BLUnlocker/blob/45a1e187764e18bd2ce7fadfc57e00bf40f457d3/dump_devinfo.bat
+[devinfo-write]: https://github.com/Naveen3Singh/BLUnlocker/blob/45a1e187764e18bd2ce7fadfc57e00bf40f457d3/unlock.bat
+[devinfo-illustration]: https://web.archive.org/web/20250206102708id_/https://xdaforums.com/attachments/1607766281870-png.5154947/
+[stock-zip]: https://mirrors-obs-2.lolinet.com/firmware/lenowow/2017/Tab_4_10/TB-X304F/TB-X304F_S001017_2211021443_Q21000_ROW_GB.zip
+[lk2nd]: https://github.com/msm8916-mainline/lk2nd
+[lk2nd-tbx304x]: https://github.com/msm8916-mainline/lk2nd/commit/517bb38a409d4ac982f09e83a046e4dc71be5029
+[lk2nd-release]: https://github.com/msm8916-mainline/lk2nd/releases/tag/23.1
+[lk2nd-pr]: https://github.com/msm8916-mainline/lk2nd/pull/664
+[lk2nd-boot]: https://github.com/msm8916-mainline/lk2nd/blob/main/Documentation/boot.md
+[linux-msm8917]: https://github.com/torvalds/linux/blob/master/arch/arm64/boot/dts/qcom/msm8917.dtsi
+[downstream-dts]: https://github.com/lenovo-devs/android_kernel_lenovo_msm8953/blob/lineage-16.0-tbx304/arch/arm/boot/dts/qcom/tbx304-msm8917-pmi8937-qrd-sku5.dts
+[pem120-dts]: https://github.com/pem120/linux-msm89x7/blob/a51b91b503307d35902447dd1f90db765372cf3b/arch/arm64/boot/dts/qcom/msm8917-lenovo-tbx304x.dts
+[lenovo-restart]: https://github.com/lenovo-devs/android_kernel_lenovo_msm8953/blob/lineage-16.0-tbx304/drivers/power/reset/msm-poweroff.c
+[lenovo-pon]: https://github.com/lenovo-devs/android_kernel_lenovo_msm8953/blob/lineage-16.0-tbx304/arch/arm/boot/dts/qcom/tbx304/tbx304-msm-pm8937.dtsi
+[lab-relay]: https://github.com/samcday/skills/pull/1
+[menu-pr]: https://github.com/samcday/pocketboot/pull/44
+[recovery-pr]: https://github.com/samcday/pocketboot/pull/42
+~~~~
+<!-- END docs/tb-x304f-bringup.md -->
+
+## Archived file: docs/tb-x304f-build.md
+
+Bytes: 18392; SHA-256: `a6afa134e0b64bebe798bfd9a8e91f8b7213fe2e8d6b0d246225f3b8e19775d0`.
+
+<!-- BEGIN docs/tb-x304f-build.md -->
+~~~~text
+# TB-X304F experimental PocketBoot build
+
+This is an **LK2nd-first diagnostic target**, not direct-stock-boot support or
+a fully validated Linux port. Three normal RAM-boots now verify PocketBoot
+USB fastboot, automatic eMMC discovery and live log retrieval; a read-only GPT
+capture matches the original backup. A subsequent LCD-supply fix has
+owner-confirmed visible framebuffer output. Goodix input registration is also
+verified; physical touch response, orientation and kexec remain unverified.
+No flashing is required by the build, and no hardware commands are included here.
+
+## Build
+
+```sh
+cargo test -p xtask
+cargo xtask kernel-src qcom/msm8917-lenovo-tbx304x
+cargo xtask build qcom/msm8917-lenovo-tbx304x
+```
+
+The canonical ID deliberately matches the existing board-port DT filename
+`qcom/msm8917-lenovo-tbx304x.dtb` and `lenovo,tbx304x` compatible. This initial
+PocketBoot trial targets the Wi-Fi TB-X304F/APQ8017; the family name does not
+claim PocketBoot validation on TB-X304L or other variants.
+
+The [device config](../configs/device/qcom/msm8917-lenovo-tbx304x.toml) pins
+[`pem120/linux-msm89x7`, `lenovo-tbx304`](https://github.com/pem120/linux-msm89x7/tree/a51b91b503307d35902447dd1f90db765372cf3b)
+at `a51b91b503307d35902447dd1f90db765372cf3b` (Linux 7.0.9).
+`xtask` fetches it beneath
+`target/kernel/src/msm8917/msm8917-lenovo-tbx304x/` and applies the seven
+[maintained patches](../patches/kernel/msm8917/README.md). A second invocation
+recognizes the applied series. It does not reset conflicting source edits.
+
+Requirements are the normal PocketBoot Rust dependencies and installed
+`aarch64-unknown-linux-musl` target, GNU AArch64 cross compiler/binutils,
+host C build tools, make, flex and bison. No in-kernel Rust toolchain is needed:
+this target uses a text DRM panic screen rather than the baseline Rust QR
+encoder. PocketBoot `/init` remains Rust, with BusyBox included.
+
+Outputs (relative to the workspace, unless `CARGO_TARGET_DIR` is set):
+
+```text
+target/kernel/qcom/msm8917-lenovo-tbx304x/boot.img
+target/kernel/qcom/msm8917-lenovo-tbx304x/arch/arm64/boot/Image
+target/kernel/qcom/msm8917-lenovo-tbx304x/arch/arm64/boot/Image.gz
+target/kernel/qcom/msm8917-lenovo-tbx304x/arch/arm64/boot/dts/qcom/msm8917-lenovo-tbx304x.dtb
+target/kernel/qcom/msm8917-lenovo-tbx304x/.config
+target/cpio/qcom/msm8917-lenovo-tbx304x/pocketboot-initrd.cpio
+```
+
+## Source compatibility
+
+The [board DTS](https://github.com/pem120/linux-msm89x7/blob/a51b91b503307d35902447dd1f90db765372cf3b/arch/arm64/boot/dts/qcom/msm8917-lenovo-tbx304x.dts)
+includes `msm8917.dtsi`, `pm8937.dtsi`, `pmi8950.dtsi` and
+`msm8937-qdsp6.dtsi`. The last file supplies audio routing only.
+`msm8917.dtsi` is a complete SoC description, not an alias of MSM8916 or
+MSM8953. The [SoC config](../configs/soc/qcom/msm8917.toml) follows its
+actual drivers:
+
+| Path in the source | Built-in driver/config |
+| --- | --- |
+| Four Cortex-A53 CPUs, MPIDRs `0x100`–`0x103`; `enable-method = "psci"` | ARM64 PSCI, SMC conduit; no spin-table patch or preboot shim |
+| `qcom,gcc-msm8917`, `qcom,msm8917-pinctrl` | `MSM_GCC_8917`, `PINCTRL_MSM8917` (dedicated drivers in this fork) |
+| RPM IPC through APCS mailbox channel 0 | `MAILBOX`, `QCOM_APCS_IPC`; no CPU PLL ownership required by register accesses |
+| SMEM/TCSR, SMD RPM clocks, domains and regulator votes | `QCOM_SMEM`, `HWSPINLOCK_QCOM`, `RPMSG_QCOM_SMD`, `QCOM_SMD_RPM`, `QCOM_CLK_SMD_RPM`, `QCOM_RPMPD`, `PM_OPP`, `REGULATOR_QCOM_SMD_RPM` |
+| PM8937/PMI8950 SPMI | PMIC arbiter, MFD and PMIC pinctrl |
+| eMMC/SD `qcom,sdhci-msm-v4` | `MMC_SDHCI_MSM`, TLMM and PM8937 RPM supply dependencies |
+| BLSP QUP I2C, including touch bus `78b7000` | `I2C_QUP`, using PIO while DMA support is disabled |
+| Board DT's `goodix,gt911` at `0x5d` | `TOUCHSCREEN_GOODIX`, existing controller configuration and `INPUT_EVDEV` |
+| USB `qcom,ci-hdrc` | ChipIdea MSM glue, UDC and `USB_ROLE_SWITCH`, not DWC3 |
+| USB `qcom,usb-hs-28nm-femtophy` | `PHY_QCOM_USB_HS_28NM` and PM8937 RPM supplies, not the older `PHY_QCOM_USB_HS` |
+
+Touch bring-up initially enables only QUP and Goodix, leaving the DT unchanged.
+The private stock-F DT contains both Goodix and Focaltech alternatives; it
+does not identify the fitted controller. The successful runtime probe now
+identifies Goodix ID 9111 on the development unit. The stock DT describes a
+different Goodix I/O supply (L6 rather than the public port's L5); successful
+probe with firmware-preserving flags does not resolve that wiring discrepancy
+or establish independent touch power management.
+
+With DMA support disabled, QUP falls back to PIO. Enabling the DMA engine
+without its referenced BAM provider would instead defer probing. The pinned
+Goodix driver leaves reset untouched and does not load optional disk config
+when `irq-gpios` is absent. Adding that property is not an isolated fix: it
+also changes reset/address-selection behavior and firmware-loader requirements.
+Neither firmware upload nor a GPIO reset change is part of this first trial.
+
+Only verified selection metadata is added for the F: APQ8017 ID 307, revision
+0, alongside the existing MSM8917 ID 303. Board ID remains `<0x1000b 0>`.
+The other stock multi-platform IDs are not copied without evidence.
+
+RAM size stays a bootloader-filled `memory@80000000` placeholder. The source
+reserves QSEE at `0x85b00000` (8 MiB), SMEM at `0x86300000` (1 MiB), a
+4 MiB region at `0x86400000`, RMTFS at `0x92100000` (1.5 MiB) and board
+ramoops at `0x8ee00000` (512 KiB). ADSP (17 MiB) and WCNSS (7 MiB) have
+dynamic no-map reservations in the `0x86800000`–`0x8e800000` allocation
+window; MPSS, GPS, MBA and Venus reservations remain disabled. These inherited
+regions are retained conservatively, not certified against F firmware.
+No modem, audio, Wi-Fi or GPU drivers are enabled for the initial target.
+
+## LK2nd handoff
+
+Android header v0, page size 2048, payload `Image.gz` followed by the DTB,
+built-in initramfs, no external ramdisk/QCDT. The header uses base `0x80000000`,
+kernel offset `0x80000`, tags offset `0x3400000` and ramdisk offset `0x3600000`.
+These are LK2nd msm8952 ARM64 defaults, **not** the stock ARM32 offsets.
+
+In [LK2nd `517bb38`](https://github.com/msm8916-mainline/lk2nd/tree/517bb38a409d4ac982f09e83a046e4dc71be5029),
+`project/msm8952.mk` enables `ABOOT_IGNORE_BOOT_HEADER_ADDRS`.
+`app/aboot/aboot.c:update_ker_tags_rdisk_addr()` uses the decompressed ARM64
+Image's `text_offset` relative to a 2 MiB-aligned base. The locally built
+Image has offset zero, so the expected entry placement is `0x80000000`,
+not the nominal header address `0x80080000`.
+
+The current diagnostic command line is:
+
+```text
+console=tty0 panic=-1 deferred_probe_timeout=5 pocketboot.log=info pocketboot.usb_role=device loglevel=8 ignore_loglevel lk2nd.pass-simplefb lk2nd.pass-ramoops clk_ignore_unused pd_ignore_unused regulator_ignore_unused
+```
+
+`deferred_probe_timeout=5` permits a bounded wait for asynchronous RPM
+providers and reports outstanding probe reasons. The seventh patch makes
+the built-in-only kernel honor that positive timeout instead of returning
+`-ENODEV` immediately after initcalls. The default zero and negative
+built-in-only behavior, and module-enabled behavior, are preserved.
+This does not disable firmware dependency checking.
+
+`pocketboot.log=info` enables userspace bind/role/discovery messages separately
+from kernel printk filtering. `pocketboot.usb_role=device` opts into requesting
+device role after the selected UDC is bound. PocketBoot resolves the UDC's
+controller and requires exactly one role switch with the same canonical
+`device` parent; missing or ambiguous matches fail rather than writing an
+unrelated controller. Other devices make no role-switch accesses by default.
+Only `device` is supported, not host mode. This is bootstrap policy, not
+complete charger, connector or hotplug management.
+
+`panic=-1` requests immediate reboot on panic instead of the default
+`panic=0` indefinite wait used by the first four trials. It is not a watchdog
+for arbitrary hangs and does not itself request bootloader mode. Verify the
+actual USB return mode and retained-log survival separately; a reboot into
+stock Android still needs manual recovery for this RAM-only workflow.
+On the development unit, an owner-authorized erase of `boot` now makes stock
+aboot fall back to fastboot. One panic/reboot/log-capture cycle is verified;
+see the [recovery record](tb-x304f-bringup.md#automatic-panic-recovery-with-an-empty-boot-partition).
+The build does not erase anything or assume this state on another tablet.
+
+LK2nd passes the boot image command line through `boot_linux()` to
+`update_device_tree()` and its registered handlers.
+`lk2nd/display/simplefb.c` reads `lk2nd.pass-simplefb`, adds a no-map
+`cont-splash@...` reservation and creates/enables the simple-framebuffer
+with the live base, dimensions, stride and format. The static board
+framebuffer/reservation is removed to avoid duplicate reservations and native
+DSI PLL dependencies. No resolution, rotation or RAM size is imposed here.
+The packaged DT therefore has **no framebuffer until LK2nd updates it**.
+Capturing that final handed-off DT is still a hardware validation step.
+
+The three `ignore_unused` flags temporarily preserve firmware-owned display
+clocks, power domains and rails without native DRM/DSI taking ownership.
+They do not prevent a driver's probe-time changes: the PocketBoot DT patch
+also marks `lcd_3v3` as `regulator-boot-on`, preventing the fixed-regulator
+driver from driving its enable GPIO low during probe. The existing fixed
+voltage and polarity are retained. These are firmware-handoff policies, not
+a complete power-management solution. USB is explicitly peripheral-only and
+its charger/extcon and host-VBUS dependencies are removed; this target does
+not manage charging or provide USB host mode.
+
+`console=tty0` is paired with `DRM_FBDEV_EMULATION`,
+`DRM_CLIENT_DEFAULT_FBDEV` and `FRAMEBUFFER_CONSOLE` so ordinary kernel text
+can appear after simpledrm probes. The initial image omitted this client:
+simpledrm and DRM panic support alone do not provide an fbcon console. This
+does not expose failures before framebuffer initialization or guarantee USB
+bring-up, but avoids mistaking an unchanged splash for a kernel that never ran.
+
+`PSTORE_CONSOLE` and the bare `lk2nd.pass-ramoops` token select retained
+kernel-console logging in LK2nd's own mapped scratch-end region. On this unit
+that is `0xbff80000`, size 512 KiB, with 8 KiB dump records, a 256 KiB console,
+and ECC disabled. LK2nd rewrites the board's original `0x8ee00000` ramoops
+reservation during handoff; the packaged DT still contains the original
+placeholder. Do not add `=zap`, which clears the retained region.
+See the bring-up record for source bounds, capture commands and retention
+limits. This does not provide logs before the kernel pstore console registers.
+
+## Validation and remaining work
+
+Local validation completed with Rust 1.96.0 and AArch64 GCC 16.2.1:
+
+- `cargo test -p xtask`: 54 tests passed, including the target contract.
+- `cargo fmt --all --check`, `git diff --check`: passed.
+- `cargo xtask build` lists the target.
+- `cargo xtask kernel-src ...` twice: clean application, then idempotent.
+- `cargo xtask build qcom/msm8917-lenovo-tbx304x`: built PocketBoot, BusyBox,
+  kernel, DTB and the initial 4,734,976-byte `boot.img`, before enabling fbcon.
+- Binary inspection verified the v0 header, exact gzip+DTB payload, ARM64
+  header, APQ8017/SKU5 metadata, PSCI, peripheral USB and retained reservations.
+  All requested enabled Kconfig values survived the strict merge.
+
+The first config merge failed because this kernel's strict merge script
+rejects `# CONFIG_FOO is not set` for symbols omitted from the final config.
+Target-local `{ raw = "n" }` settings use its supported equivalent form;
+neither the shared builder nor kernel runtime was changed to bypass checks.
+The successful build had three existing PocketBoot Rust warnings
+(`libc::time_t` twice, unused `continue_then`), not kernel/DT build errors.
+
+The normal image now confirms Linux entry, PSCI/SMP, framebuffer-driver
+registration, PocketBoot init, USB fastboot and eMMC read I/O across three
+RAM-boots. The subsequent LCD boot-on trial also confirms visible UI.
+The two-driver touch trial confirms Goodix probe and PocketBoot input-device
+discovery. Retained logs survive the tested recovery path. Still unvalidated:
+physical touch response/orientation, large USB transfers, storage writes and kexec.
+This kernel also lacks the existing MSM8916 series' ChipIdea SG-bounce and
+FunctionFS reset-work fixes; large fastboot uploads and gadget teardown must
+not be assumed reliable. Native panel/GPU, Wi-Fi and audio are deferred.
+One unattended panic recovery is verified with `panic=-1` and an explicitly
+erased `boot` partition; this does not cover arbitrary hard hangs.
+
+The first hardware trial was accepted by LK2nd, but no tablet USB interface
+appeared within 45 seconds. That trial did not establish Linux entry or
+userspace startup. See the [bring-up record](tb-x304f-bringup.md) for the observed
+result, bootloader image, recovery constraints, and next diagnostic checkpoint.
+
+A console-enabled candidate was then rebuilt using the same initramfs and
+unchanged DTB: 4,784,128 bytes, SHA-256
+`c707c18b92da380fdc2bfe9158c7c10e33cc09acda09957da186a52fdd03124b`.
+The generated config confirms fbdev emulation, the fbdev default DRM client,
+fbcon, and their fbdev-core dependency are built in. Gzip/Image/DTB inspection
+and the 54 build-tool tests passed again. LK2nd accepted this second candidate,
+but no USB appeared within 45 seconds and the screen was black when checked
+later. This is not a demonstrated USB fix.
+
+`PSTORE_CONSOLE` is enabled for the retained-log profile. The bounded raw
+exporter was exercised before the trial, but the kernel rebuild does not
+verify Linux entry or RAM retention. The latest hardware state and
+logging-region checks belong in the linked bring-up record.
+
+The shared-region image is 4,784,128 bytes, SHA-256
+`c0da6ec5c7c287b94a0e1e814e0f1517da6e091fd75bba3e9c0a43e738bd24d2`.
+The built-in frontend, bare handoff flag, gzip/Image/DTB layout and mainline DT
+classification were checked. LK2nd accepted the image, but USB again remained
+absent for 45 seconds. The recovered console identifies the missing UDC and
+zero discovered disks, followed by PID 1 exiting and a panic at 12.3 seconds.
+
+The board's SDHCI and USB PHY supply phandles point to the `pm8937_l*` nodes
+under `rpm_requests`, handled by the already-enabled
+`REGULATOR_QCOM_SMD_RPM`. They do not reference the separate direct-SPMI
+regulator node. An initially proposed `REGULATOR_QCOM_SPMI` addition was
+rejected in review and not booted; trace the actual provider dependencies
+rather than treating the absent direct-SPMI driver as their missing supplier.
+
+The RPM SMD edge reports `failed to get regmap from syscon: -517`. Its legacy
+`qcom,ipc = <&apcs 8 0>` path calls `syscon_node_to_regmap()`, which obtains
+the APCS node's first clock (`a53pll`). The attempted kernel had
+`CONFIG_QCOM_A53PLL` disabled, so that clock provider could not register.
+A candidate enabling that driver was also withheld: syscon attaches the PLL
+to its regmap and explicitly enables/disables it for register accesses.
+`clk_ignore_unused` does not prevent those explicit clock operations.
+
+The follow-up instead replaces that legacy IPC property with
+`mboxes = <&apcs 0>`. The already-enabled APCS mailbox driver signals the same
+offset 8/bit 0 through its own regmap without attaching a clock. Neither the
+CPU PLL nor CPU frequency scaling is enabled. The linked bring-up record
+distinguishes this source-level fix from subsequent hardware results.
+
+The deferred-probe log then exposed the remaining APCS-to-RPMCC dependency.
+The final two patches use the binding's `clock-controller` child: move the
+unchanged clock inputs and provider out of the mailbox node, and point all
+four CPU clock consumers at that child. The clock driver's PLL lookup uses
+the clock device, whose firmware node is either this child or the legacy
+mailbox node. Its register map and clock name still come from the parent.
+This preserves the original reference-clock source rather than substituting
+an unverified fixed-XO input, and keeps global firmware dependency checking.
+
+The child-layout DT passes the targeted APCS binding check. The otherwise
+disabled clock driver was explicitly compiled as an object for compatibility
+validation, but is not linked into the hardware image. Kernel image, config,
+initramfs and command line remain byte-identical to the deferred-probe trial;
+only the DT changes in that candidate. This is not CPU-frequency-scaling
+validation.
+
+The recovered clock-child log then confirmed RPM regulator registration and
+exposed `-EOPNOTSUPP` when RPMPD tried to add its OPP table. `PM_OPP` is hidden
+Kconfig support, so the sixth patch selects it from the driver which requires
+it; the image contract also requires it. CPU frequency scaling, A53 PLL and
+APCS clock drivers stay disabled.
+
+A bounded diagnostic experiment proved USB device-role selection and late
+eMMC re-probing independently. Normal startup now handles the former through
+the opt-in role policy, and the seventh kernel patch removes the need for the
+latter by waiting for the late power-domain provider. The tested normal image
+is 4,810,752 bytes, SHA-256
+`45ad387ee315585badce7bee2a5e1792c7482bf907c998c1bf24a79f939710d4`.
+It contains no probe wrapper or timed diagnostic panic. See the
+[normal-boot evidence](tb-x304f-bringup.md#verified-normal-usb-and-emmc-boot)
+and the separate [lab probe guide](tb-x304f-probe.md).
+
+The LCD boot-on candidate is also 4,810,752 bytes, SHA-256
+`0e69d2e2e346d87032d60ef5a3cac999aa41aff8a001af2eac1554509f7792dd`.
+Only its DT changed from that normal image. The owner confirmed a working
+framebuffer; see the [display evidence](tb-x304f-bringup.md#verified-visible-framebuffer).
+
+The touch-driver candidate is 4,823,040 bytes, SHA-256
+`942ab820c51a608a33772d240c9f5d12d2dc29183d49533dd4202030141f3378`.
+Only QUP I2C and Goodix changed in the effective kernel config; the DT,
+initramfs and command line stayed unchanged. The driver reports ID 9111 and
+version 4011, and PocketBoot opens its event device. See the
+[input-registration evidence and remaining check](tb-x304f-bringup.md#goodix-input-registration).
+~~~~
+<!-- END docs/tb-x304f-build.md -->
+
+## Archived file: docs/tb-x304f-probe.md
+
+Bytes: 4950; SHA-256: `7d265b0b8cf636ebd3bd111d57556f13b4e6d5b15d7d9da9570cf4901e66d3e8`.
+
+<!-- BEGIN docs/tb-x304f-probe.md -->
+~~~~text
+# TB-X304F bounded probe initramfs
+
+**Lab-only: this wrapper deliberately panics a responsive kernel after a
+deadline. Never install it persistently or use it as a normal boot image.**
+Verify the intended tablet, a recovery route and the supported bounded RAM-log
+export before trying it. It is not a watchdog for a hung kernel.
+
+Normal `cargo xtask build qcom/msm8917-lenovo-tbx304x` does not use this
+wrapper. The [normal image](tb-x304f-bringup.md#verified-normal-usb-and-emmc-boot)
+now starts USB and eMMC without it.
+
+## Build a separate diagnostic archive
+
+From the repository root, after creating the ordinary target initramfs:
+
+```sh
+(
+    set -eu
+    umask 077
+    mkdir -p target/tb-x304f-lab
+    OUT="$(mktemp -d target/tb-x304f-lab/probe.XXXXXX)"
+    python3 tools/tb_x304f_probe_cpio.py \
+        --input target/cpio/qcom/msm8917-lenovo-tbx304x/pocketboot-initrd.cpio \
+        --output "$OUT/probe.cpio"
+    cargo xtask kernel qcom/msm8917-lenovo-tbx304x --initrd "$OUT/probe.cpio"
+    cargo xtask bootimg qcom/msm8917-lenovo-tbx304x
+    cp target/kernel/qcom/msm8917-lenovo-tbx304x/boot.img "$OUT/probe.img"
+    printf 'Private diagnostic image: %s/probe.img\n' "$OUT"
+)
+```
+
+The builder preserves the complete input archive and saves the original
+AArch64 ELF as `/pocketboot.real-init` in an appended newc overlay. It rejects
+malformed archives, unsuitable required members, already-wrapped input and
+existing output paths. It does not extract files, flash a device or edit the
+normal initramfs.
+
+The kernel commands above do use the usual generated kernel/image directory.
+Keep the separately named diagnostic copy, and run the normal full build again
+before reusing its usual `boot.img` as an ordinary image.
+
+## Explicit activation and recovery
+
+Keep the target's normal command line and add the standalone token
+`pocketboot.probe` to the separately staged diagnostic image. Retain exactly
+`panic=-1` and bare `lk2nd.pass-ramoops`; never add `=zap`. Record the complete
+effective command line and image hash, and RAM-boot only through the verified
+lk2nd path. This guide does not authorize erasing another tablet's boot image.
+
+The wrapper:
+
+1. Refuses non-PID1 execution, starts diagnostic children, then execs the
+   original PocketBoot ELF as PID1.
+2. After about three seconds, requires exact `lenovo,tbx304x` compatibility,
+   `pocketboot.probe` and an effective `panic=-1` before any `--` init arguments.
+3. Arms an independent 30-second deadline, then records bounded snapshots of
+   deferred devices, partitions, UDC state, gadget binding and software driver
+   state into `/dev/kmsg`, prefixed `TBX304F-PROBE:`.
+4. Mounts debugfs read-only if needed. It does not read arbitrary register
+   files or block contents. Snapshot reads cannot delay the independent timer.
+5. Unless cancelled, logs `intentional diagnostic panic` and writes `c` to the
+   existing SysRq trigger. Do not misclassify this expected panic as a driver
+   crash.
+
+After independently verifying a usable PocketBoot USB session, the intended
+cancellation command is:
+
+```sh
+: "${SERIAL:?Set SERIAL to the explicitly verified tablet}"
+fastboot -s "$SERIAL" oem 'shell:touch /run/tbx304f-probe.keep'
+```
+
+It creates only a tmpfs marker. The recorded diagnostic trials deliberately
+allowed the deadline to fire so both snapshots were retained; cancellation
+itself has not been hardware-tested. Retrieve and preserve the bounded raw
+RAM window before another kernel boot. See the
+[recovery procedure](tb-x304f-bringup.md#automatic-panic-recovery-with-an-empty-boot-partition).
+
+## Optional controlled interventions
+
+These are off unless explicitly requested in addition to the three guards:
+
+- `pocketboot.probe-role-device`: after the first snapshot, request device role
+  through the `ci_hdrc.0` role switch only if its canonical device parent
+  matches that UDC. The diagnostic DT must expose `usb-role-switch`.
+- `pocketboot.probe-reprobe-mmc`: after the second snapshot, retry only the
+  unbound `7824900.mmc` device, and only after its RPM power-domain driver is
+  bound. It never unbinds a live controller or writes partition data.
+
+These controls isolated the original faults; they are not substitutes for
+normal startup fixes. The current normal profile already selects USB device
+role and waits for RPM suppliers.
+
+## Verification
+
+The host-only suite has 15 tests covering archive preservation, malformed and
+truncated input, AArch64 executable checks, overwrite refusal, shell syntax
+and ordinary-process refusal. ShellCheck passes. The actual packaged BusyBox
+applets and shell parsing were checked under `qemu-aarch64`.
+
+On the tablet, the opt-in wrapper preserved PID1, logged the expected
+snapshots, deliberately panicked, returned to stock fastboot and retained the
+log. The optional role request enabled verified PocketBoot USB; the later
+eMMC re-probe found all 48 GPT partitions. No additional partition writes
+were part of those trials.
+~~~~
+<!-- END docs/tb-x304f-probe.md -->
+
+## Archived file: tools/tb-x304f-probe-init.sh
+
+Bytes: 6974; SHA-256: `6718232188c4a10215f0ec750753aa89f770d39280b6377b53026811a242a111`.
+
+<!-- BEGIN tools/tb-x304f-probe-init.sh -->
+~~~~text
+#!/bin/busybox sh
+# Lab-only /init overlay. Never source this script or run it in a PID namespace.
+# PocketBoot remains PID1; the diagnostic children do not own its lifetime.
+if [ "$$" -ne 1 ]; then
+    printf '%s\n' 'TBX304F-PROBE: refusing to run: this wrapper must be /init (PID1)' >&2
+    exit 1
+fi
+
+log()
+{
+    printf '<6>TBX304F-PROBE: %s\n' "$*" > /dev/kmsg
+}
+
+bounded_lines()
+{
+    # At most 4096 bytes, 32 lines, 256 characters per line. HEAD -c needs a
+    # BusyBox option absent from PocketBoot's minimal config; DD does not.
+    /bin/busybox dd bs=4096 count=1 2>/dev/null |
+        /bin/busybox head -n 32 |
+        /bin/busybox cut -c 1-256 |
+        while IFS= read -r line || [ -n "$line" ]; do
+            log "$line"
+        done
+}
+
+snapshot_file()
+{
+    if [ -r "$1" ]; then
+        log "file=$1 (bounded)"
+        bounded_lines < "$1"
+    else
+        log "file=$1 unavailable"
+    fi
+}
+
+snapshot()
+{
+    log "snapshot nominal-boot-seconds=$1"
+    snapshot_file /sys/kernel/debug/devices_deferred
+    snapshot_file /proc/partitions
+    # ChipIdea's device entry reports software state, not raw registers.
+    snapshot_file /sys/kernel/debug/usb/ci_hdrc.0/device
+    snapshot_file /sys/class/usb_role/ci_hdrc.0-role-switch/role
+    snapshot_file /sys/kernel/debug/pm_genpd/pm_genpd_summary
+    for platform_device in remoteproc:smd-edge:rpm-requests:power-controller \
+        7824900.mmc 7864900.mmc; do
+        driver_link=/sys/bus/platform/devices/$platform_device/driver
+        if [ -L "$driver_link" ]; then
+            log "driver-link=$driver_link"
+            /bin/busybox readlink "$driver_link" 2>/dev/null | bounded_lines
+        else
+            log "driver-link=$driver_link unbound"
+        fi
+    done
+
+    udc_count=0
+    for udc in /sys/class/udc/*; do
+        [ -d "$udc" ] || continue
+        udc_count=$((udc_count + 1))
+        if [ "$udc_count" -gt 4 ]; then
+            log 'UDC list capped at 4'
+            break
+        fi
+        for attribute in state function current_speed maximum_speed; do
+            snapshot_file "$udc/$attribute"
+        done
+        if [ -L "$udc/device/driver" ]; then
+            log "driver-link=$udc/device/driver"
+            /bin/busybox readlink "$udc/device/driver" 2>/dev/null | bounded_lines
+        else
+            log "driver-link=$udc/device/driver unavailable"
+        fi
+    done
+    [ "$udc_count" -ne 0 ] || log 'no UDCs'
+
+    gadget_count=0
+    for gadget in /sys/kernel/config/usb_gadget/*; do
+        [ -d "$gadget" ] || continue
+        gadget_count=$((gadget_count + 1))
+        if [ "$gadget_count" -gt 4 ]; then
+            log 'gadget list capped at 4'
+            break
+        fi
+        snapshot_file "$gadget/UDC"
+    done
+    [ "$gadget_count" -ne 0 ] || log 'no configfs USB gadgets'
+}
+
+request_device_role()
+{
+    probe_role=/sys/class/usb_role/ci_hdrc.0-role-switch
+    probe_udc=/sys/class/udc/ci_hdrc.0
+    if [ ! -w "$probe_role/role" ] || [ ! -d "$probe_udc/device" ]; then
+        log 'optional device-role request unavailable'
+        return
+    fi
+    probe_role_device=$(cd -P "$probe_role/device" && pwd -P) || return
+    probe_udc_device=$(cd -P "$probe_udc/device" && pwd -P) || return
+    if [ "$probe_role_device" != "$probe_udc_device" ]; then
+        log 'refusing device-role request: role switch and UDC parents differ'
+        return
+    fi
+    log 'optional device-role request via the matched ci_hdrc.0 role-switch API'
+    if printf '%s\n' device > "$probe_role/role"; then
+        log 'device-role request accepted'
+    else
+        log 'device-role request failed'
+    fi
+}
+
+reprobe_emmc()
+{
+    probe_rpmpd=/sys/bus/platform/devices/remoteproc:smd-edge:rpm-requests:power-controller/driver
+    probe_emmc=/sys/bus/platform/devices/7824900.mmc
+    if [ ! -d "$probe_rpmpd" ] || [ ! -d "$probe_emmc" ] ||
+        [ ! -w /sys/bus/platform/drivers_probe ]; then
+        log 'optional eMMC re-probe unavailable: provider or device missing'
+        return
+    fi
+    probe_provider=$(cd -P "$probe_rpmpd" && pwd -P) || return
+    if [ "$probe_provider" != /sys/bus/platform/drivers/qcom-rpmpd ]; then
+        log 'refusing eMMC re-probe: unexpected power-domain driver'
+        return
+    fi
+    if [ -L "$probe_emmc/driver" ]; then
+        log 'eMMC already bound; not re-probing or unbinding'
+        return
+    fi
+    log 'optional one-time eMMC re-probe after RPMPD is bound'
+    if printf '%s\n' 7824900.mmc > /sys/bus/platform/drivers_probe; then
+        log 'eMMC re-probe request accepted'
+    else
+        log 'eMMC re-probe request failed'
+    fi
+}
+
+deadline()
+{
+    # Independent of snapshot reads and the optional debugfs mount. This can
+    # recover a live kernel without USB, not a hung kernel.
+    /bin/busybox sleep 30 || return
+    if [ -e /run/tbx304f-probe.keep ]; then
+        log 'diagnostic deadline cancelled: /run/tbx304f-probe.keep exists'
+        return
+    fi
+    log 'intentional diagnostic panic: deadline expired without cancellation'
+    printf c > /proc/sysrq-trigger
+}
+
+probe()
+{
+    # Give the real init time to mount proc, sysfs, devtmpfs and /run.
+    /bin/busybox sleep 3 || return
+    [ -r /sys/firmware/devicetree/base/compatible ] || return
+    /bin/busybox tr '\000' '\n' < /sys/firmware/devicetree/base/compatible |
+        /bin/busybox grep -F -x -q 'lenovo,tbx304x' || return
+    [ -r /proc/cmdline ] || return
+    IFS= read -r cmdline < /proc/cmdline || return
+    # Match whole tokens, with the last panic= value winning like the kernel.
+    # Ignore init arguments after -- and disable glob expansion while splitting.
+    set -f
+    enabled=0
+    role_device=0
+    reprobe_mmc=0
+    panic=
+    for token in $cmdline; do
+        case "$token" in
+            --) break ;;
+            pocketboot.probe) enabled=1 ;;
+            pocketboot.probe-role-device) role_device=1 ;;
+            pocketboot.probe-reprobe-mmc) reprobe_mmc=1 ;;
+            panic=*) panic=${token#panic=} ;;
+        esac
+    done
+    set +f
+    [ "$enabled" -eq 1 ] && [ "$panic" = -1 ] || return
+
+    # Nothing is logged, mounted or armed until ALL three guards pass.
+    deadline &
+    log 'armed: diagnostic panic in 30s; cancel with /run/tbx304f-probe.keep'
+
+    # Reuse PocketBoot's existing standard debugfs mount, without remounting.
+    # Only mount if absent; never write a debugfs file or a device register.
+    if [ -d /sys/kernel/debug ] &&
+        ! /bin/busybox mountpoint -q /sys/kernel/debug; then
+        if /bin/busybox mount -t debugfs -o ro,nosuid,nodev,noexec \
+            debugfs /sys/kernel/debug >/dev/null 2>&1; then
+            log 'mounted diagnostic debugfs read-only'
+        else
+            log 'debugfs mount unavailable'
+        fi
+    fi
+    snapshot 3
+    [ "$role_device" -eq 0 ] || request_device_role
+    /bin/busybox sleep 7 || return
+    snapshot 10
+    [ "$reprobe_mmc" -eq 0 ] || reprobe_emmc
+    /bin/busybox sleep 10 || return
+    snapshot 20
+}
+
+probe &
+exec /pocketboot.real-init "$@"
+~~~~
+<!-- END tools/tb-x304f-probe-init.sh -->
+
+## Archived file: tools/tb_x304f_probe_cpio.py
+
+Bytes: 8145; SHA-256: `13be5e3b8b75b64daba7052733d9955f2c785ca7c5173c61e95940a5dd5bc86f`.
+
+<!-- BEGIN tools/tb_x304f_probe_cpio.py -->
+~~~~text
+#!/usr/bin/env python3
+"""Append a lab-only TB-X304F diagnostic /init overlay without extracting files."""
+
+import argparse
+from pathlib import Path, PurePosixPath
+import stat
+import struct
+import sys
+from typing import NamedTuple
+
+
+WRAPPER = Path(__file__).with_name('tb-x304f-probe-init.sh')
+REAL_INIT = 'pocketboot.real-init'
+HEADER_SIZE = 110
+
+
+class Entry(NamedTuple):
+    name: str
+    mode: int
+    uid: int
+    gid: int
+    nlink: int
+    mtime: int
+    data: bytes
+
+
+def align4(size):
+    return (size + 3) & ~3
+
+
+def archive_name(raw):
+    if not raw or raw[-1:] != b'\0' or b'\0' in raw[:-1]:
+        raise ValueError('invalid newc filename')
+    name = raw[:-1].decode('utf-8', errors='surrogateescape')
+    if not name or '..' in name.split('/'):
+        raise ValueError('empty or traversing newc filename')
+    # /init and ./init identify the same initramfs member as init.
+    return str(PurePosixPath('/' + name.lstrip('/'))).lstrip('/')
+
+
+def parse_newc(data):
+    """Read complete uncompressed newc archive(s), including each trailer.
+
+    Multiple archives are legal in Linux initramfs. Accept them here so an
+    already-wrapped archive is detected even when its saved init is in an
+    appended overlay. No archive member is extracted to the host filesystem.
+    """
+    entries = []
+    offset = 0
+    while True:
+        while True:
+            if offset + HEADER_SIZE > len(data):
+                raise ValueError('truncated newc header or missing trailer')
+            header = data[offset:offset + HEADER_SIZE]
+            if header[:6] != b'070701':
+                raise ValueError('expected uncompressed newc magic 070701')
+            if any(c not in b'0123456789abcdefABCDEF' for c in header[6:]):
+                raise ValueError('invalid hexadecimal newc header')
+            fields = [int(header[i:i + 8], 16) for i in range(6, HEADER_SIZE, 8)]
+            (_, mode, uid, gid, nlink, mtime, size, _, _, _, _,
+             namesize, check) = fields
+            if namesize < 2 or check != 0:
+                raise ValueError('invalid newc namesize or checksum')
+            name_start = offset + HEADER_SIZE
+            name_end = name_start + namesize
+            data_start = align4(name_end)
+            data_end = data_start + size
+            next_offset = align4(data_end)
+            if next_offset > len(data):
+                raise ValueError('truncated newc name, data or alignment padding')
+            raw_name = data[name_start:name_end]
+            name = archive_name(raw_name)
+            contents = data[data_start:data_end]
+            offset = next_offset
+            if raw_name == b'TRAILER!!!\0':
+                if size != 0:
+                    raise ValueError('newc trailer must have no data')
+                break
+            entries.append(Entry(name, mode, uid, gid, nlink, mtime, contents))
+
+        # cpio tools may pad archives to a larger block size with NULs.
+        while offset < len(data) and data[offset] == 0:
+            offset += 1
+        if offset == len(data):
+            return entries
+        if offset % 4:
+            raise ValueError('unaligned concatenated newc archive')
+
+
+def executable(entries, name):
+    matches = [entry for entry in entries if entry.name == name]
+    if len(matches) != 1:
+        raise ValueError(f'expected exactly one /{name}, found {len(matches)}')
+    entry = matches[0]
+    if not stat.S_ISREG(entry.mode) or not entry.mode & 0o111:
+        raise ValueError(f'/{name} must be a regular executable file')
+    # Avoid aliasing the overwritten init or relying on hardlink data ordering.
+    if entry.nlink != 1:
+        raise ValueError(f'/{name} must not be hardlinked')
+    if not entry.data:
+        raise ValueError(f'/{name} must not be empty')
+    return entry
+
+
+def check_aarch64_elf(data, name):
+    # Verify the executable's identity, not every ELF segment/section. Its bytes
+    # are copied verbatim; this tool is not an ELF loader or a cross-linker.
+    if (len(data) < 64 or data[:7] != b'\x7fELF\x02\x01\x01'
+            or struct.unpack_from('<HHI', data, 16) not in
+            ((2, 183, 1), (3, 183, 1))
+            or struct.unpack_from('<H', data, 52)[0] != 64):
+        raise ValueError(f'/{name} must be a little-endian ELF64 AArch64 executable')
+
+
+def newc_entry(name, mode, contents, *, ino, uid=0, gid=0, mtime=0):
+    encoded_name = name.encode('ascii') + b'\0'
+    fields = (ino, mode, uid, gid, 1, mtime, len(contents),
+              0, 0, 0, 0, len(encoded_name), 0)
+    if any(value < 0 or value > 0xffffffff for value in fields):
+        raise ValueError('newc field exceeds 32 bits')
+    result = b'070701' + ''.join(f'{value:08x}' for value in fields).encode('ascii')
+    result += encoded_name
+    result += b'\0' * (align4(len(result)) - len(result))
+    result += contents
+    return result + b'\0' * (align4(len(result)) - len(result))
+
+
+def diagnostic_archive(base, wrapper):
+    entries = parse_newc(base)
+    if any(entry.name == REAL_INIT or entry.name.startswith(REAL_INIT + '/')
+           for entry in entries):
+        raise ValueError('already-wrapped input: /pocketboot.real-init exists')
+    init = executable(entries, 'init')
+    busybox = executable(entries, 'bin/busybox')
+    if any(entry.name == 'bin' and not stat.S_ISDIR(entry.mode)
+           for entry in entries):
+        raise ValueError('/bin must be a directory, not an alias')
+    for executable_entry in (init, busybox):
+        check_aarch64_elf(executable_entry.data, executable_entry.name)
+    if not wrapper.startswith(b'#!/bin/busybox sh\n'):
+        raise ValueError('unexpected diagnostic wrapper interpreter')
+
+    # Keep the original archive, trailer and padding byte-for-byte. Linux
+    # unpacks the second archive afterward, replacing /init with the wrapper.
+    overlay = newc_entry(REAL_INIT, init.mode, init.data, ino=1,
+                         uid=init.uid, gid=init.gid, mtime=init.mtime)
+    overlay += newc_entry('init', stat.S_IFREG | 0o755, wrapper, ino=2,
+                          mtime=init.mtime)
+    overlay += newc_entry('TRAILER!!!', 0, b'', ino=3)
+    return base + b'\0' * (align4(len(base)) - len(base)) + overlay
+
+
+def build(input_path, output_path):
+    input_path, output_path = Path(input_path), Path(output_path)
+    if input_path.resolve() == output_path.resolve():
+        raise ValueError('input and output must be different paths')
+    base = input_path.read_bytes()
+    result = diagnostic_archive(base, WRAPPER.read_bytes())
+    # O_EXCL also refuses hardlink aliases, dangling symlinks and racing writers.
+    # Validate everything before creating any output.
+    with output_path.open('xb') as output:
+        output.write(result)
+
+
+def main(argv=None):
+    parser = argparse.ArgumentParser(
+        description='Build a separate, opt-in TB-X304F diagnostic initramfs.',
+        epilog=(
+            'WARNING: this lab wrapper intentionally PANICS about 30s after its '
+            'guards pass (lenovo,tbx304x, pocketboot.probe, panic=-1). A verified '
+            'PocketBoot USB session can cancel via oem shell: by creating '
+            '/run/tbx304f-probe.keep before the deadline. Optional '
+            'pocketboot.probe-role-device requests device role on the matched '
+            'ci_hdrc.0 role switch after the first snapshot; '
+            'pocketboot.probe-reprobe-mmc retries only unbound 7824900.mmc after '
+            'RPMPD is bound and the second snapshot is logged. This is not recovery '
+            'from a hung kernel. Do not replace a normal boot artifact.'))
+    parser.add_argument('--input', type=Path, required=True,
+                        help='existing uncompressed newc base (never modified)')
+    parser.add_argument('--output', type=Path, required=True,
+                        help='new diagnostic cpio path; must not already exist')
+    args = parser.parse_args(argv)
+    try:
+        build(args.input, args.output)
+    except (OSError, ValueError) as error:
+        parser.exit(1, f'{parser.prog}: {error}\n')
+    print(f'Wrote lab-only diagnostic archive: {args.output}')
+    return 0
+
+
+if __name__ == '__main__':
+    sys.exit(main())
+~~~~
+<!-- END tools/tb_x304f_probe_cpio.py -->
+
+## Archived file: tools/tests/test_tb_x304f_probe_cpio.py
+
+Bytes: 12159; SHA-256: `d16fd9ff987d863bd2a83c5b360b663e1ae65ba8c334efb762d79bfdeaacbd90`.
+
+<!-- BEGIN tools/tests/test_tb_x304f_probe_cpio.py -->
+~~~~text
+"""Host-only tests. Never execute the wrapper's PID1/device-only body."""
+
+from contextlib import redirect_stderr, redirect_stdout
+import importlib.util
+import io
+import os
+from pathlib import Path
+import shutil
+import stat
+import struct
+import subprocess
+import tempfile
+import unittest
+
+
+TOOLS = Path(__file__).resolve().parents[1]
+spec = importlib.util.spec_from_file_location(
+    'tb_x304f_probe_cpio', TOOLS / 'tb_x304f_probe_cpio.py')
+probe = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(probe)
+WRAPPER = (TOOLS / 'tb-x304f-probe-init.sh').read_bytes()
+ELF = struct.pack(
+    '<16sHHIQQQIHHHHHH', b'\x7fELF\x02\x01\x01' + bytes(9),
+    2, 183, 1, 0x400000, 64, 0, 0, 64, 56, 0, 0, 0, 0
+) + b'original init payload\0\xff'
+BUSYBOX = ELF + b'busybox fixture'
+
+
+def record(name, contents=b'', mode=stat.S_IFREG | 0o755, nlink=1):
+    """Independent newc fixture writer, not the implementation's encoder."""
+    name = name.encode() + b'\0'
+    values = [17, mode, 12, 34, nlink, 123456, len(contents),
+              0, 0, 0, 0, len(name), 0]
+    result = b'070701' + b''.join(b'%08x' % value for value in values) + name
+    result += bytes(-len(result) % 4)
+    result += contents
+    return result + bytes(-len(result) % 4)
+
+
+TRAILER = record('TRAILER!!!', mode=0)
+
+
+def archive(*, init=ELF, init_mode=stat.S_IFREG | 0o755,
+            busybox=BUSYBOX, busybox_mode=stat.S_IFREG | 0o755,
+            extra=b''):
+    result = record('bin', mode=stat.S_IFDIR | 0o755)
+    if init is not None:
+        result += record('init', init, init_mode)
+    if busybox is not None:
+        result += record('bin/busybox', busybox, busybox_mode)
+    return result + extra + TRAILER
+
+
+def decode_overlay(data):
+    """Independent strict decoder for the three records the builder appends."""
+    result = []
+    offset = 0
+    while offset < len(data):
+        assert offset % 4 == 0
+        header = data[offset:offset + 110]
+        assert len(header) == 110 and header[:6] == b'070701'
+        fields = [int(header[6 + 8*i:14 + 8*i], 16) for i in range(13)]
+        namesize, size = fields[11], fields[6]
+        name_start = offset + 110
+        name_end = name_start + namesize
+        name = data[name_start:name_end]
+        assert name.endswith(b'\0')
+        data_start = (name_end + 3) // 4 * 4
+        data_end = data_start + size
+        offset = (data_end + 3) // 4 * 4
+        assert offset <= len(data)
+        assert not any(data[name_end:data_start] + data[data_end:offset])
+        result.append((name[:-1].decode(), fields, data[data_start:data_end]))
+    assert result[-1][0] == 'TRAILER!!!' and not result[-1][2]
+    return result
+
+
+class ArchiveTests(unittest.TestCase):
+    def test_overlay_preserves_full_base_original_init_and_metadata(self):
+        for padding in (0, 1, 2, 3, 512):
+            with self.subTest(padding=padding):
+                base = archive(extra=record('bin/sh', b'busybox',
+                                            stat.S_IFLNK | 0o777)) + bytes(padding)
+                result = probe.diagnostic_archive(base, WRAPPER)
+                self.assertEqual(result[:len(base)], base)
+                overlay_offset = (len(base) + 3) // 4 * 4
+                overlay = decode_overlay(result[overlay_offset:])
+                self.assertEqual([entry[0] for entry in overlay],
+                                 ['pocketboot.real-init', 'init', 'TRAILER!!!'])
+                self.assertEqual(overlay[0][2], ELF)
+                self.assertEqual(overlay[0][1][1:6],
+                                 [stat.S_IFREG | 0o755, 12, 34, 1, 123456])
+                self.assertEqual(overlay[1][2], WRAPPER)
+                self.assertEqual(overlay[1][1][1], stat.S_IFREG | 0o755)
+                effective = {entry.name: entry for entry in probe.parse_newc(result)}
+                self.assertEqual(effective['init'].data, WRAPPER)
+                self.assertEqual(effective['pocketboot.real-init'].data, ELF)
+                self.assertEqual(effective['bin/busybox'].data, BUSYBOX)
+
+    def test_only_exact_trailer_name_terminates_archive(self):
+        base = archive(extra=record('./TRAILER!!!', b'ordinary file'))
+        result = probe.diagnostic_archive(base, WRAPPER)
+        self.assertEqual(result[:len(base)], base)
+        with self.assertRaises(ValueError):
+            probe.diagnostic_archive(base[:-len(TRAILER)], WRAPPER)
+
+    def test_all_truncation_points_before_complete_trailer_are_rejected(self):
+        base = archive()
+        for end in range(len(base)):
+            with self.subTest(end=end), self.assertRaises(ValueError):
+                probe.diagnostic_archive(base[:end], WRAPPER)
+
+    def test_malformed_headers_names_trailer_and_trailing_data(self):
+        base = archive()
+        bad_hex = base[:6] + b'+' + base[7:]
+        bad_name = base[:113] + b'x' + base[114:]  # "bin" loses its NUL
+        bad_checksum = base[:102] + b'00000001' + base[110:]
+        bad_namesize = base[:94] + b'00000000' + base[102:]
+        oversized_data = base[:54] + b'ffffffff' + base[62:]
+        cases = [
+            b'070702' + base[6:], bad_hex, bad_name, bad_checksum,
+            bad_namesize, oversized_data, base + b'garbage',
+            base + b'\0' + archive(), base[:-len(TRAILER)],
+            base[:-len(TRAILER)] + record('TRAILER!!!', b'x', mode=0),
+            archive(extra=record('../escape', b'never extracted')),
+            archive(extra=record('bad\0name', b'never extracted')),
+        ]
+        for case in cases:
+            with self.subTest(case=case[:120]), self.assertRaises(ValueError):
+                probe.diagnostic_archive(case, WRAPPER)
+
+    def test_required_members_must_be_present_regular_and_executable(self):
+        for name in ('init', 'busybox'):
+            for contents in (None, b''):
+                with self.subTest(name=name, contents=contents):
+                    with self.assertRaises(ValueError):
+                        probe.diagnostic_archive(archive(**{name: contents}), WRAPPER)
+            for mode in (stat.S_IFREG | 0o644, stat.S_IFLNK | 0o777,
+                         stat.S_IFDIR | 0o755):
+                with self.subTest(name=name, mode=mode):
+                    with self.assertRaisesRegex(ValueError, 'regular executable'):
+                        probe.diagnostic_archive(
+                            archive(**{name + '_mode': mode}), WRAPPER)
+
+    def test_required_executables_must_be_aarch64_elf(self):
+        for name in ('init', 'busybox'):
+            for contents in (b'#!/bin/sh\n', ELF[:40],
+                             ELF[:18] + b'\x3e\0' + ELF[20:],
+                             ELF[:4] + b'\x01' + ELF[5:],
+                             ELF[:16] + b'\x01\0' + ELF[18:]):
+                with self.subTest(name=name, contents=contents):
+                    with self.assertRaisesRegex(ValueError, 'AArch64'):
+                        probe.diagnostic_archive(archive(**{name: contents}), WRAPPER)
+
+    def test_refuses_ambiguous_aliases_and_hardlinks(self):
+        for extra in (record('./init', ELF), record('/init', ELF),
+                      record('bin', b'elsewhere', stat.S_IFLNK | 0o777)):
+            with self.subTest(extra=extra), self.assertRaises(ValueError):
+                probe.diagnostic_archive(archive(extra=extra), WRAPPER)
+        base = record('init', ELF, nlink=2)
+        base += record('bin/busybox', b'busybox') + TRAILER
+        with self.assertRaisesRegex(ValueError, 'hardlinked'):
+            probe.diagnostic_archive(base, WRAPPER)
+
+    def test_refuses_already_wrapped_in_same_or_appended_archive(self):
+        for base in (
+            archive(extra=record('pocketboot.real-init', ELF)),
+            archive(extra=record('./pocketboot.real-init', ELF)),
+            probe.diagnostic_archive(archive(), WRAPPER),
+        ):
+            with self.subTest(base=base[:120]):
+                with self.assertRaisesRegex(ValueError, 'already-wrapped'):
+                    probe.diagnostic_archive(base, WRAPPER)
+
+
+class FileAndCLITests(unittest.TestCase):
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temp.cleanup)
+        self.input = Path(self.temp.name) / 'base.cpio'
+        self.output = Path(self.temp.name) / 'diagnostic.cpio'
+        self.base = archive()
+        self.input.write_bytes(self.base)
+
+    def test_cli_round_trip_leaves_input_unchanged(self):
+        with redirect_stdout(io.StringIO()):
+            self.assertEqual(probe.main(['--input', str(self.input),
+                                         '--output', str(self.output)]), 0)
+        self.assertEqual(self.input.read_bytes(), self.base)
+        self.assertEqual(self.output.read_bytes(),
+                         probe.diagnostic_archive(self.base, WRAPPER))
+
+    def test_existing_output_and_same_input_are_never_overwritten(self):
+        self.output.write_bytes(b'keep this')
+        with self.assertRaises(FileExistsError):
+            probe.build(self.input, self.output)
+        self.assertEqual(self.output.read_bytes(), b'keep this')
+        with self.assertRaisesRegex(ValueError, 'different paths'):
+            probe.build(self.input, self.input)
+        self.assertEqual(self.input.read_bytes(), self.base)
+
+    def test_output_symlinks_and_hardlinks_are_not_followed(self):
+        self.output.symlink_to(self.input)
+        with self.assertRaises(ValueError):
+            probe.build(self.input, self.output)
+        self.output.unlink()
+        os.link(self.input, self.output)
+        with self.assertRaises(FileExistsError):
+            probe.build(self.input, self.output)
+        self.output.unlink()
+        missing = self.output.with_name('does-not-exist')
+        self.output.symlink_to(missing)
+        with self.assertRaises(FileExistsError):
+            probe.build(self.input, self.output)
+        self.assertFalse(missing.exists())
+        self.assertEqual(self.input.read_bytes(), self.base)
+
+    def test_bad_input_does_not_create_output(self):
+        self.input.write_bytes(b'not cpio')
+        errors = io.StringIO()
+        with redirect_stderr(errors), self.assertRaises(SystemExit) as error:
+            probe.main(['--input', str(self.input), '--output', str(self.output)])
+        self.assertEqual(error.exception.code, 1)
+        self.assertIn('truncated', errors.getvalue())
+        self.assertFalse(self.output.exists())
+        self.assertEqual(self.input.read_bytes(), b'not cpio')
+
+    def test_help_warns_about_opt_in_panic_and_cancellation(self):
+        output = io.StringIO()
+        with redirect_stdout(output), self.assertRaises(SystemExit) as result:
+            probe.main(['--help'])
+        self.assertEqual(result.exception.code, 0)
+        for text in ('WARNING', 'PANICS', 'pocketboot.probe', 'panic=-1',
+                     '/run/tbx304f-probe.keep', 'oem shell:'):
+            self.assertIn(text, output.getvalue())
+
+
+class WrapperSafetyTests(unittest.TestCase):
+    def test_shell_syntax(self):
+        shell = shutil.which('sh')
+        if shell is None:
+            self.skipTest('no host sh for syntax check')
+        result = subprocess.run([shell, '-n', str(probe.WRAPPER)],
+                                capture_output=True, text=True, timeout=5)
+        self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_non_pid1_refusal_before_any_diagnostic_action(self):
+        shell = shutil.which('sh')
+        if shell is None:
+            self.skipTest('no host sh for refusal check')
+        # A normal child process only. No namespaces, sourcing, root privileges,
+        # device mocks or execution of any code after the early PID1 guard.
+        result = subprocess.run([shell, '-x', str(probe.WRAPPER)],
+                                capture_output=True, text=True, timeout=5)
+        self.assertEqual(result.returncode, 1)
+        self.assertIn('refusing to run', result.stderr)
+        self.assertEqual(result.stdout, '')
+        for forbidden in ('+ probe', '+ exec', '/bin/busybox sleep',
+                          '/dev/kmsg', '/proc/sysrq-trigger'):
+            self.assertNotIn(forbidden, result.stderr)
+
+
+if __name__ == '__main__':
+    unittest.main()
+~~~~
+<!-- END tools/tests/test_tb_x304f_probe_cpio.py -->
+
+## Archived file: patches/lk2nd/tb-x304f-apq8017.patch
+
+Bytes: 803; SHA-256: `76174aa7f01f9259965bbe8735af5c944d95605017fe00717ef72b3c8574a444`.
+
+<!-- BEGIN patches/lk2nd/tb-x304f-apq8017.patch -->
+~~~~text
+Subject: [PATCH] dts: msm8952: match APQ8017 on QRD SKU5
+
+Bootstrap patch for lk2nd 517bb38a409d4ac982f09e83a046e4dc71be5029.
+
+The Wi-Fi Lenovo TB-X304F reports APQ8017 (SoC ID 307), QRD SKU5
+board ID 0x1000b, and the NT35521S panel already handled by this DT.
+Keep the existing MSM8917 match and add the Wi-Fi SoC. This does not
+change or replace the signed stock bootloader.
+
+diff --git a/lk2nd/device/dts/msm8952/msm8917-qrd-sku5.dts b/lk2nd/device/dts/msm8952/msm8917-qrd-sku5.dts
+--- a/lk2nd/device/dts/msm8952/msm8917-qrd-sku5.dts
++++ b/lk2nd/device/dts/msm8952/msm8917-qrd-sku5.dts
+@@ -5,7 +5,7 @@
+ #include <dt-bindings/lk2nd/regulator.h>
+ 
+ / {
+-	qcom,msm-id = <QCOM_ID_MSM8917 0>;
++	qcom,msm-id = <QCOM_ID_MSM8917 0>, <QCOM_ID_APQ8017 0>;
+ 	qcom,board-id = <QCOM_BOARD_ID(QRD, 1, 0) 0>;
+ };
+ 
+~~~~
+<!-- END patches/lk2nd/tb-x304f-apq8017.patch -->
+
+## Archived file: patches/lk2nd/tb-x304f-imem-restart.patch
+
+Bytes: 1134; SHA-256: `cdb6db9f7bab1e410181980d0d0e8a06285c238929f82f092c7202ce6cbc4dfb`.
+
+<!-- BEGIN patches/lk2nd/tb-x304f-imem-restart.patch -->
+~~~~text
+Subject: [PATCH] project: msm8952: allow selecting the IMEM restart protocol
+
+Bootstrap experiment for lk2nd 517bb38a409d4ac982f09e83a046e4dc71be5029.
+Keep the existing PON default for other builds. The TB-X304F lab build can
+select USE_PON_REBOOT_REG=0 to use LK's existing IMEM cookie and warm-reset
+path for bootloader/recovery requests.
+
+The Lenovo TB-X304 kernel writes 0x77665500 to IMEM for "bootloader" and
+deletes qcom,store-hard-reset-reason from the board's PON node. In contrast,
+the default LK2nd PON/hard-reset path returned this unit to Android when
+asked to reboot to its bootloader. This override follows that source
+evidence. The TB-X304F lab build with value 0 subsequently returned to stock
+fastboot in 2.08 seconds in a controlled reboot-bootloader test.
+
+diff --git a/project/msm8952.mk b/project/msm8952.mk
+--- a/project/msm8952.mk
++++ b/project/msm8952.mk
+@@ -137,7 +137,8 @@
+ 
+ #Use PON register for reboot reason
+ ENABLE_REBOOT_MODULE := 1
+-DEFINES += USE_PON_REBOOT_REG=1
++USE_PON_REBOOT_REG ?= 1
++DEFINES += USE_PON_REBOOT_REG=$(USE_PON_REBOOT_REG)
+ 
+ # Enable unit test FW
+ ifeq ($(ENABLE_UNITTEST_FW),1)
+~~~~
+<!-- END patches/lk2nd/tb-x304f-imem-restart.patch -->
