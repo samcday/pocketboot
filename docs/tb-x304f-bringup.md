@@ -31,6 +31,9 @@ record, not a claim that PocketBoot supports this tablet yet.
   and the subsequent small lk2nd RAM-boot. The complete raw capture is saved
   privately, before another kernel boot; retention is not guaranteed for every
   reset or power loss.
+- A fourth, mailbox-only RPM IPC trial was accepted by lk2nd but again
+  produced no tablet USB within 45 seconds. Button recovery and its retained
+  log capture are pending; the absence of USB does not locate the new failure.
 
 ## Verified starting state
 
@@ -558,6 +561,39 @@ controller; the capture does not establish that they caused its absence.
 The final panic is PID 1 exiting, not evidence of an early kernel-entry fault.
 LK2nd remained responsive after retrieval. No subsequent kernel was booted
 as part of this capture.
+
+### RPM mailbox follow-up
+
+The recovered log also contains RPM SMD-edge errors:
+`failed to get regmap from syscon: -517`. The legacy `qcom,ipc` path tries to
+acquire the APCS node's first clock, the CPU PLL, whose driver is absent.
+Enabling that driver alone is not a suitable workaround: the syscon regmap
+would explicitly enable/disable it during register accesses. USB and SDHCI
+supplies are RPM-managed; enabling the unrelated direct-SPMI regulator driver
+would not provide them either. Both config-only candidates were withheld
+before hardware use; see the [source analysis](tb-x304f-build.md).
+
+The third maintained kernel patch instead replaces RPM's
+`qcom,ipc = <&apcs 8 0>` with `mboxes = <&apcs 0>`. The already-enabled APCS
+mailbox driver preserves offset 8/bit 0 using its own clockless regmap.
+Its provider may still be delayed by firmware device-link dependencies, so
+this is not a guarantee of successful RPM/USB/storage probing.
+
+The three-patch series applied cleanly and a second source invocation was
+idempotent. All 54 build-tool tests, formatting and whitespace checks passed.
+The rebuilt `7.0.9+ #5` image is 4,784,128 bytes, SHA-256
+`36f0efdbd774586f79cd3591cf178cf1838bad98f8cf3eb3657840f651816b7d`.
+Decompiling its DTB and the previous image's DTB confirmed that the IPC
+property is the only DT change. The initramfs and command line are unchanged;
+CPU PLL, APCS mux, CPU frequency scaling and direct-SPMI regulator drivers
+remain disabled.
+
+After verifying the known IMEM lk2nd identity and the preserved prior capture,
+one transient `fastboot boot` trial returned `OKAY` in 0.384 seconds.
+No USB device reappeared on the tablet's port during 45.4 seconds of
+observation. The new kernel's progress and screen state are unconfirmed
+pending manual return to stock fastboot and another bounded RAM-log capture.
+No image was flashed and no automatic second kernel attempt was made.
 
 ## First-boot milestones
 

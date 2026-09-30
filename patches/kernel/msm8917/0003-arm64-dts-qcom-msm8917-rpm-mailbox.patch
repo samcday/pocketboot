@@ -1,0 +1,30 @@
+From: Sam Day <me@samcday.com>
+Subject: [PATCH 3/3] arm64: dts: qcom: msm8917: use APCS mailbox for RPM
+
+The legacy qcom,ipc path creates a syscon regmap for APCS and acquires
+its first clock, the CPU PLL. Without the PLL provider, RPM SMD setup
+defers before its clock and regulator services can become available.
+Simply enabling the PLL provider also lets syscon accesses gate that
+clock, which is not appropriate for a minimal boot relying on firmware's
+CPU clock configuration.
+
+Use the APCS mailbox driver, as the other SMD edges already do. Channel
+0 writes bit 0 at offset 8 for the existing MSM8939 APCS compatible,
+preserving the legacy IPC signal without attaching the CPU PLL to the
+register accesses.
+
+Base: pem120/linux-msm89x7 a51b91b503307d35902447dd1f90db765372cf3b
+Assisted-by: LLM
+
+diff --git a/arch/arm64/boot/dts/qcom/msm8917.dtsi b/arch/arm64/boot/dts/qcom/msm8917.dtsi
+--- a/arch/arm64/boot/dts/qcom/msm8917.dtsi
++++ b/arch/arm64/boot/dts/qcom/msm8917.dtsi
+@@ -249,7 +249,7 @@
+ 
+ 		smd-edge {
+ 			interrupts = <GIC_SPI 168 IRQ_TYPE_EDGE_RISING>;
+-			qcom,ipc = <&apcs 8 0>;
++			mboxes = <&apcs 0>;
+ 			qcom,smd-edge = <15>;
+ 
+ 			rpm_requests: rpm-requests {

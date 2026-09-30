@@ -769,7 +769,7 @@ mod tests {
         assert_eq!(source.scope, KernelSourceScope::Device);
         assert_eq!(source.remote, "https://github.com/pem120/linux-msm89x7.git");
         assert_eq!(source.sha, "a51b91b503307d35902447dd1f90db765372cf3b");
-        assert_eq!(source.patches.len(), 2);
+        assert_eq!(source.patches.len(), 3);
         for patch in &source.patches {
             assert!(workspace_root.join(patch).is_file());
         }
@@ -787,6 +787,8 @@ mod tests {
         for symbol in [
             "MSM_GCC_8917",
             "PINCTRL_MSM8917",
+            "MAILBOX",
+            "QCOM_APCS_IPC",
             "QCOM_SMD_RPM",
             "QCOM_RPMPD",
             "REGULATOR_QCOM_SMD_RPM",

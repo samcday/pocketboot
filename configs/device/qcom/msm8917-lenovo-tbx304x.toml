@@ -9,6 +9,7 @@ sha = "a51b91b503307d35902447dd1f90db765372cf3b"
 patches = [
     "patches/kernel/msm8917/0001-arm64-dts-qcom-tbx304x-apq8017.patch",
     "patches/kernel/msm8917/0002-arm64-dts-qcom-tbx304x-pocketboot.patch",
+    "patches/kernel/msm8917/0003-arm64-dts-qcom-msm8917-rpm-mailbox.patch",
 ]
 
 [kconfig]

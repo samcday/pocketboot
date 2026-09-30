@@ -1,5 +1,5 @@
 From: PocketBoot developers <noreply@pocketboot.org>
-Subject: [PATCH 2/2] arm64: dts: qcom: tbx304x: minimal LK2nd handoff
+Subject: [PATCH 2/3] arm64: dts: qcom: tbx304x: minimal LK2nd handoff
 
 PocketBoot-only boot policy, not a general-purpose board-port change:
 

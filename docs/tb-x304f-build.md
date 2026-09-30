@@ -1,9 +1,10 @@
 # TB-X304F experimental PocketBoot build
 
 This is an **LK2nd-first diagnostic target**, not direct-stock-boot support or
-a hardware-validated Linux port. The initial goal is PocketBoot `/init`,
-USB gadget diagnostics and a firmware framebuffer. No flashing is required by
-the build, and no hardware commands are included here.
+a fully validated Linux port. A retained boot log confirms Linux and
+PocketBoot `/init` startup; usable USB, storage and visible framebuffer output
+remain bring-up goals. No flashing is required by the build, and no hardware
+commands are included here.
 
 ## Build
 
@@ -22,7 +23,7 @@ The [device config](../configs/device/qcom/msm8917-lenovo-tbx304x.toml) pins
 [`pem120/linux-msm89x7`, `lenovo-tbx304`](https://github.com/pem120/linux-msm89x7/tree/a51b91b503307d35902447dd1f90db765372cf3b)
 at `a51b91b503307d35902447dd1f90db765372cf3b` (Linux 7.0.9).
 `xtask` fetches it beneath
-`target/kernel/src/msm8917/msm8917-lenovo-tbx304x/` and applies the two
+`target/kernel/src/msm8917/msm8917-lenovo-tbx304x/` and applies the three
 [maintained patches](../patches/kernel/msm8917/README.md). A second invocation
 recognizes the applied series. It does not reset conflicting source edits.
 
@@ -56,11 +57,12 @@ actual drivers:
 | --- | --- |
 | Four Cortex-A53 CPUs, MPIDRs `0x100`–`0x103`; `enable-method = "psci"` | ARM64 PSCI, SMC conduit; no spin-table patch or preboot shim |
 | `qcom,gcc-msm8917`, `qcom,msm8917-pinctrl` | `MSM_GCC_8917`, `PINCTRL_MSM8917` (dedicated drivers in this fork) |
-| SMEM/TCSR, SMD RPM clocks, domains and PM8937 regulator votes | `QCOM_SMEM`, `HWSPINLOCK_QCOM`, `RPMSG_QCOM_SMD`, `QCOM_SMD_RPM`, `QCOM_CLK_SMD_RPM`, `QCOM_RPMPD`, `REGULATOR_QCOM_SMD_RPM` |
+| RPM IPC through APCS mailbox channel 0 | `MAILBOX`, `QCOM_APCS_IPC`; no CPU PLL ownership required by register accesses |
+| SMEM/TCSR, SMD RPM clocks, domains and regulator votes | `QCOM_SMEM`, `HWSPINLOCK_QCOM`, `RPMSG_QCOM_SMD`, `QCOM_SMD_RPM`, `QCOM_CLK_SMD_RPM`, `QCOM_RPMPD`, `REGULATOR_QCOM_SMD_RPM` |
 | PM8937/PMI8950 SPMI | PMIC arbiter, MFD and PMIC pinctrl |
-| eMMC/SD `qcom,sdhci-msm-v4` | `MMC_SDHCI_MSM`, TLMM and RPM supply dependencies |
+| eMMC/SD `qcom,sdhci-msm-v4` | `MMC_SDHCI_MSM`, TLMM and PM8937 RPM supply dependencies |
 | USB `qcom,ci-hdrc` | ChipIdea MSM glue and UDC, not DWC3 |
-| USB `qcom,usb-hs-28nm-femtophy` | `PHY_QCOM_USB_HS_28NM`, not the older `PHY_QCOM_USB_HS` |
+| USB `qcom,usb-hs-28nm-femtophy` | `PHY_QCOM_USB_HS_28NM` and PM8937 RPM supplies, not the older `PHY_QCOM_USB_HS` |
 
 Only verified selection metadata is added for the F: APQ8017 ID 307, revision
 0, alongside the existing MSM8917 ID 303. Board ID remains `<0x1000b 0>`.
@@ -148,16 +150,18 @@ neither the shared builder nor kernel runtime was changed to bypass checks.
 The successful build had three existing PocketBoot Rust warnings
 (`libc::time_t` twice, unused `continue_then`), not kernel/DT build errors.
 
-Still unvalidated: Linux entry, PSCI/SMP, gadget enumeration, storage I/O,
-live framebuffer handoff, retention of the inherited ramoops region and kexec.
+The shared-ramoops trial now confirms Linux entry, PSCI/SMP, framebuffer-driver
+registration, PocketBoot init execution and RAM-log retention through one
+manual recovery cycle. Still unvalidated: gadget enumeration, storage I/O,
+visible framebuffer output and kexec.
 This kernel also lacks the existing MSM8916 series' ChipIdea SG-bounce and
 FunctionFS reset-work fixes; large fastboot uploads and gadget teardown must
 not be assumed reliable. Touch, native panel/GPU, Wi-Fi and audio are deferred.
 Panic/reboot is not an established unattended recovery path.
 
 The first hardware trial was accepted by LK2nd, but no tablet USB interface
-appeared within 45 seconds. Linux entry and userspace startup are not yet
-confirmed. See the [bring-up record](tb-x304f-bringup.md) for the observed
+appeared within 45 seconds. That trial did not establish Linux entry or
+userspace startup. See the [bring-up record](tb-x304f-bringup.md) for the observed
 result, bootloader image, recovery constraints, and next diagnostic checkpoint.
 
 A console-enabled candidate was then rebuilt using the same initramfs and
@@ -178,4 +182,26 @@ The shared-region image is 4,784,128 bytes, SHA-256
 `c0da6ec5c7c287b94a0e1e814e0f1517da6e091fd75bba3e9c0a43e738bd24d2`.
 The built-in frontend, bare handoff flag, gzip/Image/DTB layout and mainline DT
 classification were checked. LK2nd accepted the image, but USB again remained
-absent for 45 seconds. Post-reset log retrieval and retention are pending.
+absent for 45 seconds. The recovered console identifies the missing UDC and
+zero discovered disks, followed by PID 1 exiting and a panic at 12.3 seconds.
+
+The board's SDHCI and USB PHY supply phandles point to the `pm8937_l*` nodes
+under `rpm_requests`, handled by the already-enabled
+`REGULATOR_QCOM_SMD_RPM`. They do not reference the separate direct-SPMI
+regulator node. An initially proposed `REGULATOR_QCOM_SPMI` addition was
+rejected in review and not booted; trace the actual provider dependencies
+rather than treating the absent direct-SPMI driver as their missing supplier.
+
+The RPM SMD edge reports `failed to get regmap from syscon: -517`. Its legacy
+`qcom,ipc = <&apcs 8 0>` path calls `syscon_node_to_regmap()`, which obtains
+the APCS node's first clock (`a53pll`). The attempted kernel had
+`CONFIG_QCOM_A53PLL` disabled, so that clock provider could not register.
+A candidate enabling that driver was also withheld: syscon attaches the PLL
+to its regmap and explicitly enables/disables it for register accesses.
+`clk_ignore_unused` does not prevent those explicit clock operations.
+
+The follow-up instead replaces that legacy IPC property with
+`mboxes = <&apcs 0>`. The already-enabled APCS mailbox driver signals the same
+offset 8/bit 0 through its own regmap without attaching a clock. Neither the
+CPU PLL nor CPU frequency scaling is enabled. The linked bring-up record
+distinguishes this source-level fix from subsequent hardware results.
