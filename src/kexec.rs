@@ -5,7 +5,7 @@ use std::{
     time::Instant,
 };
 
-use flate2::read::{GzDecoder, MultiGzDecoder};
+use flate2::read::GzDecoder;
 use ruzstd::decoding::StreamingDecoder;
 
 use crate::{pe, zboot};
@@ -40,10 +40,14 @@ impl KexecImage {
             ));
         }
 
+        // Prepare once for both Android images and filesystem boot entries.
+        // An explicitly supplied DTB wins over a valid appended one; only an
+        // image with neither uses the live-DTB fallback in load().
+        let (kernel, appended_dtb) = prepare_kernel_payload(kernel)?;
         Ok(Self {
             kernel,
             initrd,
-            dtb,
+            dtb: dtb.or(appended_dtb),
             cmdline: cmdline.to_string(),
         })
     }
@@ -53,7 +57,7 @@ impl KexecImage {
         let initrd = self.initrd.as_ref().map(read_payload).transpose()?;
         let dtb = match &self.dtb {
             Some(dtb) => {
-                tracing::info!("using DTB from staged boot image");
+                tracing::info!("using supplied DTB");
                 with_live_memory(read_payload(dtb)?)?
             }
             None => {
@@ -84,15 +88,17 @@ pub(crate) fn reopen_payload_readonly(file: File) -> io::Result<File> {
     Ok(readonly)
 }
 
-pub(crate) fn prepare_kernel_payload(mut kernel: File) -> io::Result<File> {
-    let mut payload = Vec::new();
-    kernel.read_to_end(&mut payload)?;
-    kernel.seek(SeekFrom::Start(0))?;
+fn prepare_kernel_payload(kernel: File) -> io::Result<(File, Option<File>)> {
+    let payload = read_payload(&kernel)?;
 
     let Some(prepared) = prepare_kernel_payload_bytes(&payload)? else {
-        return Ok(kernel);
+        return Ok((kernel, None));
     };
-    memfd_payload("kernel-prepared", &prepared)
+    let dtb = prepared
+        .appended_dtb
+        .map(|dtb| memfd_payload("kernel-appended-dtb", dtb))
+        .transpose()?;
+    Ok((memfd_payload("kernel-prepared", &prepared.kernel)?, dtb))
 }
 
 pub(crate) fn exec_loaded_image() -> io::Result<()> {
@@ -121,7 +127,12 @@ fn memfd_payload(name: &str, data: &[u8]) -> io::Result<File> {
     reopen_payload_readonly(payload)
 }
 
-fn prepare_kernel_payload_bytes(payload: &[u8]) -> io::Result<Option<Vec<u8>>> {
+struct PreparedPayload<'a> {
+    kernel: Vec<u8>,
+    appended_dtb: Option<&'a [u8]>,
+}
+
+fn prepare_kernel_payload_bytes(payload: &[u8]) -> io::Result<Option<PreparedPayload<'_>>> {
     tracing::debug!(bytes = payload.len(), "preparing kernel payload");
     if is_raw_arm64_image(payload) {
         tracing::debug!(
@@ -159,24 +170,51 @@ fn prepare_kernel_payload_bytes(payload: &[u8]) -> io::Result<Option<Vec<u8>>> {
         ));
     }
 
-    extract_pe_arm64_kernel(&pe).map(Some)
+    extract_pe_arm64_kernel(&pe).map(|kernel| {
+        Some(PreparedPayload {
+            kernel,
+            appended_dtb: None,
+        })
+    })
 }
 
-fn decompress_toplevel_gzip(payload: &[u8]) -> io::Result<Vec<u8>> {
+fn decompress_toplevel_gzip(payload: &[u8]) -> io::Result<PreparedPayload<'_>> {
     tracing::info!(bytes = payload.len(), "decompressing gzip kernel image");
     let started = Instant::now();
-    let mut decoder = MultiGzDecoder::new(payload);
     let mut decompressed = Vec::new();
-    decoder.read_to_end(&mut decompressed).map_err(|err| {
-        io::Error::new(err.kind(), format!("decompress gzip kernel image: {err}"))
-    })?;
+    let mut remaining = payload;
+    loop {
+        // BufRead preserves the exact member boundary (including its checked
+        // CRC/size trailer). The Read decoder may read ahead into an appended
+        // DTB; MultiGzDecoder instead tries to interpret it as another member.
+        let mut decoder = flate2::bufread::GzDecoder::new(remaining);
+        decoder.read_to_end(&mut decompressed).map_err(|err| {
+            io::Error::new(err.kind(), format!("decompress gzip kernel image: {err}"))
+        })?;
+        remaining = decoder.into_inner();
+        if !remaining.starts_with(&GZIP_MAGIC) {
+            break;
+        }
+    }
+    let appended_dtb =
+        if remaining.is_empty() {
+            None
+        } else {
+            Some(fdt::single_appended_dtb(remaining).map_err(|err| {
+                io::Error::new(err.kind(), format!("invalid appended DTB: {err}"))
+            })?)
+        };
     tracing::info!(
-        compressed_bytes = payload.len(),
+        compressed_bytes = payload.len() - remaining.len(),
         bytes = decompressed.len(),
+        appended_dtb_bytes = appended_dtb.map_or(0, <[u8]>::len),
         elapsed_ms = started.elapsed().as_millis(),
         "decompressed gzip kernel image"
     );
-    Ok(decompressed)
+    Ok(PreparedPayload {
+        kernel: decompressed,
+        appended_dtb,
+    })
 }
 
 fn extract_pe_arm64_kernel(pe: &pe::Image<'_>) -> io::Result<Vec<u8>> {
@@ -934,7 +972,7 @@ __pb_tramp_end:
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use flate2::{Compression, write::GzEncoder};
     use ruzstd::encoding::{CompressionLevel, compress_to_vec};
@@ -945,9 +983,10 @@ mod tests {
         let raw = raw_arm64_image();
         let payload = payload_file("test-raw-kernel", &raw);
 
-        let prepared = prepare_kernel_payload(payload).unwrap();
+        let (prepared, dtb) = prepare_kernel_payload(payload).unwrap();
 
         assert_eq!(read_file(&prepared), raw);
+        assert!(dtb.is_none());
     }
 
     #[test]
@@ -956,9 +995,10 @@ mod tests {
         raw[..2].copy_from_slice(b"MZ");
         let payload = payload_file("test-raw-kernel-mz", &raw);
 
-        let prepared = prepare_kernel_payload(payload).unwrap();
+        let (prepared, dtb) = prepare_kernel_payload(payload).unwrap();
 
         assert_eq!(read_file(&prepared), raw);
+        assert!(dtb.is_none());
     }
 
     #[test]
@@ -966,9 +1006,10 @@ mod tests {
         let raw = b"decompressed arm64 Image payload";
         let payload = payload_file("test-gzip-kernel", &gzip(raw));
 
-        let prepared = prepare_kernel_payload(payload).unwrap();
+        let (prepared, dtb) = prepare_kernel_payload(payload).unwrap();
 
         assert_eq!(read_file(&prepared), raw);
+        assert!(dtb.is_none());
     }
 
     #[test]
@@ -982,9 +1023,10 @@ mod tests {
         .concat();
         let payload = payload_file("test-pe-gzip-kernel", &pe_arm64(&section));
 
-        let prepared = prepare_kernel_payload(payload).unwrap();
+        let (prepared, dtb) = prepare_kernel_payload(payload).unwrap();
 
         assert_eq!(read_file(&prepared), raw);
+        assert!(dtb.is_none());
     }
 
     #[test]
@@ -995,9 +1037,10 @@ mod tests {
             &zboot_pe_arm64("gzip", &gzip(&raw)),
         );
 
-        let prepared = prepare_kernel_payload(payload).unwrap();
+        let (prepared, dtb) = prepare_kernel_payload(payload).unwrap();
 
         assert_eq!(read_file(&prepared), raw);
+        assert!(dtb.is_none());
     }
 
     #[test]
@@ -1008,9 +1051,10 @@ mod tests {
             &zboot_pe_arm64("zstd", &zstd(&raw)),
         );
 
-        let prepared = prepare_kernel_payload(payload).unwrap();
+        let (prepared, dtb) = prepare_kernel_payload(payload).unwrap();
 
         assert_eq!(read_file(&prepared), raw);
+        assert!(dtb.is_none());
     }
 
     #[test]
@@ -1037,6 +1081,167 @@ mod tests {
         );
     }
 
+    #[test]
+    fn gzip_appended_dtb_is_separated_and_selected_without_reading_live_dtb() {
+        let raw = raw_arm64_image();
+        let dtb = dtb_fixture();
+        let payload = [gzip(&raw), dtb.clone(), vec![0; 32]].concat();
+        let image = KexecImage::new(payload_file("appended", &payload), None, None, "").unwrap();
+        assert_payloads(&image, &raw, Some(&dtb));
+    }
+
+    #[test]
+    fn explicit_dtb_takes_precedence_over_a_valid_appended_dtb() {
+        let raw = raw_arm64_image();
+        let appended = dtb_fixture();
+        let mut explicit = appended.clone();
+        explicit[28..32].copy_from_slice(&0x100u32.to_be_bytes());
+        let payload = [gzip(&raw), appended].concat();
+        let image = KexecImage::new(
+            payload_file("appended", &payload),
+            None,
+            Some(payload_file("explicit", &explicit)),
+            "",
+        )
+        .unwrap();
+        assert_payloads(&image, &raw, Some(&explicit));
+    }
+
+    #[test]
+    fn gzip_members_still_concatenate_with_or_without_a_dtb() {
+        let raw = raw_arm64_image();
+        let members = [gzip(&raw[..64]), gzip(&raw[64..])].concat();
+        for dtb in [None, Some(dtb_fixture())] {
+            let mut payload = members.clone();
+            if let Some(dtb) = &dtb {
+                payload.extend_from_slice(dtb);
+            }
+            let image = KexecImage::new(payload_file("members", &payload), None, None, "").unwrap();
+            assert_payloads(&image, &raw, dtb.as_deref());
+        }
+    }
+
+    #[test]
+    fn appended_dtb_never_hides_bad_gzip_crc_size_or_truncation() {
+        let raw = raw_arm64_image();
+        let compressed = gzip(&raw);
+        for member in 0..2 {
+            for trailer_byte in [1, 8] {
+                let mut bad = compressed.clone();
+                let offset = bad.len() - trailer_byte;
+                bad[offset] ^= 1; // ISIZE or CRC32
+                let prefix = if member == 0 { vec![] } else { gzip(b"prefix") };
+                let payload = [prefix, bad, dtb_fixture()].concat();
+                let error = prepare_kernel_payload(payload_file("bad-crc", &payload)).unwrap_err();
+                assert!(error.to_string().contains("decompress gzip kernel image"));
+            }
+        }
+        for length in [1, 2, 10, compressed.len() - 1] {
+            let payload = [gzip(b"first"), compressed[..length].to_vec()].concat();
+            assert!(prepare_kernel_payload(payload_file("truncated", &payload)).is_err());
+        }
+    }
+
+    #[test]
+    fn rejects_garbage_and_multiple_appended_dtbs_even_with_an_explicit_dtb() {
+        let raw = raw_arm64_image();
+        let dtb = dtb_fixture();
+        for trailer in [
+            b"garbage".to_vec(),
+            vec![0; 32],
+            [vec![0; 4], dtb.clone()].concat(),
+            [dtb.clone(), dtb.clone()].concat(),
+            [dtb.clone(), b"garbage".to_vec()].concat(),
+        ] {
+            let payload = [gzip(&raw), trailer].concat();
+            let result = KexecImage::new(
+                payload_file("bad-tail", &payload),
+                None,
+                Some(payload_file("explicit", &dtb)),
+                "",
+            );
+            assert!(result.is_err(), "must not ignore a malformed tail");
+        }
+    }
+
+    #[test]
+    fn rejects_malformed_appended_dtb_headers_blocks_and_structure() {
+        let dtb = dtb_fixture();
+        let structure = u32::from_be_bytes(dtb[8..12].try_into().unwrap()) as usize;
+        let reservations = u32::from_be_bytes(dtb[16..20].try_into().unwrap()) as usize;
+        let cases = [
+            (0, 0u32),                  // magic
+            (4, 39),                    // total smaller than header
+            (4, dtb.len() as u32 + 1),  // truncated FDT
+            (8, 0),                     // block overlaps header
+            (8, structure as u32 + 1),  // misaligned structure
+            (12, dtb.len() as u32),     // strings outside total
+            (16, 41),                   // misaligned reservation map
+            (16, structure as u32),     // reservation/structure overlap
+            (20, 16),                   // unsupported header layout
+            (24, 18),                   // incompatible FDT version
+            (36, u32::MAX),             // block length overflow/out of range
+            (structure, 0xdead),        // unknown structure token
+            (structure + 16, u32::MAX), // property name outside strings
+        ];
+        for (offset, value) in cases {
+            let mut bad = dtb.clone();
+            bad[offset..offset + 4].copy_from_slice(&value.to_be_bytes());
+            let payload = [gzip(&raw_arm64_image()), bad].concat();
+            assert!(
+                prepare_kernel_payload(payload_file("bad-fdt", &payload)).is_err(),
+                "accepted field at {offset} = {value}"
+            );
+        }
+        let mut unterminated = dtb.clone();
+        unterminated[reservations..reservations + 16].fill(0xff);
+        let payload = [gzip(&raw_arm64_image()), unterminated].concat();
+        assert!(prepare_kernel_payload(payload_file("bad-reservations", &payload)).is_err());
+        for length in [4, 8, 39, dtb.len() - 1] {
+            let payload = [gzip(&raw_arm64_image()), dtb[..length].to_vec()].concat();
+            assert!(prepare_kernel_payload(payload_file("short-fdt", &payload)).is_err());
+        }
+    }
+
+    #[test]
+    fn rejects_data_hidden_after_end_inside_the_declared_structure_block() {
+        for extra in [
+            vec![0; 4],
+            4u32.to_be_bytes().to_vec(), // NOP after END is not part of the tree
+            [1u32, 0, 2, 9]
+                .into_iter()
+                .flat_map(u32::to_be_bytes)
+                .collect(),
+        ] {
+            let mut dtb = dtb_fixture();
+            let structure = u32::from_be_bytes(dtb[8..12].try_into().unwrap()) as usize;
+            let size = u32::from_be_bytes(dtb[36..40].try_into().unwrap()) as usize;
+            let strings = u32::from_be_bytes(dtb[12..16].try_into().unwrap()) as usize;
+            let added = extra.len();
+            dtb.splice(structure + size..structure + size, extra);
+            let total = dtb.len() as u32;
+            dtb[4..8].copy_from_slice(&total.to_be_bytes());
+            dtb[12..16].copy_from_slice(&((strings + added) as u32).to_be_bytes());
+            dtb[36..40].copy_from_slice(&((size + added) as u32).to_be_bytes());
+            let payload = [gzip(&raw_arm64_image()), dtb].concat();
+            let error = prepare_kernel_payload(payload_file("hidden-tail", &payload)).unwrap_err();
+            assert!(error.to_string().contains("after END"), "{error}");
+        }
+    }
+
+    pub(crate) fn dtb_fixture() -> Vec<u8> {
+        fdt::test_dtb()
+    }
+
+    pub(crate) fn assert_payloads(image: &KexecImage, kernel: &[u8], dtb: Option<&[u8]>) {
+        let actual_kernel = read_payload(&image.kernel).unwrap();
+        let actual_dtb = image.dtb.as_ref().map(|file| read_payload(file).unwrap());
+        assert_eq!(actual_kernel.len(), kernel.len());
+        assert!(actual_kernel == kernel, "prepared kernel bytes differ");
+        assert_eq!(actual_dtb.as_ref().map(Vec::len), dtb.map(<[u8]>::len),);
+        assert!(actual_dtb.as_deref() == dtb, "selected DTB bytes differ");
+    }
+
     fn payload_file(name: &str, data: &[u8]) -> File {
         let mut file = create_payload_memfd(name).unwrap();
         file.write_all(data).unwrap();
@@ -1052,7 +1257,7 @@ mod tests {
         data
     }
 
-    fn gzip(data: &[u8]) -> Vec<u8> {
+    pub(crate) fn gzip(data: &[u8]) -> Vec<u8> {
         let mut encoder = GzEncoder::new(Vec::new(), Compression::default());
         encoder.write_all(data).unwrap();
         encoder.finish().unwrap()
@@ -1062,7 +1267,7 @@ mod tests {
         compress_to_vec(data, CompressionLevel::Fastest)
     }
 
-    fn raw_arm64_image() -> Vec<u8> {
+    pub(crate) fn raw_arm64_image() -> Vec<u8> {
         let mut image = vec![0; 128];
         let image_size = image.len() as u64;
         image[8..16].copy_from_slice(&0x80000u64.to_le_bytes());
@@ -1145,7 +1350,9 @@ fn page_align(value: u64) -> io::Result<u64> {
         .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "size overflow"))
 }
 
-#[cfg(any(target_arch = "aarch64", test))]
+// Payload validation is architecture-independent; the remaining FDT handoff
+// helpers are used only by the ARM64 loader (and its host tests).
+#[cfg_attr(not(any(target_arch = "aarch64", test)), allow(dead_code))]
 mod fdt {
     use std::io;
 
@@ -1199,6 +1406,55 @@ mod fdt {
     struct ReservedChild {
         enabled: bool,
         reg: Option<Vec<u8>>,
+    }
+
+    /// Accept one complete v17-format FDT at the gzip boundary, optionally
+    /// followed by zero padding. Never scan for magic or choose among DTBs.
+    pub(super) fn single_appended_dtb(trailer: &[u8]) -> io::Result<&[u8]> {
+        let header = Header::parse(trailer)?;
+        if header.version < 17
+            || header.last_comp_version > 17
+            || header.last_comp_version > header.version
+        {
+            return invalid_data("unsupported appended DTB version");
+        }
+        if header.off_mem_rsvmap % 8 != 0 || header.off_dt_struct % 4 != 0 {
+            return invalid_data("appended DTB blocks are misaligned");
+        }
+        let dtb = &trailer[..header.totalsize];
+        let reservations = reserve_map(dtb, &header)?;
+        let blocks = [
+            header.off_mem_rsvmap..header.off_mem_rsvmap + reservations.len(),
+            header.off_dt_struct..header.off_dt_struct + header.size_dt_struct,
+            header.off_dt_strings..header.off_dt_strings + header.size_dt_strings,
+        ];
+        for (index, block) in blocks.iter().enumerate() {
+            if block.start < 40 {
+                return invalid_data("appended DTB block overlaps its header");
+            }
+            for other in &blocks[..index] {
+                if !block.is_empty()
+                    && !other.is_empty()
+                    && block.start < other.end
+                    && other.start < block.end
+                {
+                    return invalid_data("appended DTB blocks overlap");
+                }
+            }
+        }
+        contract_tree(dtb)?;
+        if trailer[header.totalsize..].iter().any(|&byte| byte != 0) {
+            return invalid_data("multiple appended DTBs or nonzero trailing data are unsupported");
+        }
+        Ok(dtb)
+    }
+
+    #[cfg(test)]
+    pub(super) fn test_dtb() -> Vec<u8> {
+        tests::test_dtb(|structure, strings| {
+            let model = ensure_string(strings, b"model").unwrap();
+            write_prop(structure, model, b"test device\0");
+        })
     }
 
     pub(super) fn patch_chosen(
@@ -1802,6 +2058,9 @@ mod fdt {
                 }
                 FDT_NOP => {}
                 FDT_END if stack.is_empty() => {
+                    if cursor != structure.len() {
+                        return invalid_data("DTB structure has data after END");
+                    }
                     return root.ok_or_else(|| invalid_data_error("DTB has no root node"));
                 }
                 FDT_END => return invalid_data("DTB has unterminated nodes"),
@@ -3209,7 +3468,7 @@ mod fdt {
             })
         }
 
-        fn test_dtb(build_root: impl FnOnce(&mut Vec<u8>, &mut Vec<u8>)) -> Vec<u8> {
+        pub(super) fn test_dtb(build_root: impl FnOnce(&mut Vec<u8>, &mut Vec<u8>)) -> Vec<u8> {
             test_dtb_with_reserve_map(&[0; 16], build_root)
         }
 
