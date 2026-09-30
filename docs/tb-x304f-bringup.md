@@ -19,11 +19,18 @@ record, not a claim that PocketBoot supports this tablet yet.
   Linux kernel; button recovery is still needed for the latter.
 - Both the initial PocketBoot image and its framebuffer-console follow-up
   were accepted by lk2nd, but neither produced tablet USB within 45 seconds.
-  Both screens were black when checked later. Linux entry and userspace are
-  unconfirmed.
-- The shared-ramoops profile has also been attempted without USB appearing.
-  Its bounded raw exporter and pre-trial baseline capture work; post-reset
-  retrieval and actual RAM retention are still pending.
+  Both screens were black when checked later; those attempts did not establish
+  Linux entry or userspace startup.
+- The shared-ramoops profile's recovered log now **confirms Linux and
+  PocketBoot `/init` startup**, with all four CPUs online and simpledrm/fbcon
+  registered. Visible display output is still unverified.
+- That boot discovered no disks and no USB device controller (UDC). Gadget
+  setup failed, followed by PID 1 exiting and a kernel panic at 12.3 seconds.
+  USB, storage, and a usable PocketBoot session remain bring-up work.
+- The 512 KiB RAM-log window survived this manual recovery to stock fastboot
+  and the subsequent small lk2nd RAM-boot. The complete raw capture is saved
+  privately, before another kernel boot; retention is not guaranteed for every
+  reset or power loss.
 
 ## Verified starting state
 
@@ -420,7 +427,8 @@ From the quiet IMEM lk2nd build, the first `fastboot boot` returned `OKAY`
 for download (0.148 s) and boot (0.230 s), total 0.381 s. Afterward no USB
 device appeared on the tablet's physical port within 45 seconds. There was
 no PocketBoot fastboot/ADB/ACM identity to query. A host boot acknowledgement
-does not establish Linux entry or userspace startup; neither is confirmed.
+does not establish Linux entry or userspace startup; neither was confirmed
+for this first image.
 The owner observed a black screen later, without watching the handoff, and
 returned it to fastboot with the buttons. No image was flashed and no factory
 reset was performed.
@@ -442,7 +450,9 @@ does not locate the failure before or after Linux entry.
 Instead of depending on a live view of the screen, the next logging profile
 enables `PSTORE_CONSOLE`. The rebuilt config and kernel include that frontend.
 Its region must be shared with lk2nd's supported ramoops exporter; RAM-log
-retention through the actual button-reset sequence is not yet verified.
+retention through the actual button-reset sequence was unverified when this
+candidate was built. The recovered evidence below now demonstrates it for one
+trial.
 
 ### Shared-region RAM logging trial
 
@@ -481,7 +491,8 @@ LK2nd accepted its download and boot in 0.384 seconds; there was still no
 tablet USB interface within 45 seconds. On 2026-09-30 the owner reported a
 blank screen with possibly lit backlight, uncertain in bright ambient light,
 and a return to fastboot. Backlight alone would not establish Linux progress:
-it could remain enabled from the bootloader. A post-reset capture is pending.
+it could remain enabled from the bootloader. The post-reset capture below
+provides the first direct evidence of this kernel and userspace running.
 
 After button recovery into stock fastboot, RAM-boot only the known lk2nd
 image, verify its identity, and retrieve **before another kernel boot**.
@@ -508,6 +519,45 @@ baseline and expected kernel version. Power loss, reset behavior, cache state
 or later bootloader activity can destroy evidence; an empty capture does not
 prove that Linux never ran. `oem log` is only the current lk2nd session's log
 and cannot recover its pre-reset handoff messages.
+
+### Recovered boot evidence (2026-09-30)
+
+After USB contact was restored, stock fastboot still reported unlocked. Only
+the known quiet IMEM lk2nd image was RAM-booted, with its SHA-256, version,
+board compatible and panel verified. Its bounded exporter returned all
+524288 bytes before any further kernel boot. The raw file is retained
+read-only under the private `target/tb-x304f-lab/ramoops-shared/` directory,
+SHA-256 `c78edcd6635a8b746cc55000cb8bf045e20db9538bd4ab11eaf47c84d4330216`.
+
+The ECC0 decoder accepted all 33 region headers. It recovered an 18241-byte
+console and two compressed dmesg records; the other 30 dump records were
+empty. This differs from the pre-trial baseline, which had no valid headers.
+The console identifies Linux `7.0.9+ #2`, the expected build time and the
+shared-ramoops command line. Selected evidence:
+
+```text
+[    0.005453] smp: Brought up 1 node, 4 CPUs
+[    0.023263] ramoops: using 0x80000@0xbff80000, ecc: 0
+[    0.139817] simple-framebuffer 90001000.framebuffer: [drm] fb0: simpledrmdrmfb frame buffer device
+[    0.199061] Run /init as init process
+[    5.210396]  WARN pocketboot: local flash settle timed out elapsed_ms=5003 disks=0 partitions=0 events=0 snapshot_changes=0 snapshot=none
+[   11.282308] ERROR pocketboot::gadget: USB gadget failed error=Custom { kind: NotFound, error: "no USB device controller (UDC) available" }
+[   12.322267] Kernel panic - not syncing: Attempted to kill init! exitcode=0x00000000
+```
+
+This establishes successful kernel handoff, SMP, framebuffer-driver
+registration, RAM-console logging and PocketBoot userspace execution, not a
+working display or USB gadget. The absence of a registered UDC is a
+device-side problem to investigate separately from intermittent cable contact.
+Storage also remained undiscovered. Check their driver/provider dependencies
+before changing boot addresses or the CPU handoff.
+
+Two FunctionFS unmount warnings pass through `ffs_fs_kill_sb()` and
+`cancel_work_sync()` during gadget cleanup. They are separate from the missing
+controller; the capture does not establish that they caused its absence.
+The final panic is PID 1 exiting, not evidence of an early kernel-entry fault.
+LK2nd remained responsive after retrieval. No subsequent kernel was booted
+as part of this capture.
 
 ## First-boot milestones
 
