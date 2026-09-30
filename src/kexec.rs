@@ -96,6 +96,8 @@ pub(crate) fn prepare_kernel_payload(mut kernel: File) -> io::Result<File> {
 }
 
 pub(crate) fn exec_loaded_image() -> io::Result<()> {
+    // kernel_kexec does not sync; data written over UMS or adb must survive.
+    unsafe { libc::sync() };
     let rc = unsafe { libc::reboot(LINUX_REBOOT_CMD_KEXEC) };
     if rc < 0 {
         return Err(io::Error::last_os_error());
@@ -479,6 +481,17 @@ fn load_arm64(kernel: &[u8], initrd: Option<&[u8]>, dtb: &[u8], cmdline: &str) -
     arm64::load(kernel, initrd, dtb, cmdline)
 }
 
+/// Drops whatever image is currently loaded for kexec.
+#[cfg(target_arch = "aarch64")]
+pub(crate) fn unload() -> io::Result<()> {
+    arm64::unload()
+}
+
+#[cfg(not(target_arch = "aarch64"))]
+pub(crate) fn unload() -> io::Result<()> {
+    Ok(())
+}
+
 #[cfg(target_arch = "aarch64")]
 mod arm64 {
     use super::{PAGE_SIZE, fdt, page_align};
@@ -718,6 +731,11 @@ __pb_tramp_end:
             .collect::<Vec<_>>();
 
         kexec_load(trampoline_phys, &raw_segments)
+    }
+
+    pub(super) fn unload() -> io::Result<()> {
+        // nr_segments == 0 uninstalls the loaded image.
+        kexec_load(0, &[])
     }
 
     impl ImageHeader {

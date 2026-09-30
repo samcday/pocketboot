@@ -157,6 +157,9 @@ def main():
     cmdline = " ".join(word for word in args.cmdline_file.read_text().strip().split()
                        if not word.startswith(("pocketboot.lab=", "panic=", "oops=")))
     cmdline += f" panic={args.panic_timeout} oops=panic"
+    if "pocketboot.menu" not in cmdline.split():
+        # Keep chained generations resident in Pocketboot fastboot instead of autobooting.
+        cmdline += " pocketboot.menu"
     if "\x00" in cmdline or len(cmdline.encode()) > 1400:
         raise ValueError("invalid or excessively long base cmdline")
     args.output.mkdir(parents=True, exist_ok=False)

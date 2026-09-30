@@ -1,5 +1,6 @@
 use std::{
     env,
+    ffi::OsString,
     fs::{self, OpenOptions},
     path::{Path, PathBuf},
     process::Command,
@@ -7,11 +8,18 @@ use std::{
 
 use crate::Result;
 
-use super::{ensure_file, kernel, kernel_tree, run_command, target_dir, workspace_root};
+use super::{
+    ensure_file,
+    kernel::{self, KernelBuild},
+    kernel_tree, run_command, target_dir, workspace_root,
+};
 
 const QEMU_DEVICE: &str = "qemu/aarch64-virt";
 const QEMU_TARGET: &str = "aarch64-virt";
 const QEMU_DISK_SIZE: u64 = 64 * 1024 * 1024;
+/// Console and log setup shared with `qemu-boot-policy`.
+pub(super) const QEMU_CONSOLE: &str =
+    "console=ttyAMA0 earlycon=pl011,mmio32,0x09000000 loglevel=7 pocketboot.log=info";
 
 #[derive(clap::Args, Debug)]
 pub(crate) struct QemuArgs {
@@ -29,10 +37,8 @@ pub(crate) fn run(args: QemuArgs) -> Result<()> {
 
 fn qemu(args: QemuArgs) -> Result<()> {
     let workspace_root = workspace_root()?;
-    let kernel_tree = kernel_tree(&args.kernel_tree)?;
-    let target_dir = target_dir(&workspace_root);
-    let build = kernel::build_device_kernel_id(&workspace_root, &kernel_tree, QEMU_DEVICE, None)?;
-    let disk = qemu_disk(&target_dir)?;
+    let build = build_qemu_kernel(&workspace_root, &args.kernel_tree)?;
+    let disk = qemu_disk(&target_dir(&workspace_root))?;
 
     println!("initrd {}", build.initrd.display());
     println!("image {}", build.image.display());
@@ -44,6 +50,15 @@ fn qemu(args: QemuArgs) -> Result<()> {
     }
 
     run_qemu(&workspace_root, &build.image, &disk, &args.qemu_args)
+}
+
+pub(super) fn build_qemu_kernel(workspace_root: &Path, tree: &Path) -> Result<KernelBuild> {
+    let tree = kernel_tree(tree)?;
+    kernel::build_device_kernel_id(workspace_root, &tree, QEMU_DEVICE, None)
+}
+
+pub(super) fn qemu_binary() -> OsString {
+    env::var_os("QEMU").unwrap_or_else(|| "qemu-system-aarch64".into())
 }
 
 fn qemu_disk(target_dir: &Path) -> Result<PathBuf> {
@@ -71,14 +86,16 @@ fn qemu_disk(target_dir: &Path) -> Result<PathBuf> {
 }
 
 fn run_qemu(workspace_root: &Path, image: &Path, disk: &Path, extra_args: &[String]) -> Result<()> {
-    let qemu = env::var_os("QEMU").unwrap_or_else(|| "qemu-system-aarch64".into());
+    let qemu = qemu_binary();
     let drive = format!("if=none,id=pocketboot,format=raw,file={}", disk.display());
-    let append =
-        "console=ttyAMA0 earlycon=pl011,mmio32,0x09000000 loglevel=7 panic=1 pocketboot.log=info";
+    let append = format!("{QEMU_CONSOLE} panic=1");
 
     println!("USB/IP guest server will be forwarded to 127.0.0.1:3240");
     println!(
         "host attach: sudo modprobe vhci-hcd && sudo usbip attach -r 127.0.0.1 -d usbip-vudc.0"
+    );
+    println!(
+        "vol-down break-in: pass -- -qmp tcp:127.0.0.1:4444,server=on,wait=off and hold qcode \"volumedown\" with input-send-event"
     );
 
     let mut command = Command::new(qemu);
@@ -98,11 +115,14 @@ fn run_qemu(workspace_root: &Path, image: &Path, disk: &Path, extra_args: &[Stri
             "-kernel",
         ])
         .arg(image)
-        .args(["-append", append, "-drive"])
+        .args(["-append", &append, "-drive"])
         .arg(drive)
         .args(["-device", "virtio-blk-device,drive=pocketboot"])
         .args(["-netdev", "user,id=net0,hostfwd=tcp:127.0.0.1:3240-:3240"])
         .args(["-device", "virtio-net-device,netdev=net0"])
+        .args(["-global", "virtio-mmio.force-legacy=false"])
+        .args(["-device", "virtio-gpu-device"])
+        .args(["-device", "virtio-keyboard-device"])
         .args(extra_args);
     run_command(command, "qemu")
 }

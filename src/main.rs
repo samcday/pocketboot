@@ -1,9 +1,10 @@
 use std::{
+    convert::Infallible,
     ffi::CString,
-    fs, io,
+    fmt, fs, io,
     path::{Path, PathBuf},
     thread,
-    time::Duration,
+    time::{Duration, Instant},
 };
 
 mod ab_slots;
@@ -11,10 +12,12 @@ mod adb;
 mod battery;
 mod boot_state;
 mod bootflow;
+mod breakin;
 mod cmdline;
 mod fastboot;
 mod gadget;
 mod getty;
+mod input;
 mod kexec;
 mod kmsg;
 #[path = "kmsg-forwarder.rs"]
@@ -34,9 +37,14 @@ type Result<T> = std::result::Result<T, String>;
 const SYS_BLOCK: &str = "/sys/block";
 const PROC_CMDLINE: &str = "/proc/cmdline";
 const ACM_CMDLINE_PARAM: &str = "pocketboot.acm";
+const MENU_CMDLINE_PARAM: &str = "pocketboot.menu";
 const DRM_PAGE_FLIPS_CMDLINE_PARAM: &str = "pocketboot.drm_page_flips";
 const UI_ANIMATION_LAB_CMDLINE_PARAM: &str = "pocketboot.ui_animation_lab";
 const MAX_DRM_PAGE_FLIPS: u32 = 64;
+const AUTOBOOT_TIMEOUT: Duration = Duration::from_secs(15);
+const FASTBOOT_RESPAWN_DELAY: Duration = Duration::from_secs(5);
+const FASTBOOT_CONTINUE_TIMEOUT: Duration = Duration::from_secs(15);
+const MAX_FASTBOOT_RESPAWNS: u32 = 3;
 const FDT_MODEL_PATH: &str = "/sys/firmware/devicetree/base/model";
 const FDT_COMPATIBLE_PATH: &str = "/sys/firmware/devicetree/base/compatible";
 const FDT_SERIALNO_PATHS: [&str; 1] = [
@@ -48,17 +56,19 @@ const DEFAULT_DEVICE_NAME: &str = "Pocketboot Device";
 const DEFAULT_DEVICE_DETAIL: &str = "LinuxBoot environment";
 
 fn main() {
-    if let Err(err) = runtime::block_on(run()) {
-        println!("pocketboot error: {}", err);
-        thread::sleep(Duration::from_secs(1));
+    if unsafe { libc::getpid() } != 1 {
+        println!("pocketboot error: pocketboot must run as PID 1 (/init)");
+        return;
     }
+
+    // Only early setup can fail; returning lets the kernel's panic= policy act.
+    let Err(err) = runtime::block_on(run());
+    println!("pocketboot error: {}", err);
+    thread::sleep(Duration::from_secs(1));
 }
 
-async fn run() -> Result<()> {
-    if unsafe { libc::getpid() } != 1 {
-        return Err("pocketboot must run as PID 1 (/init)".to_string());
-    }
-
+async fn run() -> Result<Infallible> {
+    let started = Instant::now();
     mount_core_vfs()?;
 
     let cmdline = cmdline::KernelCommandLine::read(PROC_CMDLINE).unwrap_or_else(|err| {
@@ -83,54 +93,118 @@ async fn run() -> Result<()> {
         source_detail = boot_state_source.map(|source| source.detail.as_str()).unwrap_or(""),
         "detected boot state"
     );
+    if matches!(
+        boot_state.reboot_mode,
+        Some(boot_state::RebootMode::Bootloader | boot_state::RebootMode::Recovery)
+    ) {
+        // The spare register is sticky and the previous stage already acted on it.
+        tracing::info!(
+            reboot_mode = ?boot_state.reboot_mode,
+            "reboot mode does not select the boot menu"
+        );
+    }
+
+    let pon_keys = boot_state::detect_pon_keys();
+    let pon_key_state = sample_pon_keys(pon_keys.as_ref(), started);
 
     let serialno = detect_serial(&cmdline);
     tracing::info!(serialno = %serialno, "selected device serialno");
     let system_info = detect_system_info(&serialno);
-    let battery = match battery::spawn() {
-        Ok(updates) => Some(updates),
-        Err(err) => {
-            tracing::warn!(error = %err, "failed to spawn battery watcher thread");
-            None
-        }
-    };
     let drm_page_flips = drm_page_flips(&cmdline);
     let ui_animation_lab = cmdline.is_set(UI_ANIMATION_LAB_CMDLINE_PARAM);
-    let ui = match ui::spawn(battery, system_info, drm_page_flips, ui_animation_lab) {
-        Ok(handle) => Some(handle),
-        Err(err) => {
-            tracing::warn!(error = %err, "failed to spawn UI thread");
-            None
-        }
-    };
-    let gadget = gadget::Gadget::new(serialno.clone());
     let acm = cmdline.is_set(ACM_CMDLINE_PARAM);
-    let fastboot_thread = gadget
-        .spawn(gadget::Mode::Fastboot {
-            commands: fastboot_commands(gadget.clone(), serialno, cmdline.clone()),
-            acm,
-        })
-        .map_err(|err| format!("spawn fastboot gadget thread: {err}"))?;
-    #[cfg(feature = "qemu")]
-    if let Err(err) = qemu::spawn() {
-        tracing::warn!(error = ?err, "failed to spawn QEMU USB/IP service");
-    }
-    if acm {
-        kmsg_forwarder::spawn();
-    } else {
-        tracing::info!(param = ACM_CMDLINE_PARAM, "CDC-ACM disabled");
-    }
+    let initial_menu = initial_menu_reason(
+        &cmdline,
+        drm_page_flips,
+        ui_animation_lab,
+        pon_key_state.volume_down,
+    );
 
     let (event_tx, event_rx) = async_channel::unbounded();
-    if let Some(ui) = &ui {
-        spawn_ui_action_forwarder(ui, event_tx.clone());
+    let mut coordinator = Coordinator {
+        started,
+        event_tx: event_tx.clone(),
+        menu: None,
+        entries: Vec::new(),
+        bootable_entry_indices: Vec::new(),
+        discovery_complete: false,
+        pending_continue: None,
+        continue_generation: 0,
+        watcher: None,
+        pon_keys,
+        serialno,
+        system_info,
+        cmdline,
+        acm,
+        drm_page_flips,
+        ui_animation_lab,
+    };
+    match initial_menu {
+        Some(reason) => coordinator.enter_menu(reason),
+        None => coordinator.start_autoboot(),
     }
-    spawn_fastboot_joiner(fastboot_thread, event_tx.clone());
-    spawn_boot_discovery(event_tx.clone());
-    drop(event_tx);
+    spawn_boot_discovery(event_tx, started);
 
-    run_boot_coordinator(ui.as_ref(), event_rx).await?;
-    Ok(())
+    Ok(coordinator.run(event_rx).await)
+}
+
+fn sample_pon_keys(
+    pon_keys: Option<&boot_state::PonKeys>,
+    started: Instant,
+) -> boot_state::PonKeyState {
+    let Some(pon_keys) = pon_keys else {
+        tracing::info!(
+            elapsed_ms = started.elapsed().as_millis(),
+            "no PMIC PON keys found"
+        );
+        return boot_state::PonKeyState::default();
+    };
+
+    match pon_keys.read() {
+        Ok(state) => {
+            tracing::info!(
+                registers = %pon_keys.registers.display(),
+                rt_sts_reg = format_args!("0x{:04x}", pon_keys.rt_sts_reg),
+                volume_down_key = pon_keys.volume_down,
+                power_key = pon_keys.power,
+                volume_down_held = state.volume_down,
+                power_held = state.power,
+                elapsed_ms = started.elapsed().as_millis(),
+                "detected PMIC PON keys"
+            );
+            state
+        }
+        Err(err) => {
+            tracing::warn!(
+                registers = %pon_keys.registers.display(),
+                error = %err,
+                elapsed_ms = started.elapsed().as_millis(),
+                "PMIC PON key read failed"
+            );
+            boot_state::PonKeyState::default()
+        }
+    }
+}
+
+fn initial_menu_reason(
+    cmdline: &cmdline::KernelCommandLine,
+    drm_page_flips: u32,
+    ui_animation_lab: bool,
+    volume_down_held: bool,
+) -> Option<MenuReason> {
+    if cmdline.is_set(MENU_CMDLINE_PARAM) {
+        Some(MenuReason::Cmdline)
+    } else if drm_page_flips > 0 || ui_animation_lab {
+        // The DRM lab modes only run inside the UI and expect fastboot to stay up.
+        Some(MenuReason::Lab)
+    } else if volume_down_held {
+        Some(MenuReason::VolumeDown)
+    } else if cfg!(not(target_arch = "aarch64")) {
+        // kexec loading is only implemented for aarch64.
+        Some(MenuReason::AutobootUnsupported)
+    } else {
+        None
+    }
 }
 
 enum CoordinatorEvent {
@@ -138,6 +212,579 @@ enum CoordinatorEvent {
     Fastboot(Result<Option<fastboot::PostResponseAction>>),
     DiscoveryUpdate(Vec<bootflow::BootEntry>),
     DiscoveryComplete(Vec<bootflow::BootEntry>),
+    BreakIn,
+    AutobootTimeout,
+    RespawnFastboot,
+    ContinueExpired(u64),
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+enum MenuReason {
+    Cmdline,
+    Lab,
+    VolumeDown,
+    AutobootUnsupported,
+    NoBootableEntry,
+    BootFailed { entry: String, error: String },
+    DiscoveryTimeout,
+}
+
+impl fmt::Display for MenuReason {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(match self {
+            Self::Cmdline => "cmdline",
+            Self::Lab => "lab",
+            Self::VolumeDown => "volume-down",
+            Self::AutobootUnsupported => "autoboot-unsupported",
+            Self::NoBootableEntry => "no-bootable-entry",
+            Self::BootFailed { .. } => "boot-failed",
+            Self::DiscoveryTimeout => "discovery-timeout",
+        })
+    }
+}
+
+impl MenuReason {
+    fn notice(&self) -> Option<ui::MenuNotice> {
+        match self {
+            Self::BootFailed { entry, error } => Some(ui::MenuNotice {
+                title: "Boot failed".to_string(),
+                detail: format!("{entry}: {error}"),
+                error: true,
+            }),
+            Self::DiscoveryTimeout => Some(ui::MenuNotice {
+                title: "Still scanning boot media".to_string(),
+                detail: format!(
+                    "Autoboot stopped waiting after {}s",
+                    AUTOBOOT_TIMEOUT.as_secs()
+                ),
+                error: false,
+            }),
+            Self::Cmdline
+            | Self::Lab
+            | Self::VolumeDown
+            | Self::AutobootUnsupported
+            | Self::NoBootableEntry => None,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum BootOrigin {
+    Ui,
+    Fastboot,
+}
+
+struct MenuState {
+    ui: Option<ui::Handle>,
+    notice: Option<ui::MenuNotice>,
+    gadget: gadget::Gadget,
+    fastboot_running: bool,
+    fastboot_errors: u32,
+}
+
+/// Owns the boot policy. `menu` is None while autobooting; once the menu is
+/// entered pocketboot stays resident until a boot succeeds.
+struct Coordinator {
+    started: Instant,
+    // Retained so the event channel can never close.
+    event_tx: async_channel::Sender<CoordinatorEvent>,
+    menu: Option<MenuState>,
+    entries: Vec<bootflow::BootEntry>,
+    bootable_entry_indices: Vec<usize>,
+    discovery_complete: bool,
+    // Generation of a `fastboot continue` waiting for discovery to finish.
+    pending_continue: Option<u64>,
+    continue_generation: u64,
+    watcher: Option<breakin::Watcher>,
+    pon_keys: Option<boot_state::PonKeys>,
+    serialno: String,
+    system_info: ui::SystemInfo,
+    cmdline: cmdline::KernelCommandLine,
+    acm: bool,
+    drm_page_flips: u32,
+    ui_animation_lab: bool,
+}
+
+impl Coordinator {
+    fn start_autoboot(&mut self) {
+        let break_in_tx = self.event_tx.clone();
+        match breakin::Watcher::spawn(self.started, self.pon_keys.clone(), move || {
+            if break_in_tx.try_send(CoordinatorEvent::BreakIn).is_err() {
+                tracing::debug!("boot coordinator event channel closed");
+            }
+        }) {
+            Ok(watcher) => self.watcher = Some(watcher),
+            Err(err) => tracing::warn!(error = %err, "failed to spawn break-in watcher thread"),
+        }
+
+        let timeout_tx = self.event_tx.clone();
+        runtime::detach(async move {
+            async_io::Timer::after(AUTOBOOT_TIMEOUT).await;
+            let _ = timeout_tx.send(CoordinatorEvent::AutobootTimeout).await;
+        });
+    }
+
+    async fn run(mut self, events: async_channel::Receiver<CoordinatorEvent>) -> Infallible {
+        loop {
+            let event = match events.recv().await {
+                Ok(event) => event,
+                Err(_) => {
+                    tracing::error!("boot coordinator event channel closed");
+                    return futures_lite::future::pending().await;
+                }
+            };
+            if self.menu.is_none() {
+                self.autoboot_event(event).await;
+            } else {
+                self.menu_event(event).await;
+            }
+        }
+    }
+
+    async fn autoboot_event(&mut self, event: CoordinatorEvent) {
+        match event {
+            CoordinatorEvent::DiscoveryUpdate(entries) => {
+                self.store_entries(entries);
+            }
+            CoordinatorEvent::DiscoveryComplete(entries) => {
+                self.store_entries(entries);
+                self.discovery_complete = true;
+                if self
+                    .watcher
+                    .as_ref()
+                    .is_some_and(breakin::Watcher::triggered)
+                {
+                    self.enter_menu(MenuReason::VolumeDown);
+                } else if let Some(entry_index) = self.default_entry_index() {
+                    self.attempt(entry_index).await;
+                } else {
+                    self.enter_menu(MenuReason::NoBootableEntry);
+                }
+            }
+            CoordinatorEvent::BreakIn => self.enter_menu(MenuReason::VolumeDown),
+            CoordinatorEvent::AutobootTimeout => {
+                if self.discovery_complete {
+                    tracing::debug!("ignoring autoboot timeout after discovery completed");
+                } else {
+                    self.enter_menu(MenuReason::DiscoveryTimeout);
+                }
+            }
+            CoordinatorEvent::UiAction(_)
+            | CoordinatorEvent::Fastboot(_)
+            | CoordinatorEvent::RespawnFastboot
+            | CoordinatorEvent::ContinueExpired(_) => {
+                tracing::debug!("ignoring boot menu event during autoboot");
+            }
+        }
+    }
+
+    // A break-in during the load is honoured by the final check once the load
+    // returns. A load that hangs can only be escaped through the serial getty.
+    async fn attempt(&mut self, entry_index: usize) {
+        let Some(entry) = self.entries.get(entry_index).cloned() else {
+            return;
+        };
+        tracing::info!(
+            decision = "autoboot",
+            id = %entry.id,
+            source = %entry.source.display(),
+            elapsed_ms = self.elapsed_ms(),
+            "POCKETBOOT_BOOT_DECISION"
+        );
+
+        let load_entry = entry.clone();
+        if let Err(err) = runtime::unblock(move || load_entry.load()).await {
+            // A failed kexec_load installs nothing, so there is nothing to unload.
+            self.enter_menu(MenuReason::BootFailed {
+                entry: boot_entry_title(&entry),
+                error: err.to_string(),
+            });
+            return;
+        }
+        tracing::info!(
+            id = %entry.id,
+            elapsed_ms = self.elapsed_ms(),
+            "autoboot entry loaded"
+        );
+
+        let (watcher_held, open_inputs) = self
+            .watcher
+            .take()
+            .map(breakin::Watcher::finish)
+            .unwrap_or_default();
+        let held = watcher_held
+            || self
+                .pon_keys
+                .as_ref()
+                .is_some_and(boot_state::PonKeys::volume_down_pressed);
+        if held {
+            unload_kexec_image();
+            self.enter_menu(MenuReason::VolumeDown);
+            return;
+        }
+
+        let error = kexec_error(kexec::exec_loaded_image());
+        drop(open_inputs);
+        unload_kexec_image();
+        self.enter_menu(MenuReason::BootFailed {
+            entry: boot_entry_title(&entry),
+            error,
+        });
+    }
+
+    fn enter_menu(&mut self, reason: MenuReason) {
+        if self.menu.is_some() {
+            tracing::debug!(reason = %reason, "boot menu is already active");
+            return;
+        }
+        if let Some(watcher) = self.watcher.take() {
+            watcher.finish();
+        }
+        log_menu_decision(&reason, self.elapsed_ms());
+
+        let battery = match battery::spawn() {
+            Ok(updates) => Some(updates),
+            Err(err) => {
+                tracing::warn!(error = %err, "failed to spawn battery watcher thread");
+                None
+            }
+        };
+        let notice = reason.notice();
+        let ui = match ui::spawn(
+            battery,
+            self.system_info.clone(),
+            self.drm_page_flips,
+            self.ui_animation_lab,
+            self.pon_keys.clone(),
+        ) {
+            Ok(ui) => {
+                spawn_ui_action_forwarder(&ui, self.event_tx.clone());
+                // The command channel is drained before the first draw, so the
+                // first frame already shows these.
+                ui.update_boot_entries(boot_menu_entries(&self.entries).1, self.discovery_complete);
+                ui.set_notice(notice.clone());
+                Some(ui)
+            }
+            Err(err) => {
+                tracing::warn!(error = %err, "failed to spawn UI thread");
+                None
+            }
+        };
+
+        self.menu = Some(MenuState {
+            ui,
+            notice,
+            gadget: gadget::Gadget::new(self.serialno.clone()),
+            fastboot_running: false,
+            fastboot_errors: 0,
+        });
+        self.spawn_fastboot();
+        #[cfg(feature = "qemu")]
+        if let Err(err) = qemu::spawn() {
+            tracing::warn!(error = ?err, "failed to spawn QEMU USB/IP service");
+        }
+        if self.acm {
+            kmsg_forwarder::spawn();
+        } else {
+            tracing::info!(param = ACM_CMDLINE_PARAM, "CDC-ACM disabled");
+        }
+        tracing::info!("waiting for UI boot selection or fastboot exit");
+    }
+
+    async fn menu_event(&mut self, event: CoordinatorEvent) {
+        match event {
+            CoordinatorEvent::DiscoveryUpdate(entries) => {
+                let menu_entries = self.store_entries(entries);
+                if let Some(ui) = self.ui() {
+                    ui.update_boot_entries(menu_entries, false);
+                }
+            }
+            CoordinatorEvent::DiscoveryComplete(entries) => {
+                let menu_entries = self.store_entries(entries);
+                self.discovery_complete = true;
+                if let Some(ui) = self.ui() {
+                    ui.update_boot_entries(menu_entries, true);
+                }
+                if self.menu.as_ref().map(|menu| &menu.notice)
+                    == Some(&MenuReason::DiscoveryTimeout.notice())
+                {
+                    self.show_notice(None);
+                }
+                if self.pending_continue.take().is_some() {
+                    match self.default_entry_index() {
+                        Some(entry_index) => {
+                            self.menu_boot(entry_index, BootOrigin::Fastboot).await;
+                        }
+                        None => {
+                            tracing::warn!(
+                                "fastboot continue: no directly bootable entry was discovered"
+                            );
+                            self.spawn_fastboot();
+                        }
+                    }
+                }
+            }
+            CoordinatorEvent::BreakIn | CoordinatorEvent::AutobootTimeout => {
+                tracing::debug!("ignoring autoboot event in the boot menu");
+            }
+            CoordinatorEvent::UiAction(ui::Action::BootEntry(menu_index)) => {
+                // A UI selection supersedes a `fastboot continue` still waiting
+                // for discovery; fastboot comes back if this boot fails.
+                let superseded_continue = self.pending_continue.take().is_some();
+                match self.bootable_entry_indices.get(menu_index).copied() {
+                    Some(entry_index) => self.menu_boot(entry_index, BootOrigin::Ui).await,
+                    None => {
+                        tracing::warn!(menu_index, "UI requested unknown boot entry");
+                        if let Some(ui) = self.ui() {
+                            ui.cancel_booting();
+                        }
+                    }
+                }
+                if superseded_continue {
+                    self.spawn_fastboot();
+                }
+            }
+            CoordinatorEvent::Fastboot(Err(err)) => {
+                self.fastboot_exited(false);
+                self.schedule_fastboot_respawn(err);
+            }
+            CoordinatorEvent::Fastboot(Ok(Some(action))) => {
+                self.fastboot_exited(true);
+                tracing::info!("running fastboot post-response action");
+                // Every action leaves pocketboot when it succeeds.
+                let error = match action() {
+                    Ok(()) => "returned unexpectedly".to_string(),
+                    Err(err) => err.to_string(),
+                };
+                tracing::warn!(error = %error, "fastboot post-response action failed");
+                self.show_notice(Some(ui::MenuNotice {
+                    title: "Fastboot action failed".to_string(),
+                    detail: error,
+                    error: true,
+                }));
+                self.spawn_fastboot();
+            }
+            CoordinatorEvent::Fastboot(Ok(None)) => {
+                self.fastboot_exited(true);
+                if !self.discovery_complete {
+                    // Fastboot stays down while the continue is pending, so a
+                    // later session can't be cut off by the deferred kexec.
+                    tracing::info!(
+                        "fastboot continue before boot discovery completed; booting the default entry once it does"
+                    );
+                    self.continue_generation += 1;
+                    let generation = self.continue_generation;
+                    self.pending_continue = Some(generation);
+                    let event_tx = self.event_tx.clone();
+                    runtime::detach(async move {
+                        async_io::Timer::after(FASTBOOT_CONTINUE_TIMEOUT).await;
+                        let _ = event_tx
+                            .send(CoordinatorEvent::ContinueExpired(generation))
+                            .await;
+                    });
+                } else if let Some(entry_index) = self.default_entry_index() {
+                    self.menu_boot(entry_index, BootOrigin::Fastboot).await;
+                } else {
+                    tracing::warn!("fastboot continue: no directly bootable entry was discovered");
+                    self.spawn_fastboot();
+                }
+            }
+            CoordinatorEvent::RespawnFastboot => {
+                if self.pending_continue.is_none() {
+                    self.spawn_fastboot();
+                }
+            }
+            CoordinatorEvent::ContinueExpired(generation) => {
+                if self.pending_continue == Some(generation) {
+                    self.pending_continue = None;
+                    tracing::warn!(
+                        "fastboot continue: boot discovery is still running; giving up and restarting fastboot"
+                    );
+                    self.spawn_fastboot();
+                }
+            }
+        }
+    }
+
+    async fn menu_boot(&mut self, entry_index: usize, origin: BootOrigin) {
+        let Some(entry) = self.entries.get(entry_index).cloned() else {
+            return;
+        };
+        match origin {
+            BootOrigin::Ui => tracing::info!(
+                id = %entry.id,
+                source = %entry.source.display(),
+                "booting UI-selected entry"
+            ),
+            BootOrigin::Fastboot => tracing::info!(
+                id = %entry.id,
+                source = %entry.source.display(),
+                "booting discovered entry"
+            ),
+        }
+
+        let load_entry = entry.clone();
+        let error = match runtime::unblock(move || load_entry.load()).await {
+            Ok(()) => {
+                let error = kexec_error(kexec::exec_loaded_image());
+                unload_kexec_image();
+                error
+            }
+            Err(err) => err.to_string(),
+        };
+        tracing::warn!(
+            id = %entry.id,
+            origin = ?origin,
+            error = %error,
+            "boot failed; staying in the boot menu"
+        );
+
+        self.show_notice(
+            MenuReason::BootFailed {
+                entry: boot_entry_title(&entry),
+                error,
+            }
+            .notice(),
+        );
+        if origin == BootOrigin::Ui
+            && let Some(ui) = self.ui()
+        {
+            ui.cancel_booting();
+        }
+        if origin == BootOrigin::Fastboot {
+            self.spawn_fastboot();
+        }
+    }
+
+    fn spawn_fastboot(&mut self) {
+        let Some(menu) = self.menu.as_mut() else {
+            return;
+        };
+        if menu.fastboot_running {
+            tracing::debug!("fastboot gadget thread is already running");
+            return;
+        }
+
+        let commands = fastboot_commands(
+            menu.gadget.clone(),
+            self.serialno.clone(),
+            self.cmdline.clone(),
+        );
+        match menu.gadget.spawn(gadget::Mode::Fastboot {
+            commands,
+            acm: self.acm,
+        }) {
+            Ok(thread) => {
+                menu.fastboot_running = true;
+                spawn_fastboot_joiner(thread, self.event_tx.clone());
+            }
+            Err(err) => tracing::warn!(error = %err, "failed to spawn fastboot gadget thread"),
+        }
+    }
+
+    fn fastboot_exited(&mut self, ok: bool) {
+        if let Some(menu) = self.menu.as_mut() {
+            menu.fastboot_running = false;
+            if ok {
+                menu.fastboot_errors = 0;
+            }
+        }
+    }
+
+    fn schedule_fastboot_respawn(&mut self, err: String) {
+        let Some(menu) = self.menu.as_mut() else {
+            return;
+        };
+        if menu.fastboot_errors >= MAX_FASTBOOT_RESPAWNS {
+            tracing::warn!(error = %err, "fastboot gadget failed; not respawning it again");
+            return;
+        }
+
+        menu.fastboot_errors += 1;
+        tracing::warn!(
+            error = %err,
+            attempt = menu.fastboot_errors,
+            delay_ms = FASTBOOT_RESPAWN_DELAY.as_millis(),
+            "fastboot gadget failed; respawning"
+        );
+        let event_tx = self.event_tx.clone();
+        runtime::detach(async move {
+            async_io::Timer::after(FASTBOOT_RESPAWN_DELAY).await;
+            let _ = event_tx.send(CoordinatorEvent::RespawnFastboot).await;
+        });
+    }
+
+    fn store_entries(&mut self, entries: Vec<bootflow::BootEntry>) -> Vec<ui::BootMenuEntryInfo> {
+        let (indices, menu_entries) = boot_menu_entries(&entries);
+        self.entries = entries;
+        self.bootable_entry_indices = indices;
+        menu_entries
+    }
+
+    fn default_entry_index(&self) -> Option<usize> {
+        self.bootable_entry_indices.first().copied()
+    }
+
+    fn ui(&self) -> Option<&ui::Handle> {
+        self.menu.as_ref()?.ui.as_ref()
+    }
+
+    fn show_notice(&mut self, notice: Option<ui::MenuNotice>) {
+        let Some(menu) = self.menu.as_mut() else {
+            return;
+        };
+        if let Some(ui) = &menu.ui {
+            ui.set_notice(notice.clone());
+        }
+        menu.notice = notice;
+    }
+
+    fn elapsed_ms(&self) -> u128 {
+        self.started.elapsed().as_millis()
+    }
+}
+
+fn log_menu_decision(reason: &MenuReason, elapsed_ms: u128) {
+    match reason {
+        MenuReason::BootFailed { entry, error } => tracing::warn!(
+            decision = "menu",
+            reason = %reason,
+            entry = ?entry,
+            error = ?error,
+            elapsed_ms,
+            "POCKETBOOT_BOOT_DECISION"
+        ),
+        MenuReason::NoBootableEntry | MenuReason::DiscoveryTimeout => tracing::warn!(
+            decision = "menu",
+            reason = %reason,
+            elapsed_ms,
+            "POCKETBOOT_BOOT_DECISION"
+        ),
+        MenuReason::Cmdline
+        | MenuReason::Lab
+        | MenuReason::VolumeDown
+        | MenuReason::AutobootUnsupported => tracing::info!(
+            decision = "menu",
+            reason = %reason,
+            elapsed_ms,
+            "POCKETBOOT_BOOT_DECISION"
+        ),
+    }
+}
+
+fn kexec_error(result: io::Result<()>) -> String {
+    match result {
+        Ok(()) => "kexec returned unexpectedly".to_string(),
+        Err(err) => format!("kexec: {err}"),
+    }
+}
+
+// Only called after this process loaded the image itself: unloading drops
+// whatever is installed, including an image fastboot loaded on purpose.
+fn unload_kexec_image() {
+    if let Err(err) = kexec::unload() {
+        tracing::warn!(error = %err, "failed to unload kexec image");
+    }
 }
 
 fn spawn_ui_action_forwarder(ui: &ui::Handle, event_tx: async_channel::Sender<CoordinatorEvent>) {
@@ -166,15 +813,18 @@ fn spawn_fastboot_joiner(
     });
 }
 
-fn spawn_boot_discovery(event_tx: async_channel::Sender<CoordinatorEvent>) {
+fn spawn_boot_discovery(event_tx: async_channel::Sender<CoordinatorEvent>, started: Instant) {
     runtime::detach(async move {
         let settled =
             runtime::unblock(|| settle::wait_for_local_flash(Duration::from_secs(5))).await;
-        log_settle_report(&settled);
+        log_settle_report(&settled, started);
 
-        match runtime::unblock(block_devices).await {
-            Ok(devices) => log_block_devices(devices),
-            Err(err) => tracing::warn!(error = %err, "block device listing failed"),
+        // This walk is only for logging; skip it at the default log level.
+        if tracing::enabled!(tracing::Level::INFO) {
+            match runtime::unblock(block_devices).await {
+                Ok(devices) => log_block_devices(devices),
+                Err(err) => tracing::warn!(error = %err, "block device listing failed"),
+            }
         }
 
         let progress_tx = event_tx.clone();
@@ -198,105 +848,23 @@ fn spawn_boot_discovery(event_tx: async_channel::Sender<CoordinatorEvent>) {
                 Vec::new()
             }
         };
+        tracing::info!(
+            count = entries.len(),
+            elapsed_ms = started.elapsed().as_millis(),
+            "boot discovery complete"
+        );
         let _ = event_tx
             .send(CoordinatorEvent::DiscoveryComplete(entries))
             .await;
     });
 }
 
-async fn run_boot_coordinator(
-    ui: Option<&ui::Handle>,
-    events: async_channel::Receiver<CoordinatorEvent>,
-) -> Result<()> {
-    let mut boot_entries: Vec<bootflow::BootEntry> = Vec::new();
-    let mut bootable_entry_indices: Vec<usize> = Vec::new();
-    let mut discovery_complete = false;
-    let mut fastboot_requested_default = false;
-    tracing::info!("waiting for UI boot selection or fastboot exit");
-
-    loop {
-        let event = events
-            .recv()
-            .await
-            .map_err(|_| "boot coordinator event channel closed".to_string())?;
-        match event {
-            CoordinatorEvent::UiAction(ui::Action::BootEntry(menu_index)) => {
-                let Some(entry_index) = bootable_entry_indices.get(menu_index).copied() else {
-                    tracing::warn!(menu_index, "UI requested unknown boot entry");
-                    continue;
-                };
-                let entry = &boot_entries[entry_index];
-                tracing::info!(
-                    id = %entry.id,
-                    source = %entry.source.display(),
-                    "booting UI-selected entry"
-                );
-                return boot_discovered_entry(entry);
-            }
-            CoordinatorEvent::Fastboot(result) => {
-                let action = result?;
-                if let Some(action) = action {
-                    tracing::info!("running fastboot post-response action");
-                    action()
-                        .map_err(|err| format!("fastboot post-response action failed: {err}"))?;
-                    return Ok(());
-                }
-
-                if discovery_complete {
-                    boot_default_entry(&boot_entries)?;
-                    return Ok(());
-                }
-
-                tracing::info!("fastboot exited; waiting for boot discovery before default boot");
-                fastboot_requested_default = true;
-            }
-            CoordinatorEvent::DiscoveryUpdate(entries) => {
-                apply_boot_entries_update(
-                    ui,
-                    &mut boot_entries,
-                    &mut bootable_entry_indices,
-                    entries,
-                    false,
-                );
-            }
-            CoordinatorEvent::DiscoveryComplete(entries) => {
-                discovery_complete = true;
-                apply_boot_entries_update(
-                    ui,
-                    &mut boot_entries,
-                    &mut bootable_entry_indices,
-                    entries,
-                    true,
-                );
-                if fastboot_requested_default {
-                    boot_default_entry(&boot_entries)?;
-                    return Ok(());
-                }
-                tracing::info!("boot discovery complete; holding for fastboot or UI selection");
-            }
-        }
-    }
-}
-
-fn apply_boot_entries_update(
-    ui: Option<&ui::Handle>,
-    boot_entries: &mut Vec<bootflow::BootEntry>,
-    bootable_entry_indices: &mut Vec<usize>,
-    entries: Vec<bootflow::BootEntry>,
-    scan_complete: bool,
-) {
-    let (indices, menu_entries) = boot_menu_entries(&entries);
-    *boot_entries = entries;
-    *bootable_entry_indices = indices;
-    if let Some(ui) = ui {
-        ui.update_boot_entries(menu_entries, scan_complete);
-    }
-}
-
-fn log_settle_report(settled: &settle::Report) {
+fn log_settle_report(settled: &settle::Report, started: Instant) {
+    let since_start_ms = started.elapsed().as_millis();
     if settled.timed_out {
         tracing::warn!(
             elapsed_ms = settled.elapsed.as_millis(),
+            since_start_ms,
             disks = settled.disks,
             partitions = settled.partitions,
             events = settled.events,
@@ -307,6 +875,7 @@ fn log_settle_report(settled: &settle::Report) {
     } else {
         tracing::info!(
             elapsed_ms = settled.elapsed.as_millis(),
+            since_start_ms,
             disks = settled.disks,
             partitions = settled.partitions,
             events = settled.events,
@@ -353,28 +922,6 @@ fn log_boot_entries(entries: &[bootflow::BootEntry]) {
             );
         }
     }
-}
-
-fn boot_default_entry(boot_entries: &[bootflow::BootEntry]) -> Result<()> {
-    if let Some(entry) = boot_entries
-        .iter()
-        .find(|entry| entry.is_directly_bootable())
-    {
-        tracing::info!(id = %entry.id, source = %entry.source.display(), "booting discovered entry");
-        boot_discovered_entry(entry)?;
-    } else if !boot_entries.is_empty() {
-        tracing::warn!("boot entries were discovered, but none are directly bootable yet");
-    }
-    Ok(())
-}
-
-fn boot_discovered_entry(entry: &bootflow::BootEntry) -> Result<()> {
-    entry
-        .load()
-        .map_err(|err| format!("load discovered boot entry {}: {err}", entry.id))?;
-    kexec::exec_loaded_image()
-        .map_err(|err| format!("execute discovered boot entry {}: {err}", entry.id))?;
-    Ok(())
 }
 
 fn boot_menu_entries(
@@ -800,5 +1347,102 @@ mod tests {
             let cmdline = cmdline::KernelCommandLine::parse(value);
             assert_eq!(drm_page_flips(&cmdline), expected, "cmdline: {value}");
         }
+    }
+
+    #[test]
+    fn initial_menu_reason_prefers_explicit_requests() {
+        let menu = cmdline::KernelCommandLine::parse("quiet pocketboot.menu");
+        let plain = cmdline::KernelCommandLine::parse("quiet");
+
+        assert_eq!(
+            initial_menu_reason(&menu, 16, true, true),
+            Some(MenuReason::Cmdline)
+        );
+        assert_eq!(
+            initial_menu_reason(&plain, 16, false, true),
+            Some(MenuReason::Lab)
+        );
+        assert_eq!(
+            initial_menu_reason(&plain, 0, true, false),
+            Some(MenuReason::Lab)
+        );
+        assert_eq!(
+            initial_menu_reason(&plain, 0, false, true),
+            Some(MenuReason::VolumeDown)
+        );
+    }
+
+    #[test]
+    fn initial_menu_reason_autoboots_only_where_kexec_works() {
+        let plain = cmdline::KernelCommandLine::parse("quiet pocketboot.menu=1");
+
+        assert_eq!(
+            initial_menu_reason(&plain, 0, false, false),
+            cfg!(not(target_arch = "aarch64")).then_some(MenuReason::AutobootUnsupported)
+        );
+    }
+
+    #[test]
+    fn menu_reasons_use_kebab_case_markers() {
+        let failed = MenuReason::BootFailed {
+            entry: "Debian".to_string(),
+            error: "boom".to_string(),
+        };
+        let markers = [
+            (MenuReason::Cmdline, "cmdline"),
+            (MenuReason::Lab, "lab"),
+            (MenuReason::VolumeDown, "volume-down"),
+            (MenuReason::AutobootUnsupported, "autoboot-unsupported"),
+            (MenuReason::NoBootableEntry, "no-bootable-entry"),
+            (failed, "boot-failed"),
+            (MenuReason::DiscoveryTimeout, "discovery-timeout"),
+        ];
+
+        for (reason, marker) in markers {
+            assert_eq!(reason.to_string(), marker);
+        }
+    }
+
+    #[test]
+    fn only_fallback_menus_show_a_notice() {
+        for reason in [
+            MenuReason::Cmdline,
+            MenuReason::Lab,
+            MenuReason::VolumeDown,
+            MenuReason::AutobootUnsupported,
+            MenuReason::NoBootableEntry,
+        ] {
+            assert_eq!(reason.notice(), None, "reason: {reason}");
+        }
+
+        assert_eq!(
+            MenuReason::BootFailed {
+                entry: "Debian".to_string(),
+                error: "kernel is not a raw arm64 Image".to_string(),
+            }
+            .notice(),
+            Some(ui::MenuNotice {
+                title: "Boot failed".to_string(),
+                detail: "Debian: kernel is not a raw arm64 Image".to_string(),
+                error: true,
+            })
+        );
+        assert_eq!(
+            MenuReason::DiscoveryTimeout.notice(),
+            Some(ui::MenuNotice {
+                title: "Still scanning boot media".to_string(),
+                detail: "Autoboot stopped waiting after 15s".to_string(),
+                error: false,
+            })
+        );
+    }
+
+    #[test]
+    fn describes_kexec_failures() {
+        assert_eq!(kexec_error(Ok(())), "kexec returned unexpectedly");
+        assert_eq!(
+            kexec_error(Err(io::Error::from_raw_os_error(libc::EBUSY))),
+            format!("kexec: {}", io::Error::from_raw_os_error(libc::EBUSY))
+        );
     }
 }

@@ -32,12 +32,20 @@ use slint::platform::{
 };
 use slint::{ComponentHandle, LogicalPosition, ModelRc, PhysicalSize, SharedString, VecModel};
 
-use crate::{battery, power};
+use crate::{
+    battery, boot_state,
+    input::{
+        ABS_MT_POSITION_X, ABS_MT_POSITION_Y, ABS_MT_SLOT, ABS_MT_TRACKING_ID, ABS_X, ABS_Y,
+        BTN_TOUCH, EV_ABS, EV_KEY, EV_SYN, INPUT, InputAbsInfo, InputEvent, KEY_BITS_BYTES,
+        KEY_POWER, KEY_VOLUMEDOWN, KEY_VOLUMEUP, SYN_REPORT, eviocgabs, eviocgbit, ioctl_read,
+        test_bit,
+    },
+    power,
+};
 
 slint::include_modules!();
 
 const DRI: &str = "/dev/dri";
-const INPUT: &str = "/dev/input";
 const UI_START_TIMEOUT: Duration = Duration::from_secs(2);
 const IDLE_SLEEP: Duration = Duration::from_millis(16);
 const POWER_KEY_HOLD: Duration = Duration::from_millis(2500);
@@ -55,6 +63,7 @@ const ANIMATION_LAB_DAMAGE_PATTERN_FRAMES: u8 =
 const ANIMATION_LAB_DAMAGE_VALIDATION_FRAMES: u8 =
     ANIMATION_LAB_DAMAGE_PATTERN_FRAMES + ANIMATION_LAB_DAMAGE_FRAMES_PER_STATE;
 const MAX_PENDING_DAMAGE_RECTS: usize = 64;
+const MAX_NOTICE_CHARS: usize = 120;
 
 #[derive(Clone, Debug)]
 pub(crate) struct SystemInfo {
@@ -71,6 +80,13 @@ pub(crate) struct BootMenuEntryInfo {
     pub(crate) badge: String,
 }
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct MenuNotice {
+    pub(crate) title: String,
+    pub(crate) detail: String,
+    pub(crate) error: bool,
+}
+
 #[derive(Debug)]
 pub(crate) enum Action {
     BootEntry(usize),
@@ -84,20 +100,28 @@ pub(crate) struct Handle {
 
 impl Handle {
     pub(crate) fn update_boot_entries(&self, entries: Vec<BootMenuEntryInfo>, scan_complete: bool) {
-        if self
-            .commands
-            .try_send(Command::SetBootEntries {
-                entries,
-                scan_complete,
-            })
-            .is_err()
-        {
-            tracing::debug!("UI command channel disconnected");
-        }
+        self.send(Command::SetBootEntries {
+            entries,
+            scan_complete,
+        });
+    }
+
+    pub(crate) fn set_notice(&self, notice: Option<MenuNotice>) {
+        self.send(Command::SetNotice(notice));
+    }
+
+    pub(crate) fn cancel_booting(&self) {
+        self.send(Command::CancelBooting);
     }
 
     pub(crate) fn action_receiver(&self) -> async_channel::Receiver<Action> {
         self.actions.clone()
+    }
+
+    fn send(&self, command: Command) {
+        if self.commands.try_send(command).is_err() {
+            tracing::debug!("UI command channel disconnected");
+        }
     }
 }
 
@@ -106,6 +130,8 @@ enum Command {
         entries: Vec<BootMenuEntryInfo>,
         scan_complete: bool,
     },
+    SetNotice(Option<MenuNotice>),
+    CancelBooting,
 }
 
 pub(crate) fn spawn(
@@ -113,6 +139,7 @@ pub(crate) fn spawn(
     system_info: SystemInfo,
     drm_page_flips: u32,
     ui_animation_lab: bool,
+    pon_keys: Option<boot_state::PonKeys>,
 ) -> io::Result<Handle> {
     let (command_tx, command_rx) = async_channel::unbounded();
     let (action_tx, action_rx) = async_channel::unbounded();
@@ -124,6 +151,7 @@ pub(crate) fn spawn(
                 system_info,
                 drm_page_flips,
                 ui_animation_lab,
+                pon_keys,
                 command_rx,
                 action_tx,
             ) {
@@ -143,6 +171,7 @@ fn run(
     system_info: SystemInfo,
     drm_page_flips: u32,
     ui_animation_lab: bool,
+    pon_keys: Option<boot_state::PonKeys>,
     commands: async_channel::Receiver<Command>,
     actions: async_channel::Sender<Action>,
 ) -> Result<(), String> {
@@ -210,7 +239,7 @@ fn run(
     );
 
     let mut touch = TouchInput::new();
-    let mut buttons = ButtonInput::new();
+    let mut buttons = ButtonInput::new(pon_keys.as_ref());
     let mut battery = battery.map(BatteryUpdates::new);
     let mut commands = UiCommands::new(commands);
     let mut pointer_down = false;
@@ -751,7 +780,46 @@ fn apply_command(window: &MainWindow, command: Command) {
             entries,
             scan_complete,
         } => apply_boot_entries(window, entries, scan_complete),
+        Command::SetNotice(notice) => apply_notice(window, notice),
+        Command::CancelBooting => cancel_booting(window),
     }
+}
+
+fn apply_notice(window: &MainWindow, notice: Option<MenuNotice>) {
+    let (title, detail, error) = match notice {
+        Some(notice) => (
+            sanitize_notice_text(&notice.title),
+            sanitize_notice_text(&notice.detail),
+            notice.error,
+        ),
+        None => (String::new(), String::new(), false),
+    };
+    window.set_notice_title(title.into());
+    window.set_notice_detail(detail.into());
+    window.set_notice_error(error);
+}
+
+// The software renderer only embeds printable ASCII glyphs (minus '`').
+fn sanitize_notice_text(text: &str) -> String {
+    text.chars()
+        .map(|ch| {
+            if matches!(ch, ' '..='~') && ch != '`' {
+                ch
+            } else {
+                '?'
+            }
+        })
+        .take(MAX_NOTICE_CHARS)
+        .collect()
+}
+
+fn cancel_booting(window: &MainWindow) {
+    let booting_index = window.get_booting_index();
+    if booting_index >= 0 {
+        window.set_hardware_selected_index(booting_index);
+    }
+    window.set_booting_index(-1);
+    window.invoke_refresh_boot_selection();
 }
 
 fn apply_boot_entries(window: &MainWindow, entries: Vec<BootMenuEntryInfo>, scan_complete: bool) {
@@ -769,7 +837,6 @@ fn apply_boot_entries(window: &MainWindow, entries: Vec<BootMenuEntryInfo>, scan
     window.set_boot_entries(ModelRc::new(VecModel::from(rows)));
     window.set_boot_entry_count(i32::try_from(count).unwrap_or(i32::MAX));
     window.set_boot_scan_complete(scan_complete);
-    window.set_booting_index(-1);
     window.invoke_refresh_boot_selection();
 }
 
@@ -3077,14 +3144,42 @@ struct ButtonInput {
 }
 
 impl ButtonInput {
-    fn new() -> Self {
+    fn new(pon_keys: Option<&boot_state::PonKeys>) -> Self {
         let mut input = Self {
             devices: Vec::new(),
             ignored_devices: Vec::new(),
             next_scan: Instant::now(),
         };
         input.rescan();
+        // Sample the PMIC only after opening, so a release in between still
+        // reaches these fds and clears the suppression.
+        if let Some(pon_keys) = pon_keys {
+            input.suppress_held_pon_keys(pon_keys);
+        }
         input
+    }
+
+    fn suppress_held_pon_keys(&mut self, pon_keys: &boot_state::PonKeys) {
+        let held = match pon_keys.read() {
+            Ok(held) => held,
+            Err(err) => {
+                tracing::debug!(error = %err, "PMIC PON key read failed");
+                return;
+            }
+        };
+        if !held.volume_down && !held.power {
+            return;
+        }
+
+        tracing::info!(
+            volume_down = held.volume_down,
+            power = held.power,
+            devices = self.devices.len(),
+            "ignoring PMIC keys held when the UI opened input until release"
+        );
+        for device in &mut self.devices {
+            device.state.suppress_held(held);
+        }
     }
 
     fn poll(&mut self) -> Vec<ButtonEvent> {
@@ -3203,17 +3298,42 @@ impl ButtonDevice {
 struct ButtonState {
     power_pressed_since: Option<Instant>,
     power_long_reported: bool,
+    volume_up_pressed: bool,
+    volume_down_pressed: bool,
+    suppress_volume_down: bool,
+    suppress_power: bool,
 }
 
 impl ButtonState {
+    fn suppress_held(&mut self, held: boot_state::PonKeyState) {
+        self.suppress_volume_down |= held.volume_down;
+        self.suppress_power |= held.power;
+    }
+
     fn handle(&mut self, event: InputEvent, events: &mut Vec<ButtonEvent>) {
         if event.type_ != EV_KEY {
             return;
         }
 
         match event.code {
-            KEY_VOLUMEUP if matches!(event.value, 1 | 2) => events.push(ButtonEvent::Previous),
-            KEY_VOLUMEDOWN if matches!(event.value, 1 | 2) => events.push(ButtonEvent::Next),
+            KEY_VOLUMEDOWN if self.suppress_volume_down => {
+                self.suppress_volume_down = event.value != 0;
+            }
+            KEY_POWER if self.suppress_power => {
+                self.suppress_power = event.value != 0;
+            }
+            KEY_VOLUMEUP => handle_volume(
+                &mut self.volume_up_pressed,
+                event.value,
+                ButtonEvent::Previous,
+                events,
+            ),
+            KEY_VOLUMEDOWN => handle_volume(
+                &mut self.volume_down_pressed,
+                event.value,
+                ButtonEvent::Next,
+                events,
+            ),
             KEY_POWER => self.handle_power(event.value, events),
             _ => {}
         }
@@ -3251,6 +3371,25 @@ impl ButtonState {
 
         self.power_long_reported = true;
         events.push(ButtonEvent::OpenMenu);
+    }
+}
+
+// A repeat only navigates after this device reported the press itself, so a key
+// held since before the device was opened cannot scroll the menu.
+fn handle_volume(
+    pressed: &mut bool,
+    value: i32,
+    event: ButtonEvent,
+    events: &mut Vec<ButtonEvent>,
+) {
+    match value {
+        0 => *pressed = false,
+        1 => {
+            *pressed = true;
+            events.push(event);
+        }
+        2 if *pressed => events.push(event),
+        _ => {}
     }
 }
 
@@ -3550,85 +3689,7 @@ fn query_button_keys(fd: i32) -> io::Result<ButtonKeys> {
     })
 }
 
-fn test_bit(bits: &[u8], bit: u16) -> bool {
-    let index = bit as usize / 8;
-    let mask = 1 << (bit as usize % 8);
-    bits.get(index).is_some_and(|byte| byte & mask != 0)
-}
-
-fn ioctl_read<T>(fd: i32, request: u64, value: &mut T) -> io::Result<()> {
-    let rc = unsafe { libc::ioctl(fd, request as _, value as *mut T) };
-    if rc == -1 {
-        Err(io::Error::last_os_error())
-    } else {
-        Ok(())
-    }
-}
-
-fn eviocgabs(abs: u16) -> u64 {
-    ior(b'E', 0x40 + abs as u8, mem::size_of::<InputAbsInfo>())
-}
-
-fn eviocgbit(type_: u16, size: usize) -> u64 {
-    ior(b'E', 0x20 + type_ as u8, size)
-}
-
-fn ior(type_: u8, number: u8, size: usize) -> u64 {
-    ioc(IOC_READ, type_, number, size)
-}
-
-fn ioc(direction: u8, type_: u8, number: u8, size: usize) -> u64 {
-    ((direction as u64) << IOC_DIRSHIFT)
-        | ((type_ as u64) << IOC_TYPESHIFT)
-        | ((number as u64) << IOC_NRSHIFT)
-        | ((size as u64) << IOC_SIZESHIFT)
-}
-
-const IOC_NRBITS: u64 = 8;
-const IOC_TYPEBITS: u64 = 8;
-const IOC_SIZEBITS: u64 = 14;
-const IOC_NRSHIFT: u64 = 0;
-const IOC_TYPESHIFT: u64 = IOC_NRSHIFT + IOC_NRBITS;
-const IOC_SIZESHIFT: u64 = IOC_TYPESHIFT + IOC_TYPEBITS;
-const IOC_DIRSHIFT: u64 = IOC_SIZESHIFT + IOC_SIZEBITS;
-const IOC_READ: u8 = 2;
-
 const MAX_TOUCH_SLOTS: usize = 10;
-const EV_SYN: u16 = 0x00;
-const EV_KEY: u16 = 0x01;
-const EV_ABS: u16 = 0x03;
-const SYN_REPORT: u16 = 0x00;
-const KEY_VOLUMEDOWN: u16 = 0x72;
-const KEY_VOLUMEUP: u16 = 0x73;
-const KEY_POWER: u16 = 0x74;
-const KEY_BITS_BYTES: usize = KEY_POWER as usize / 8 + 1;
-const BTN_TOUCH: u16 = 0x14a;
-const ABS_X: u16 = 0x00;
-const ABS_Y: u16 = 0x01;
-const ABS_MT_SLOT: u16 = 0x2f;
-const ABS_MT_POSITION_X: u16 = 0x35;
-const ABS_MT_POSITION_Y: u16 = 0x36;
-const ABS_MT_TRACKING_ID: u16 = 0x39;
-
-#[repr(C)]
-#[derive(Clone, Copy)]
-struct InputEvent {
-    time: libc::timeval,
-    type_: u16,
-    code: u16,
-    value: i32,
-}
-
-#[repr(C)]
-#[derive(Default)]
-struct InputAbsInfo {
-    value: i32,
-    minimum: i32,
-    maximum: i32,
-    fuzz: i32,
-    flat: i32,
-    resolution: i32,
-}
 
 #[cfg(test)]
 mod button_tests {
@@ -3717,6 +3778,101 @@ mod button_tests {
         assert_eq!(
             events,
             vec![ButtonEvent::OpenMenu, ButtonEvent::PowerReleased]
+        );
+    }
+
+    #[test]
+    fn volume_repeat_without_press_on_this_device_is_ignored() {
+        let mut state = ButtonState::default();
+        let mut events = Vec::new();
+
+        state.handle(event(EV_KEY, KEY_VOLUMEDOWN, 2), &mut events);
+        state.handle(event(EV_KEY, KEY_VOLUMEDOWN, 2), &mut events);
+        state.handle(event(EV_KEY, KEY_VOLUMEUP, 2), &mut events);
+        state.handle(event(EV_KEY, KEY_VOLUMEDOWN, 0), &mut events);
+        assert!(events.is_empty());
+
+        state.handle(event(EV_KEY, KEY_VOLUMEDOWN, 1), &mut events);
+        state.handle(event(EV_KEY, KEY_VOLUMEDOWN, 2), &mut events);
+        assert_eq!(events, vec![ButtonEvent::Next, ButtonEvent::Next]);
+    }
+
+    #[test]
+    fn held_pmic_volume_down_is_suppressed_until_release() {
+        let mut state = ButtonState::default();
+        let mut events = Vec::new();
+        state.suppress_held(boot_state::PonKeyState {
+            volume_down: true,
+            power: false,
+        });
+
+        // pm8941-pwrkey reports a release it never saw pressed as press+release.
+        state.handle(event(EV_KEY, KEY_VOLUMEDOWN, 1), &mut events);
+        state.handle(event(EV_KEY, KEY_VOLUMEDOWN, 0), &mut events);
+        assert!(events.is_empty());
+
+        state.handle(event(EV_KEY, KEY_VOLUMEDOWN, 1), &mut events);
+        assert_eq!(events, vec![ButtonEvent::Next]);
+    }
+
+    #[test]
+    fn held_pmic_power_key_is_suppressed_until_release() {
+        let mut state = ButtonState::default();
+        let mut events = Vec::new();
+        state.suppress_held(boot_state::PonKeyState {
+            volume_down: false,
+            power: true,
+        });
+
+        state.handle(event(EV_KEY, KEY_POWER, 1), &mut events);
+        state.handle(event(EV_KEY, KEY_POWER, 0), &mut events);
+        state.poll(&mut events);
+        assert!(events.is_empty());
+
+        state.handle(event(EV_KEY, KEY_VOLUMEDOWN, 1), &mut events);
+        state.handle(event(EV_KEY, KEY_POWER, 1), &mut events);
+        state.handle(event(EV_KEY, KEY_POWER, 0), &mut events);
+        assert_eq!(
+            events,
+            vec![
+                ButtonEvent::Next,
+                ButtonEvent::PowerPressed,
+                ButtonEvent::PowerReleased,
+                ButtonEvent::PowerShortPress,
+            ]
+        );
+    }
+}
+
+#[cfg(test)]
+mod notice_tests {
+    use super::*;
+
+    #[test]
+    fn notice_text_keeps_printable_ascii() {
+        assert_eq!(
+            sanitize_notice_text("Debian: kernel is not a raw arm64 Image (os error 22)"),
+            "Debian: kernel is not a raw arm64 Image (os error 22)"
+        );
+    }
+
+    #[test]
+    fn notice_text_replaces_unrenderable_characters() {
+        assert_eq!(
+            sanitize_notice_text("Fedora\u{2122} `rawhide`\n\tdone"),
+            "Fedora? ?rawhide???done"
+        );
+    }
+
+    #[test]
+    fn notice_text_is_limited_by_characters_after_sanitizing() {
+        let long = "\u{e9}".repeat(MAX_NOTICE_CHARS + 10);
+        let sanitized = sanitize_notice_text(&long);
+
+        assert_eq!(sanitized, "?".repeat(MAX_NOTICE_CHARS));
+        assert_eq!(
+            sanitize_notice_text(&"x".repeat(500)).len(),
+            MAX_NOTICE_CHARS
         );
     }
 }
