@@ -1,0 +1,69 @@
+name = "Qualcomm QCM6490"
+
+[kconfig]
+ARCH_QCOM = true
+NR_CPUS = 8
+
+# RPMh resources and native PSCI CPU shutdown/handoff.
+QCOM_SCM = true
+QCOM_COMMAND_DB = true
+QCOM_RPMH = true
+QCOM_RPMHPD = true
+# Select the OPP core used by RPMh performance-state tables.
+QCOM_CPR = true
+QCOM_CLK_RPMH = true
+QCOM_SMEM = true
+QCOM_SOCINFO = true
+HWSPINLOCK = true
+HWSPINLOCK_QCOM = true
+CPU_IDLE = true
+ARM_PSCI_CPUIDLE = true
+ARM_PSCI_CPUIDLE_DOMAIN = true
+
+# QCM6490 uses the SC7280 clock, pinctrl and interconnect blocks.
+COMMON_CLK_QCOM = true
+SC_GCC_7280 = true
+PINCTRL_MSM = true
+PINCTRL_SC7280 = true
+PINCTRL_QCOM_SPMI_PMIC = true
+QCOM_PDC = true
+INTERCONNECT = true
+INTERCONNECT_QCOM = true
+INTERCONNECT_QCOM_SC7280 = true
+IOMMU_SUPPORT = true
+ARM_SMMU = true
+ARM_SMMU_QCOM = true
+
+# PMIC access, regulators and reset.
+SPMI = true
+SPMI_MSM_PMIC_ARB = true
+MFD_SPMI_PMIC = true
+REGULATOR = true
+REGULATOR_FIXED_VOLTAGE = true
+REGULATOR_QCOM_RPMH = true
+POWER_RESET_QCOM_PON = true
+NVMEM = true
+NVMEM_QCOM_QFPROM = true
+
+# Serial console; no remoteproc/ADSP or PMIC GLINK firmware dependency.
+QCOM_GENI_SE = true
+SERIAL_QCOM_GENI = true
+SERIAL_QCOM_GENI_CONSOLE = true
+
+# UFS storage.
+BLK_DEV_SD = true
+SCSI_UFSHCD = true
+SCSI_UFSHCD_PLATFORM = true
+SCSI_UFS_QCOM = true
+GENERIC_PHY = true
+PHY_QCOM_QMP = true
+PHY_QCOM_QMP_UFS = true
+PHY_QCOM_QMP_COMBO = false
+PHY_QCOM_QMP_USB = false
+PHY_QCOM_QMP_USB_LEGACY = false
+
+# Fixed USB peripheral role for the initial USB2-only diagnostic image.
+USB_DWC3 = true
+USB_DWC3_GADGET = true
+USB_DWC3_QCOM = true
+PHY_QCOM_USB_SNPS_FEMTO_V2 = true
