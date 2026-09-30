@@ -16,6 +16,7 @@ const ARM64_IMAGE_MAGIC_OFFSET: usize = 56;
 const ARM64_IMAGE_MAGIC_BYTES: &[u8; 4] = b"ARM\x64";
 const ARM64_IMAGE_MIN_SIZE: usize = 64;
 const ARM64_PAGE_SIZE: u64 = 4096;
+const ARM_ZIMAGE_MAGIC: u32 = 0x016f2818;
 #[cfg(any(target_arch = "aarch64", target_arch = "arm", test))]
 const PAGE_SIZE: u64 = 4096;
 
@@ -64,6 +65,12 @@ impl KexecImage {
                 with_live_memory(read_payload(dtb)?)?
             }
             None => {
+                #[cfg(target_arch = "arm")]
+                if let Some(dtb) = arm::appended_dtb(&kernel)? {
+                    tracing::info!("using DTB appended to ARM zImage");
+                    let dtb = with_live_memory(dtb.to_vec())?;
+                    return load_native(&kernel, initrd.as_deref(), &dtb, &self.cmdline);
+                }
                 tracing::info!("using current DTB from /sys/firmware/fdt");
                 read_current_dtb()?
             }
@@ -130,6 +137,12 @@ fn memfd_payload(name: &str, data: &[u8]) -> io::Result<File> {
 
 fn prepare_kernel_payload_bytes(payload: &[u8]) -> io::Result<Option<Vec<u8>>> {
     tracing::debug!(bytes = payload.len(), "preparing kernel payload");
+    // An ARM EFI stub starts with MZ but is still directly bootable as a
+    // zImage. Recognize the native image before interpreting outer wrappers.
+    if is_raw_arm_zimage(payload) {
+        tracing::debug!(bytes = payload.len(), "detected raw ARM zImage payload");
+        return Ok(None);
+    }
     if is_raw_arm64_image(payload) {
         tracing::debug!(
             bytes = payload.len(),
@@ -410,6 +423,11 @@ fn decompress_embedded_gzip(payload: &[u8]) -> io::Result<Vec<u8>> {
         )
     })?;
     Ok(decompressed)
+}
+
+fn is_raw_arm_zimage(payload: &[u8]) -> bool {
+    payload.len() >= 60
+        && payload.get(0x24..0x28) == Some(ARM_ZIMAGE_MAGIC.to_le_bytes().as_slice())
 }
 
 fn is_raw_arm64_image(payload: &[u8]) -> bool {
@@ -817,6 +835,26 @@ mod tests {
     use std::io::Write;
 
     #[test]
+    fn arm_efi_stub_zimage_bypasses_the_arm64_pe_parser() {
+        let mut raw = vec![0; 512];
+        raw[..2].copy_from_slice(b"MZ");
+        raw[0x24..0x28].copy_from_slice(&ARM_ZIMAGE_MAGIC.to_le_bytes());
+        raw[0x2c..0x30].copy_from_slice(&512u32.to_le_bytes());
+        raw[0x3c..0x40].copy_from_slice(&0x80u32.to_le_bytes());
+        raw[0x80..0x84].copy_from_slice(b"PE\0\0");
+        raw[0x84..0x86].copy_from_slice(&0x1c2u16.to_le_bytes()); // THUMB
+        raw[0x86..0x88].copy_from_slice(&1u16.to_le_bytes());
+        raw[0x94..0x96].copy_from_slice(&224u16.to_le_bytes());
+        raw[0x98..0x9a].copy_from_slice(&0x10bu16.to_le_bytes()); // PE32
+        assert!(pe::Image::parse(&raw).is_err());
+        let prepared = prepare_kernel_payload(payload_file("arm-efi-zimage", &raw)).unwrap();
+        assert_eq!(read_file(&prepared), raw);
+        let prepared =
+            prepare_kernel_payload(payload_file("gzip-arm-efi-zimage", &gzip(&raw))).unwrap();
+        assert_eq!(read_file(&prepared), raw);
+    }
+
+    #[test]
     fn raw_kernel_payload_passes_through() {
         let raw = raw_arm64_image();
         let payload = payload_file("test-raw-kernel", &raw);
@@ -1058,7 +1096,6 @@ mod fdt {
         initrd_start: u32,
         initrd_end: u32,
         booted_from_kexec: u32,
-        address_cells: u32,
     }
 
     struct MemoryFragment {
@@ -1104,7 +1141,6 @@ mod fdt {
             initrd_start: ensure_string(&mut strings, PROP_INITRD_START)?,
             initrd_end: ensure_string(&mut strings, PROP_INITRD_END)?,
             booted_from_kexec: ensure_string(&mut strings, PROP_BOOTED_FROM_KEXEC)?,
-            address_cells: contract_tree(dtb)?.cells(PROP_ADDRESS_CELLS, 2)?,
         };
 
         let new_struct = patch_structure_block(struct_block, &strings, &offsets, cmdline, initrd)?;
@@ -1127,7 +1163,26 @@ mod fdt {
         // Preserve live firmware carveouts even if the supplied board DTB
         // omits them, both for our placement and for the destination kernel.
         let mut reservations = reserve_map_ranges(dtb, &header)?;
-        reservations.extend(reserved_ranges(live_dtb)?);
+        let mut live_reservations = reserved_ranges(live_dtb)?
+            .into_iter()
+            .map(|(start, end)| super::memory::PhysRange { start, end })
+            .collect::<Vec<_>>();
+        // Older kernels reserve /memreserve/ before applying no-map. Adding
+        // an overlapping header reservation makes memblock_mark_nomap fail
+        // with EBUSY, leaving firmware memory in the linear map. Keep the
+        // supplied header unchanged and rely on its no-map nodes for those
+        // intervals; reserved_ranges() still excludes them from placement.
+        for (start, end) in no_map_ranges(&target_root)? {
+            super::memory::subtract_range(
+                &mut live_reservations,
+                super::memory::PhysRange { start, end },
+            );
+        }
+        reservations.extend(
+            live_reservations
+                .into_iter()
+                .map(|range| (range.start, range.end)),
+        );
         reservations.sort_unstable();
         reservations.dedup();
         let mut reserve_map = Vec::new();
@@ -1169,8 +1224,43 @@ mod fdt {
             return invalid_data("live DTB has no root memory nodes");
         }
 
-        let new_struct = graft_memory_structure(struct_block, &memory)?;
+        // A compiled destination DTB normally lacks the serial injected by
+        // firmware. Preserve it unless the destination explicitly supplies one.
+        let serial = match (
+            target_root.get(b"serial-number"),
+            live_root.get(b"serial-number"),
+        ) {
+            (None, Some(value)) => Some((ensure_string(&mut strings, b"serial-number")?, value)),
+            _ => None,
+        };
+        let new_struct = graft_memory_structure(struct_block, &memory, serial)?;
         build_dtb(&header, &reserve_map, &new_struct, &strings)
+    }
+
+    fn no_map_ranges(root: &ContractNode) -> io::Result<Vec<(u64, u64)>> {
+        let Some(reserved) = root.child(b"reserved-memory") else {
+            return Ok(Vec::new());
+        };
+        let children = reserved
+            .children
+            .iter()
+            .filter(|node| node.enabled() && node.get(b"no-map").is_some())
+            .collect::<Vec<_>>();
+        if children.is_empty() {
+            return Ok(Vec::new());
+        }
+        // Only trust a subtree the destination kernel can actually interpret.
+        // Linux ignores the parent's status; availability applies to children.
+        let Some((address_cells, size_cells)) = reserved_memory_cells(root, reserved)? else {
+            return Ok(Vec::new());
+        };
+        let mut ranges = Vec::new();
+        for child in children {
+            if let Some(reg) = child.get(PROP_REG) {
+                ranges.extend(decode_reg_ranges(reg, address_cells, size_cells)?);
+            }
+        }
+        Ok(ranges)
     }
 
     const SPIN_TABLE_COMPAT: &[u8] = b"pocketboot,spin-table-v1";
@@ -1353,20 +1443,29 @@ mod fdt {
                 "spin-table requires an enabled /reserved-memory with empty ranges",
             );
         }
+        reserved_memory_cells(root, reserved)?.ok_or_else(|| {
+            invalid_data_error("unsupported or inconsistent spin-table reserved-memory cell format")
+        })
+    }
+
+    fn reserved_memory_cells(
+        root: &ContractNode,
+        reserved: &ContractNode,
+    ) -> io::Result<Option<(u32, u32)>> {
         let address_cells = reserved.cells(PROP_ADDRESS_CELLS, 0)?;
         let size_cells = reserved.cells(PROP_SIZE_CELLS, 0)?;
-        // Linux rejects the whole reserved-memory subtree if these properties
-        // are absent or differ from the root's cells.
-        if !(1..=2).contains(&address_cells)
+        // Match Linux's __reserved_mem_check_root: these cells must be
+        // explicit and match the root, and ranges must exist. The flat-DT
+        // scanner does not translate ranges or check the parent's status.
+        if reserved.get(b"ranges").is_none()
+            || !(1..=2).contains(&address_cells)
             || !(1..=2).contains(&size_cells)
             || address_cells != root.cells(PROP_ADDRESS_CELLS, 2)?
             || size_cells != root.cells(PROP_SIZE_CELLS, 1)?
         {
-            return invalid_data(
-                "unsupported or inconsistent spin-table reserved-memory cell format",
-            );
+            return Ok(None);
         }
-        Ok((address_cells, size_cells))
+        Ok(Some((address_cells, size_cells)))
     }
 
     fn graft_parking_reservation(
@@ -1785,6 +1884,11 @@ mod fdt {
         Ok(ranges)
     }
 
+    #[cfg(any(target_arch = "arm", test))]
+    pub(super) fn blob_size(dtb: &[u8]) -> io::Result<usize> {
+        Ok(Header::parse(dtb)?.totalsize)
+    }
+
     impl Header {
         fn parse(dtb: &[u8]) -> io::Result<Self> {
             if dtb.len() < 40 {
@@ -2191,6 +2295,7 @@ mod fdt {
     fn graft_memory_structure(
         struct_block: &[u8],
         memory: &[MemoryFragment],
+        serial: Option<(u32, &[u8])>,
     ) -> io::Result<Vec<u8>> {
         let memory_bytes: usize = memory.iter().map(|fragment| fragment.data.len()).sum();
         let mut cursor = 0usize;
@@ -2220,6 +2325,9 @@ mod fdt {
                         }
                         saw_root = true;
                         output.extend_from_slice(&struct_block[token_start..next]);
+                        if let Some((nameoff, value)) = serial {
+                            write_prop(&mut output, nameoff, value);
+                        }
                         depth = 1;
                         cursor = next;
                     } else if depth == 1 && is_memory_node_name(name) {
@@ -2378,16 +2486,10 @@ mod fdt {
             if start >= end {
                 return invalid_data("invalid initrd address range");
             }
-            write_prop(
-                output,
-                offsets.initrd_start,
-                &encode_cells(start, offsets.address_cells)?,
-            );
-            write_prop(
-                output,
-                offsets.initrd_end,
-                &encode_cells(end, offsets.address_cells)?,
-            );
+            // /chosen's initrd ABI is independent of root #address-cells.
+            // Match Linux's of_kexec_alloc_and_setup_fdt on ARM and ARM64.
+            write_prop(output, offsets.initrd_start, &start.to_be_bytes());
+            write_prop(output, offsets.initrd_end, &end.to_be_bytes());
         }
 
         write_prop(output, offsets.booted_from_kexec, &[]);
@@ -2626,7 +2728,7 @@ mod fdt {
         }
 
         #[test]
-        fn chosen_initrd_uses_root_cell_width_and_removes_stale_values() {
+        fn chosen_initrd_is_64bit_independent_of_root_cells_and_clears_stale_values() {
             for cells in [1u32, 2] {
                 let mut root = ContractNode::new(b"");
                 root.set(PROP_ADDRESS_CELLS, &cells.to_be_bytes());
@@ -2642,11 +2744,11 @@ mod fdt {
                 assert_eq!(chosen.get(PROP_BOOTARGS), Some(b"new\0".as_slice()));
                 assert_eq!(
                     chosen.get(PROP_INITRD_START).unwrap(),
-                    encode_cells(0x81000000, cells).unwrap()
+                    0x81000000u64.to_be_bytes()
                 );
                 assert_eq!(
                     chosen.get(PROP_INITRD_END).unwrap(),
-                    encode_cells(0x81001001, cells).unwrap()
+                    0x81001001u64.to_be_bytes()
                 );
                 assert_eq!(chosen.get(PROP_BOOTED_FROM_KEXEC), Some([].as_slice()));
                 let cleared = contract_tree(&patch_chosen(&patched, "", None).unwrap()).unwrap();
@@ -2654,9 +2756,12 @@ mod fdt {
                 assert!(chosen.get(PROP_BOOTARGS).is_none());
                 assert!(chosen.get(PROP_INITRD_START).is_none());
                 assert!(chosen.get(PROP_INITRD_END).is_none());
-                if cells == 1 {
-                    assert!(patch_chosen(&dtb, "", Some((0xffffffff, 0x100000000))).is_err());
-                }
+                let high = patch_chosen(&dtb, "", Some((0xffffffff, 0x100000000))).unwrap();
+                let high = contract_tree(&high).unwrap();
+                assert_eq!(
+                    high.child(b"chosen").unwrap().get(PROP_INITRD_END).unwrap(),
+                    0x100000000u64.to_be_bytes()
+                );
                 assert!(patch_chosen(&dtb, "", Some((2, 1))).is_err());
             }
         }
@@ -2711,6 +2816,261 @@ mod fdt {
             assert_eq!(
                 reserved_ranges(&again).unwrap(),
                 reserved_ranges(&grafted).unwrap()
+            );
+        }
+
+        fn memory_root(cells: u32) -> ContractNode {
+            let mut root = ContractNode::new(b"");
+            root.set(PROP_ADDRESS_CELLS, &cells.to_be_bytes());
+            root.set(PROP_SIZE_CELLS, &cells.to_be_bytes());
+            let mut memory = ContractNode::new(b"memory@80000000");
+            memory.set(b"device_type", b"memory\0");
+            memory.set(
+                PROP_REG,
+                &[
+                    encode_cells(0x80000000, cells).unwrap(),
+                    encode_cells(0x20000000, cells).unwrap(),
+                ]
+                .concat(),
+            );
+            root.children.push(memory);
+            root
+        }
+
+        fn add_no_map(root: &mut ContractNode, start: u64, size: u64, enabled: bool) {
+            let cells = root.cells(PROP_ADDRESS_CELLS, 2).unwrap();
+            let mut reserved = ContractNode::new(b"reserved-memory");
+            reserved.set(PROP_ADDRESS_CELLS, &cells.to_be_bytes());
+            reserved.set(PROP_SIZE_CELLS, &cells.to_be_bytes());
+            reserved.set(b"ranges", &[]);
+            let mut region = ContractNode::new(format!("firmware@{start:x}").as_bytes());
+            region.set(
+                PROP_REG,
+                &[
+                    encode_cells(start, cells).unwrap(),
+                    encode_cells(size, cells).unwrap(),
+                ]
+                .concat(),
+            );
+            region.set(b"no-map", &[]);
+            if !enabled {
+                region.set(PROP_STATUS, b"disabled\0");
+            }
+            reserved.children.push(region);
+            root.children.push(reserved);
+        }
+
+        fn reservation_map(ranges: &[(u64, u64)]) -> Vec<u8> {
+            let mut map = Vec::new();
+            for &(start, size) in ranges {
+                map.extend_from_slice(&start.to_be_bytes());
+                map.extend_from_slice(&size.to_be_bytes());
+            }
+            map.extend_from_slice(&[0; 16]);
+            map
+        }
+
+        #[test]
+        fn memory_graft_does_not_duplicate_no_map_nodes_in_header() {
+            for cells in [1, 2] {
+                let mut root = memory_root(cells);
+                add_no_map(&mut root, 0x81000000, 0x200000, true);
+                let dtb = fixture_dtb(&root);
+                let grafted = graft_memory(&dtb, &dtb).unwrap();
+                assert!(
+                    reserve_map_ranges(&grafted, &Header::parse(&grafted).unwrap())
+                        .unwrap()
+                        .is_empty()
+                );
+                assert_eq!(
+                    reserved_ranges(&grafted).unwrap(),
+                    [(0x81000000, 0x81200000)]
+                );
+                assert_eq!(
+                    contract_tree(&grafted)
+                        .unwrap()
+                        .child(b"reserved-memory")
+                        .unwrap()
+                        .children[0]
+                        .get(b"no-map"),
+                    Some([].as_slice())
+                );
+            }
+        }
+
+        #[test]
+        fn memory_graft_subtracts_partial_no_map_overlap_but_keeps_supplied_header() {
+            let mut target = memory_root(2);
+            add_no_map(&mut target, 0x81200000, 0x200000, true);
+            let target =
+                fixture_dtb_with_reservations(&target, &reservation_map(&[(0x82000000, 0x1000)]));
+            let live = fixture_dtb_with_reservations(
+                &memory_root(2),
+                &reservation_map(&[(0x81000000, 0x600000)]),
+            );
+            let grafted = graft_memory(&target, &live).unwrap();
+            let header = Header::parse(&grafted).unwrap();
+            assert_eq!(
+                reserve_map_ranges(&grafted, &header).unwrap(),
+                [
+                    (0x81000000, 0x81200000),
+                    (0x81400000, 0x81600000),
+                    (0x82000000, 0x82001000),
+                ]
+            );
+            assert!(
+                reserved_ranges(&grafted)
+                    .unwrap()
+                    .contains(&(0x81200000, 0x81400000))
+            );
+        }
+
+        #[test]
+        fn disabled_no_map_nodes_do_not_discard_live_reservations() {
+            let mut target = memory_root(1);
+            add_no_map(&mut target, 0x81000000, 0x200000, false);
+            let target = fixture_dtb(&target);
+            let live = fixture_dtb_with_reservations(
+                &memory_root(1),
+                &reservation_map(&[(0x81000000, 0x200000)]),
+            );
+            let grafted = graft_memory(&target, &live).unwrap();
+            assert_eq!(
+                reserve_map_ranges(&grafted, &Header::parse(&grafted).unwrap()).unwrap(),
+                [(0x81000000, 0x81200000)]
+            );
+        }
+
+        #[test]
+        fn memory_graft_matches_linux_reserved_memory_parent_checks() {
+            let live = fixture_dtb_with_reservations(
+                &memory_root(1),
+                &reservation_map(&[(0x81000000, 0x200000)]),
+            );
+            for property in [PROP_ADDRESS_CELLS, PROP_SIZE_CELLS, b"ranges".as_slice()] {
+                let mut target = memory_root(1);
+                add_no_map(&mut target, 0x81000000, 0x200000, true);
+                target.children[1].remove(property);
+                let grafted = graft_memory(&fixture_dtb(&target), &live).unwrap();
+                assert_eq!(
+                    reserve_map_ranges(&grafted, &Header::parse(&grafted).unwrap()).unwrap(),
+                    [(0x81000000, 0x81200000)]
+                );
+            }
+            // Differing root cells also make Linux ignore the whole subtree.
+            let mut target = memory_root(1);
+            add_no_map(&mut target, 0x81000000, 0x200000, true);
+            target.children[1].set(PROP_ADDRESS_CELLS, &2u32.to_be_bytes());
+            let grafted = graft_memory(&fixture_dtb(&target), &live).unwrap();
+            assert_eq!(
+                reserve_map_ranges(&grafted, &Header::parse(&grafted).unwrap()).unwrap(),
+                [(0x81000000, 0x81200000)]
+            );
+
+            // Only a child's status affects the early flat-DT reservation scan.
+            let mut target = memory_root(1);
+            add_no_map(&mut target, 0x81000000, 0x200000, true);
+            target.children[1].set(PROP_STATUS, b"disabled\0");
+            let grafted = graft_memory(&fixture_dtb(&target), &live).unwrap();
+            assert!(
+                reserve_map_ranges(&grafted, &Header::parse(&grafted).unwrap())
+                    .unwrap()
+                    .is_empty()
+            );
+        }
+
+        #[test]
+        fn memory_graft_preserves_firmware_serial_only_when_destination_omits_it() {
+            let mut live = memory_root(1);
+            live.set(b"serial-number", b"firmware-serial\0");
+            let live = fixture_dtb(&live);
+            for serial in [None, Some(b"destination-serial\0".as_slice())] {
+                let mut target = memory_root(1);
+                if let Some(serial) = serial {
+                    target.set(b"serial-number", serial);
+                }
+                let grafted = graft_memory(&fixture_dtb(&target), &live).unwrap();
+                let root = contract_tree(&grafted).unwrap();
+                assert_eq!(
+                    root.get(b"serial-number"),
+                    Some(serial.unwrap_or(b"firmware-serial\0"))
+                );
+            }
+        }
+
+        #[test]
+        fn arm_memory_base_rejects_unsupported_memory_descriptions() {
+            for property in [PROP_ADDRESS_CELLS, PROP_SIZE_CELLS] {
+                let mut root = memory_root(1);
+                root.remove(property);
+                assert!(
+                    arm_memory_base(&fixture_dtb(&root))
+                        .unwrap_err()
+                        .to_string()
+                        .contains("ARM DTB needs")
+                );
+            }
+            let mut root = memory_root(1);
+            let mut chosen = ContractNode::new(b"chosen");
+            chosen.set(
+                b"linux,usable-memory-range",
+                &[0x80000000u32.to_be_bytes(), 0x100000u32.to_be_bytes()].concat(),
+            );
+            root.children.push(chosen);
+            assert!(
+                arm_memory_base(&fixture_dtb(&root))
+                    .unwrap_err()
+                    .to_string()
+                    .contains("crash-kernel memory overrides")
+            );
+
+            for property in [PROP_STATUS, b"linux,usable-memory".as_slice()] {
+                let mut root = memory_root(1);
+                root.children[0].set(
+                    property,
+                    if property == PROP_STATUS {
+                        b"disabled\0"
+                    } else {
+                        &[]
+                    },
+                );
+                assert!(
+                    arm_memory_base(&fixture_dtb(&root))
+                        .unwrap_err()
+                        .to_string()
+                        .contains("enabled root banks without overrides")
+                );
+            }
+            let mut root = memory_root(1);
+            let memory = root.children.remove(0);
+            let mut soc = ContractNode::new(b"soc");
+            soc.children.push(memory);
+            root.children.push(soc);
+            assert!(
+                arm_memory_base(&fixture_dtb(&root))
+                    .unwrap_err()
+                    .to_string()
+                    .contains("enabled root banks without overrides")
+            );
+
+            let mut root = memory_root(1);
+            root.children[0].remove(PROP_REG);
+            assert!(
+                arm_memory_base(&fixture_dtb(&root))
+                    .unwrap_err()
+                    .to_string()
+                    .contains("memory node has no reg")
+            );
+            let mut root = memory_root(2);
+            root.children[0].set(
+                PROP_REG,
+                &[0x100000000u64.to_be_bytes(), 0x100000u64.to_be_bytes()].concat(),
+            );
+            assert!(
+                arm_memory_base(&fixture_dtb(&root))
+                    .unwrap_err()
+                    .to_string()
+                    .contains("no 32-bit memory bank")
             );
         }
 

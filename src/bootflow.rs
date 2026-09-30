@@ -1587,6 +1587,14 @@ fn fdtdir_candidate_paths(compatibles: &[String]) -> Vec<PathBuf> {
                 &mut paths,
                 PathBuf::from(&soc.vendor).join(format!("{}-{}.dtb", soc.name, board.name)),
             );
+            // ARM32 DTBs can retain the SoC vendor in the filename, whether
+            // installed flat or copied with the vendor directory from the build.
+            let filename = format!(
+                "{}-{}-{}-{}.dtb",
+                soc.vendor, soc.name, board.vendor, board.name
+            );
+            push_unique_path(&mut paths, PathBuf::from(&filename));
+            push_unique_path(&mut paths, PathBuf::from(&soc.vendor).join(filename));
         }
     }
 
@@ -1880,12 +1888,16 @@ fn boot_entry_id_matches(filename: &str, preferred: &str) -> bool {
 }
 
 fn architecture_matches(value: Option<&str>) -> bool {
+    architecture_matches_for_target(value, std::env::consts::ARCH)
+}
+
+fn architecture_matches_for_target(value: Option<&str>, target_arch: &str) -> bool {
     let Some(value) = value else {
         return true;
     };
     matches!(
-        value.trim().to_ascii_lowercase().as_str(),
-        "aa64" | "aarch64" | "arm64"
+        (target_arch, value.trim().to_ascii_lowercase().as_str()),
+        ("arm", "arm") | ("aarch64", "aa64" | "aarch64" | "arm64")
     )
 }
 
@@ -2253,11 +2265,53 @@ mod tests {
         let _ = fs::remove_dir_all(&root);
         fs::create_dir_all(&qcom).unwrap();
         File::create(&dtb).unwrap();
+        for fallback in [
+            "qcom/sdm845-fajita.dtb",
+            "qcom-sdm845-oneplus-fajita.dtb",
+            "qcom/qcom-sdm845-oneplus-fajita.dtb",
+            "qcom/sdm845.dtb",
+        ] {
+            File::create(root.join(fallback)).unwrap();
+        }
 
         assert_eq!(
             select_fdtdir_dtb(
                 &root,
                 &["oneplus,fajita".to_string(), "qcom,sdm845".to_string()]
+            ),
+            Some(dtb)
+        );
+
+        fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[test]
+    fn selects_arm32_fdtdir_dtb_from_flat_tree() {
+        assert_selects_arm32_fdtdir_dtb("flat", "qcom-msm8960-samsung-expressatt.dtb");
+    }
+
+    #[test]
+    fn selects_arm32_fdtdir_dtb_from_unflattened_tree() {
+        assert_selects_arm32_fdtdir_dtb("unflattened", "qcom/qcom-msm8960-samsung-expressatt.dtb");
+    }
+
+    fn assert_selects_arm32_fdtdir_dtb(layout: &str, relative_dtb: &str) {
+        let root = std::env::temp_dir().join(format!(
+            "pocketboot-arm32-fdtdir-{layout}-test-{}",
+            std::process::id()
+        ));
+        let dtb = root.join(relative_dtb);
+        let _ = fs::remove_dir_all(&root);
+        fs::create_dir_all(root.join("qcom")).unwrap();
+        File::create(&dtb).unwrap();
+        // A generic SoC DTB or another board must not hide the board+SoC match.
+        File::create(root.join("qcom/msm8960.dtb")).unwrap();
+        File::create(root.join("qcom-msm8960-samsung-ks02.dtb")).unwrap();
+
+        assert_eq!(
+            select_fdtdir_dtb(
+                &root,
+                &["samsung,expressatt".to_string(), "qcom,msm8960".to_string()]
             ),
             Some(dtb)
         );
@@ -2366,11 +2420,40 @@ mod tests {
 
     #[test]
     fn recognizes_arm64_architecture_names() {
+        assert!(architecture_matches_for_target(None, "aarch64"));
+        for value in ["aa64", "AA64", "aarch64", "arm64", " ARM64 "] {
+            assert!(architecture_matches_for_target(Some(value), "aarch64"));
+        }
+        for value in ["arm", "x64", ""] {
+            assert!(!architecture_matches_for_target(Some(value), "aarch64"));
+        }
+    }
+
+    #[test]
+    fn recognizes_arm32_architecture_name() {
+        assert!(architecture_matches_for_target(None, "arm"));
+        for value in ["arm", "ARM", " arm "] {
+            assert!(architecture_matches_for_target(Some(value), "arm"));
+        }
+        for value in ["aa64", "aarch64", "arm64", "x64", ""] {
+            assert!(!architecture_matches_for_target(Some(value), "arm"));
+        }
+    }
+
+    #[test]
+    fn architecture_matching_uses_the_build_target() {
         assert!(architecture_matches(None));
-        assert!(architecture_matches(Some("aa64")));
-        assert!(architecture_matches(Some("AA64")));
-        assert!(architecture_matches(Some("aarch64")));
-        assert!(!architecture_matches(Some("x64")));
+        assert_eq!(architecture_matches(Some("arm")), cfg!(target_arch = "arm"));
+        for value in ["aa64", "aarch64", "arm64"] {
+            assert_eq!(
+                architecture_matches(Some(value)),
+                cfg!(target_arch = "aarch64")
+            );
+        }
+        assert!(architecture_matches_for_target(None, "x86_64"));
+        for value in ["arm", "aa64", "aarch64", "arm64"] {
+            assert!(!architecture_matches_for_target(Some(value), "x86_64"));
+        }
     }
 
     #[test]
