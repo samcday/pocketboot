@@ -94,8 +94,13 @@ not the nominal header address `0x80080000`.
 The current diagnostic command line is:
 
 ```text
-console=tty0 panic=-1 loglevel=8 ignore_loglevel lk2nd.pass-simplefb lk2nd.pass-ramoops clk_ignore_unused pd_ignore_unused regulator_ignore_unused
+console=tty0 panic=-1 deferred_probe_timeout=5 loglevel=8 ignore_loglevel lk2nd.pass-simplefb lk2nd.pass-ramoops clk_ignore_unused pd_ignore_unused regulator_ignore_unused
 ```
+
+`deferred_probe_timeout=5` makes the built-in-only kernel report outstanding
+probe reasons before the current no-UDC failure exits `/init`. The default
+zero timeout did not schedule that diagnostic work. This does not disable
+firmware dependency checking or supply a missing provider.
 
 `panic=-1` requests immediate reboot on panic instead of the default
 `panic=0` indefinite wait used by the first four trials. It is not a watchdog

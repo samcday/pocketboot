@@ -644,6 +644,35 @@ it through stock fastboot and would remove this empty-boot fallback; restoration
 has not been performed or tested. The pre-existing Android decryption/password
 issue is separate from restoring the boot image.
 
+### Deferred-probe evidence
+
+Adding only `deferred_probe_timeout=5` exposed the outstanding suppliers before
+the init-exit panic. Kernel, DTB and initramfs bytes were unchanged. The
+4,784,128-byte image has SHA-256
+`25b8a7b1a86ebaa9a371c7c4a08efeec0319358feea7d8546e1338f8f408f58d`.
+The automatic loop returned to stock fastboot in 15.52 seconds and completed
+RAM-log retrieval by 16.74 seconds. All 33 record headers decode; the private
+raw capture has SHA-256
+`1740df71a496921d785ea29a15084a6475cb97f613ac5f5d9c7688c786b727d0`.
+
+The log identifies the actual dependency loop, rather than a guessed missing
+regulator driver:
+
+```text
+[    5.347368] platform remoteproc: deferred probe pending: qcom-rpm-proc: Failed to register smd-edge
+[    5.374193] platform b011000.mailbox: deferred probe pending: platform: wait for supplier /remoteproc/smd-edge/rpm-requests/clock-controller
+[    5.401534] platform 6c000.phy: deferred probe pending: platform: wait for supplier /remoteproc/smd-edge/rpm-requests/regulators-0/l13
+[    5.429437] platform 78db000.usb: deferred probe pending: platform: supplier 6c000.phy not ready
+[    5.443715] platform 7824900.mmc: deferred probe pending: platform: wait for supplier /remoteproc/smd-edge/rpm-requests/regulators-0/l5
+[    5.471880] platform 7864900.mmc: deferred probe pending: platform: wait for supplier /remoteproc/smd-edge/rpm-requests/regulators-0/l12
+```
+
+RPM needs APCS mailbox channel 0; APCS's declared `ref` input points back to
+RPM's clock controller. RPM-managed supplies then block the USB PHY and both
+SDHCI controllers. The next change must address this specific relationship,
+not globally disable firmware dependency checking. LK2nd remained responsive
+after retrieving this trial's evidence.
+
 ## First-boot milestones
 
 Keep unlock/recovery, the first mainline boot, and the later PocketFed install

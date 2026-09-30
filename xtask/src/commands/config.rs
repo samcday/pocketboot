@@ -845,6 +845,7 @@ mod tests {
         let args = bootimg.cmdline.split_whitespace().collect::<Vec<_>>();
         assert!(args.contains(&"lk2nd.pass-ramoops"));
         assert!(!args.contains(&"lk2nd.pass-ramoops=zap"));
+        assert!(args.contains(&"deferred_probe_timeout=5"));
         let panic_args = args
             .iter()
             .copied()
