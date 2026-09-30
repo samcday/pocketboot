@@ -1,0 +1,93 @@
+# Review audit: USB role workaround and built-in probe timeout
+
+Repository: samcday/pocketboot. Annotated commit:
+f52efe969d181c155ba4653753d296adee5b3a8f (normal USB/eMMC startup).
+Reviewed again at a7d0397cc3e01e4fe2bb1bb9aa667bc88fcc8006.
+Hardware evidence below is from the recorded Lenovo TB-X304F / APQ8017
+trials, not a new trial. The review itself was read-only source inspection.
+Kernel pin: pem120/linux-msm89x7 a51b91b503307d35902447dd1f90db765372cf3b.
+
+## USB chronology and what the workaround really does
+
+Commands used to establish ordering:
+
+    git show 4f6fa88:patches/kernel/msm8917/0002-arm64-dts-qcom-tbx304x-pocketboot.patch
+    git diff 5854328 f52efe9 -- patches/kernel/msm8917/0002-arm64-dts-qcom-tbx304x-pocketboot.patch
+
+The first target commit 4f6fa88 already changed dr_mode from otg to peripheral
+and removed both charger extcon and host vbus-supply. The usb-role-switch
+property and normal userspace device-role request were added much later in
+f52efe9, after controlled diagnostics. It was not an OTG-only failure fixed
+by selecting peripheral mode for the first time.
+
+After the RPM and PM_OPP fixes, the first bounded diagnostic logged successful
+UDC binding but not-attached / UNKNOWN speed. The next controlled image added
+the role-switch interface and requested device role; verified PocketBoot USB
+appeared at 5.471 s from the host Linux boot invocation. That trial changed
+both the DT interface and the software request; it does not establish a
+fundamental need for userspace role selection on this hardware.
+
+Exact-pin source findings:
+
+- core.c:1173-1174 initializes the gadget for dr_mode=peripheral;
+  core.c:649-668 already chooses the gadget when that is the only role.
+  Static role selection therefore is not the missing part.
+- ci_handle_vbus_change in otg.c:131-145 still gates gadget connection on
+  B-session-valid for an OTG-capable controller. is_otg is derived from
+  hardware capabilities (core.c:975-988), not cleared just because dr_mode
+  is peripheral. Without an external source, hw_read_otgsc reads native BSV.
+- Adding usb-role-switch changes hw_read_otgsc: otg.c:38-54 replaces BSV
+  with the software cable.connected state instead of the hardware value.
+- ci_usb_role_switch_set(USB_ROLE_DEVICE), core.c:629-645, sets that
+  software VBUS-connected state true and invokes the interrupt handler.
+- The MSM reset callback, ci_hdrc_msm.c:117-122, also enables the hardware
+  session-valid override when an extcon or role switch exists.
+
+References:
+https://github.com/pem120/linux-msm89x7/blob/a51b91b503307d35902447dd1f90db765372cf3b/drivers/usb/chipidea/core.c#L616-L668
+https://github.com/pem120/linux-msm89x7/blob/a51b91b503307d35902447dd1f90db765372cf3b/drivers/usb/chipidea/core.c#L1159-L1216
+https://github.com/pem120/linux-msm89x7/blob/a51b91b503307d35902447dd1f90db765372cf3b/drivers/usb/chipidea/otg.c#L29-L74
+https://github.com/pem120/linux-msm89x7/blob/a51b91b503307d35902447dd1f90db765372cf3b/drivers/usb/chipidea/otg.c#L131-L145
+https://github.com/pem120/linux-msm89x7/blob/a51b91b503307d35902447dd1f90db765372cf3b/drivers/usb/chipidea/ci_hdrc_msm.c#L117-L124
+
+Conclusion: this is a forced session-valid/VBUS bootstrap workaround after
+removing the charger/extcon path, not a demonstrated requirement of fixed
+peripheral mode. The removal is a plausible explanation for losing the
+normal detection path; native BSV, wiring and PMIC detection were not measured,
+so the root cause is not closed. A proper connector/VBUS provider or a justified,
+device-scoped kernel-glue fix should replace it before claiming general support.
+Do not keep usb-role-switch but simply remove the userspace write: that would
+leave the new software cable state unasserted. No new kernel/DT/runtime change
+or device boot was made during this review.
+
+## MODULES=n and deferred probing
+
+The pinned dd.c:260-264 defaults the timeout to 10 with modules and zero
+without. dd.c:291-294 unconditionally returns -ENODEV after initcalls for a
+no-modules kernel, even when a positive timeout was explicitly requested.
+The RPM SMD channel discovers and populates provider devices asynchronously;
+all drivers being built in does not mean all their devices already exist.
+
+The recorded controlled re-probe of unbound 7824900.mmc after RPMPD bound
+found HS400 eMMC and all 48 GPT partitions. Patch 0007 permits -EPROBE_DEFER
+while a positive requested timeout remains instead of abandoning the
+consumer at that point. The actual helper passed a compiled modules on/off,
+pre/post-initcalls, timeout -1/0/5 matrix in the original bring-up.
+
+This is narrower than making no-modules behavior equivalent to modules:
+dd.c:356-372 still calls fw_devlink_drivers_done and fw_devlink_probing_done
+at the late initcall with MODULES=n. Patch 0007 does not change those calls.
+core.c:1767-1811 shows the corresponding link relaxation and sync_state
+processing; the strict/timeout sync-state policy is separately configurable.
+
+References:
+https://github.com/pem120/linux-msm89x7/blob/a51b91b503307d35902447dd1f90db765372cf3b/drivers/base/dd.c#L260-L303
+https://github.com/pem120/linux-msm89x7/blob/a51b91b503307d35902447dd1f90db765372cf3b/drivers/base/dd.c#L345-L376
+https://github.com/pem120/linux-msm89x7/blob/a51b91b503307d35902447dd1f90db765372cf3b/drivers/base/core.c#L1674-L1704
+https://github.com/pem120/linux-msm89x7/blob/a51b91b503307d35902447dd1f90db765372cf3b/drivers/base/core.c#L1757-L1811
+
+Treat 0007 as a bounded bring-up workaround, not a comprehensive driver-core
+policy fix. A useful follow-up control is MODULES=y with the same drivers
+built in and without 0007, followed by a reproducer for asynchronously created
+built-in suppliers. An upstream submission needs driver-core review as well
+as the board/RPM context. Assistance remains disclosed with Assisted-by: LLM.
