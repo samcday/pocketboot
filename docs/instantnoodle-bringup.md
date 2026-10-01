@@ -69,6 +69,11 @@ substitute for choosing the intended CI run.
 
 ## First hardware test
 
+For a locked IN2017, start with the
+[local-agent read-only handoff](instantnoodle-agent-handoff.md), not the boot
+command below. Device discovery and unlock-eligibility queries are a separate
+session from unlocking or testing this image.
+
 Before attempting a boot:
 
 1. Confirm the exact model is an `instantnoodle`, its installed firmware,
