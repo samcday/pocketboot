@@ -795,3 +795,61 @@ RAM-boot the saved LK2nd image, verify lk2nd:version/model, then RAM-boot the sa
 PocketBoot lab image. Re-upload the firmware pair and SquashFS and recreate the bind
 mounts from the preceding procedure. No flashing, erasing, or kexec is required.
 A hard hang may still require physical buttons; no automated recovery guarantee is made.
+
+7cbd101743532a883eef8b7747aab915b70a0cea2ab4679f19a0578ba04030ab  /run/pocketboot-a308-lab.img
+7f85abf8e207d794b795b2622daa01f470a2ac8b1d357557dfbdad59785b3591  /run/lk2nd-tbx304f.img
+72ccdffc9ff01c2926be791149eecf6d02aaef3e0551bf758cf5af9108407a56  /run/mesa-smoke.squashfs
+rootfs / rootfs rw,size=1000324k,nr_inodes=250081 0 0
+proc /proc proc rw,relatime 0 0
+sysfs /sys sysfs rw,relatime 0 0
+devtmpfs /dev devtmpfs rw,relatime,size=1000324k,nr_inodes=250081,mode=755 0 0
+devpts /dev/pts devpts rw,relatime,mode=600,ptmxmode=000 0 0
+tmpfs /run tmpfs rw,relatime,mode=755 0 0
+configfs /sys/kernel/config configfs rw,relatime 0 0
+gadgetry-most-foul0-0 /dev/ffs-gadgetry-most-foul0-0 functionfs rw,relatime 0 0
+gadgetry-most-foul0-1 /dev/ffs-gadgetry-most-foul0-1 functionfs rw,relatime 0 0
+/dev/loop0 /run/mesa squashfs ro,relatime,errors=continue 0 0
+devtmpfs /run/mesa/dev devtmpfs rw,relatime,size=1000324k,nr_inodes=250081,mode=755 0 0
+proc /run/mesa/proc proc rw,relatime 0 0
+sysfs /run/mesa/sys sysfs rw,relatime 0 0
+tmpfs /run/mesa/run tmpfs rw,relatime,mode=755 0 0
+tmpfs /run/mesa/tmp tmpfs rw,relatime,mode=755 0 0
+MemTotal:        2003212 kB
+MemFree:         1898876 kB
+MemAvailable:    1914556 kB
+Buffers:               0 kB
+Cached:            73816 kB
+SwapCached:            0 kB
+Active:            46308 kB
+Inactive:          28920 kB
+Active(anon):      26308 kB
+Inactive(anon):    17996 kB
+Active(file):      20000 kB
+Inactive(file):    10924 kB
+Unevictable:        3036 kB
+Mlocked:               0 kB
+SwapTotal:             0 kB
+SwapFree:              0 kB
+Dirty:                 0 kB
+Writeback:             0 kB
+AnonPages:          4564 kB
+Mapped:             2128 kB
+Shmem:             42892 kB
+KReclaimable:       4392 kB
+Slab:              13516 kB
+SReclaimable:       4392 kB
+SUnreclaim:         9124 kB
+KernelStack:        1600 kB
+PageTables:          428 kB
+SecPageTables:        40 kB
+NFS_Unstable:          0 kB
+Bounce:                0 kB
+WritebackTmp:          0 kB
+CommitLimit:     1001604 kB
+Committed_AS:      75016 kB
+VmallocTotal:   135288315904 kB
+VmallocUsed:        2624 kB
+VmallocChunk:          0 kB
+Percpu:              272 kB
+Balloon:               0 kB
+on
