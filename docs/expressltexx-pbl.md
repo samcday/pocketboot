@@ -1,8 +1,10 @@
-# Expressltexx PBL investigation
+# Expressltexx PBL extraction
 
-The first experiment is a read of a candidate boot-ROM address from a
-diagnostic Pocketboot kernel. This is not an EDL programmer, a secure-boot
-bypass, or a replacement for SBL1. No ROM extraction is claimed yet.
+The PBL window at physical `0x00000000–0x0001ffff` was successfully read
+through `/dev/mem` on the inspected MSM8930 handset. Two complete 128 KiB
+reads agreed byte-for-byte. No EDL programmer or TrustZone exploit was
+needed. This does not bypass secure boot or establish that an unsigned
+SBL1 will execute.
 
 ## Target and address evidence
 
@@ -11,8 +13,7 @@ SoC ID 116, revision 1.2. Its bootloader command line identifies
 `I8730XWANE1`. Do not substitute Expressatt/MSM8960 images: those are
 different devices even though some firmware source paths say `msm8960`.
 
-The initial candidate is physical `0x00000000`, with a possible 128 KiB
-window. This is a hypothesis for MSM8930, supported by:
+The initial address-zero, 128 KiB hypothesis came from:
 
 - Qualcomm's [APQ8064 datasheet](https://www.qualcomm.com/content/dam/qcomm-martech/dm-assets/documents/snapdragon_600_apq_8064_data_sheet.pdf),
   section 3.1.1 and figure 4-1: ARM7 RPM is the primary boot processor,
@@ -23,6 +24,30 @@ window. This is a hypothesis for MSM8930, supported by:
 Do not use a broad tool configuration's `0x00100000` ROM range blindly:
 this handset's live RPM interface occupies `0x00108000–0x00108fff`.
 Do not sweep MMIO looking for executable-looking bytes.
+
+## Validated result
+
+On 2026-10-01 UTC, the diagnostic kernel RAM-booted successfully and the
+reader acquired a word, a page, then two identical full-window dumps.
+Reset vectors, coherent startup/data-initialization code, PBL source
+filenames, and the `BOOT ROM VERSION: 2.0` / `QHSUSB VERSION: 02.02.07`
+strings identify a Qualcomm PBL image linked for zero.
+
+The inspected startup copies data from this window into separate working
+memory. That supports the ROM interpretation, but
+read consistency alone cannot distinguish silicon ROM from an identical
+alias or mirror. Preserve the whole captured window, including zero
+padding; do not claim this exhausts every ROM on the SoC.
+
+The full persistent BOOT partition matched its pre-test backup. The phone
+was then rebooted into its original Pocketboot kernel, with ADB and
+fastboot working and `/dev/mem` absent again. No flash-writing commands or
+manual security-register writes were issued.
+
+The detailed acquisition/build identities, hashes, instruction offsets,
+transport observations and restoration checks are in `refs/notes/evidence`
+on the commit recording this result. The earlier preparation evidence is
+on `fc27b695f5bf04d5b567c3d6172601c98326deaf`.
 
 ## Separate diagnostic build
 
@@ -76,32 +101,59 @@ read. Confirm the USB serial and the working persistent BOOT backup before
 
 After the handoff, verify the diagnostic kernel release, SoC ID, CPU 0-only
 state, correct RAM map, `/chosen/linux,booted-from-kexec`, and `/dev/mem`.
-Copy the helper into the RAM-backed `/run` directory.
+Copy the helper into the RAM-backed `/run` directory and verify a complete,
+byte-identical readback before executing it. The tested initramfs's ADB
+upload reported completion but did not exit; a subsequent fastboot
+`oem cat:/run/physread` / `get_staged` readback verified the upload.
+Do not treat a progress message as proof that a transfer succeeded.
 
 The first request is **one aligned word**, `physread 0x0 4`. Read-only
 does not mean crash-proof: a bus firewall or inaccessible address can
 fault, hang or reset the phone. Stop on failure rather than trying
 neighbouring addresses or changing security registers.
 
-Pocketboot's raw ADB exec transport combines stdout and stderr and does
-not carry a shell-v2 exit status. Stage the output, stderr and exit status
-as separate RAM files, then retrieve them. For example, after setting
+The tested acquisition used fastboot's staged shell output. After setting
 `serial` to the verified handset and installing `/run/physread`:
 
 ```sh
-adb -s "$serial" exec-out \
-    '/run/physread 0x0 4 >/run/rom-probe.bin 2>/run/rom-probe.err; echo $? >/run/rom-probe.status'
-adb -s "$serial" exec-out 'cat /run/rom-probe.status /run/rom-probe.err'
-adb -s "$serial" pull /run/rom-probe.bin first-word.bin
+fastboot -s "$serial" oem 'shell:chmod 0755 /run/physread'
+fastboot -s "$serial" oem 'shell:/run/physread 0x0 4'
+fastboot -s "$serial" get_staged first-word.bin
 wc -c first-word.bin
 ```
 
-Require remote status zero and exactly four output bytes. A successful
-word read is not a dump: only then consider a page, followed by the
-corroborated ROM window. Repeat full reads and compare sizes and hashes;
-inspect vectors, instruction-set transitions and internal references.
-Stable zeros or a plausible disassembly alone do not establish mask-ROM
-provenance.
+Require `shell exited 0` and exactly four output bytes. Shell stderr is
+also staged: on failure, the staged output may be an error message, not
+ROM bytes. A successful word read is not a dump: inspect it, then consider
+a page and finally the corroborated window:
+
+```sh
+fastboot -s "$serial" oem 'shell:/run/physread 0x0 0x1000'
+fastboot -s "$serial" get_staged first-page.bin
+fastboot -s "$serial" oem 'shell:/run/physread 0x0 0x20000'
+fastboot -s "$serial" get_staged rom-window-a.bin
+fastboot -s "$serial" oem 'shell:/run/physread 0x0 0x20000'
+fastboot -s "$serial" get_staged rom-window-b.bin
+wc -c first-page.bin rom-window-a.bin rom-window-b.bin
+cmp rom-window-a.bin rom-window-b.bin
+sha256sum rom-window-a.bin rom-window-b.bin
+```
+
+Every operation must succeed; expected sizes are 4096, 131072 and 131072.
+Inspect vectors and internal references as well as comparing bytes.
+Stable zeros or plausible disassembly alone do not establish provenance.
+
+Keep each fastboot command, including `oem `, within 64 bytes. For longer
+scripts use `fastboot stage script.sh` followed by
+`fastboot oem shell-staged`, both with the selected serial. An overlong
+post-acquisition inventory command left fastboot unresponsive in this
+run; ADB remained available and a normal reboot restored both interfaces.
+This is a transport observation, not a PBL read failure.
+
+If using raw ADB exec instead, it combines stdout/stderr and does not
+carry shell-v2 exit status. Capture binary output, stderr and exit status
+into separate RAM files before retrieving them; do not call a raw exec
+byte stream a successful dump without those checks.
 
 Keep raw dumps and build products ignored. Record commands, source/build
 identities, addresses, lengths, hashes, relevant logs and interpretation
