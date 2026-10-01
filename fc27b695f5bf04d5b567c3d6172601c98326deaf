@@ -191,3 +191,12 @@ Only after inspecting the first result should a page/full-window dump be
 considered. Stable zeros or plausible disassembly alone are insufficient
 ROM provenance. Keep raw binaries local; record any future acquisition
 address/size/hash and repeated-read evidence in this notes ref.
+
+## Final artifact-size correction (2026-10-01T23:35:41Z)
+
+The final reader with SHA256
+0d857360bd2c0289acd0e6d9d583f5f754757b69c7471a72ae1a60e94d2e45db
+is 362232 bytes, not 361752. The smaller size belonged to the earlier
+pre-review binary (SHA256 e9697b2514c940a24dc4b1b849626056475bf6a9a42bf3c41182d79308ca2ae7).
+The final reader hash and test results above are correct. The local build
+and preparation pass was completed on 2026-10-01 UTC.
