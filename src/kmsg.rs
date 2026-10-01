@@ -31,6 +31,8 @@ pub(crate) fn init_tracing(cmdline: &KernelCommandLine) {
             .with_target(true)
             .with_writer(KmsgMakeWriter);
 
+        #[cfg(feature = "blob-wrangler")]
+        let _ = tracing_log::LogTracer::init();
         let _ = tracing_subscriber::registry()
             .with(level)
             .with(layer)
