@@ -1,0 +1,193 @@
+# Expressltexx PBL probe preparation — no ROM read yet
+
+Repository: https://github.com/samcday/pocketboot
+Commit: fc27b695f5bf04d5b567c3d6172601c98326deaf
+Starting branch revision: 764a1d48a63c5af205824a5cd83eb96ee3224b12
+Scope: read-only handset inventory and firmware reads; isolated diagnostic
+kernel and Rust reader preparation. No reboot, kexec load, flash write,
+physical-memory read, or secure-world exploit was attempted in this pass.
+
+## Handset and existing boot chain
+
+USB serial selected on every command: 00001EB100006FAB
+USB manufacturer/product: pocketboot; 1d6b:0104; fastboot, ADB and mass-storage
+interfaces. Root ADB exec shell works.
+DT model: Samsung Galaxy Express GT-I8730
+DT compatible: samsung,expressltexx / qcom,msm8930
+socinfo: MSM8930, soc_id 116, revision 1.2
+Bootloader identifier from command line: I8730XWANE1
+Running kernel: Linux 7.1.0-rc3+ #2 Wed Sep 30 01:05:24 UTC 2026 armv7l
+CPU possible/online: 0 / 0
+/proc/iomem includes:
+  00108000-00108fff : 108000.rpm rpm@108000
+  80200000-889fffff : System RAM
+    80208000-807ddfff : Kernel code
+Other RAM banks: 8e800000-8effffff, 8f800000-8fafffff,
+8fe00000-8fefffff, 90000000-bfffffff.
+
+No /dev/mem, no mem entry in /sys/class/mem and no read_mem/mmap_mem/open_mem
+implementation in kallsyms. No /proc/modules or /proc/config.gz. Symbols:
+  c003d588 T sys_ni_syscall
+  c003d588 W sys_init_module
+  c003d588 W sys_finit_module
+  c003d588 W sys_kexec_file_load
+  c009d2dc T sys_kexec_load
+  c0014a18 T machine_kexec
+/sys/kernel/kexec_loaded = 0
+Conclusion: the running kernel lacks devmem/module support, but has legacy
+ARM kexec. Creating a device node or uploading a module cannot enable devmem.
+
+The attached branch already contains the ARM32 implementation from PR47 and
+the Expressltexx configuration from PR48. Previous actual hardware handoffs
+are documented in refs/notes/evidence on cf2ebd6e790b13a1eef86a9d02c8e2caf9cb76ce.
+Those runs predate the latest loader review fixes. This preparation does not
+claim new hardware validation of those fixes.
+
+## Read-only firmware provenance
+
+Named partitions were identified through /sys/class/block/*/uevent before
+reading them. No EFS, modem-state or userdata was read.
+
+BOOT (/dev/mmcblk0p7, 10485760 bytes) was read with:
+  adb -s 00001EB100006FAB exec-out 'cat /dev/mmcblk0p7' > boot-before.img
+SHA256 5097189bc623493f9c8ffcbdff08fa407cc087a2673ccabac9e148f93c1ddffd
+This exactly matches the full persistent BOOT readback in cf2ebd6's evidence.
+It is retained locally as target/pbl-lab/boot-before.img, not published.
+
+SBL1 (/dev/mmcblk0p2, 131072 bytes):
+SHA256 66c583325905cec3c13e357d9051ec909a2bbe80f61ee202048bae87d5538a42
+Two reads across the inspection/preparation passes agree. MBN header:
+code offset 0x50, load 0x2a000000, code length 0x168cc, signature length
+0x100, certificate region length 0x1800. Presence of those fields does not
+prove whether authentication is enabled by this handset's fuses.
+Source-path strings include secboot3/hw/msm8960/sbl1/sbl1_mc.c,
+boot_pbl_v1.c and boot_pbl_authenticator.c. The msm8960 path is not chip ID.
+Initial ARM disassembly preserves incoming r0, sets SP=0x2c000 and branches
+to 0x2a0111b4. The continuation passes the saved r0 to 0x2a01133c.
+This is SBL1 analysis, not a PBL acquisition.
+
+Initial inspection also read these named firmware partitions into temporary
+scratch (not durable backups):
+  sbl2 262144 bytes f8049568774f4835704519a673d625a20429e47b89094da745a600ca98cb3c83
+  sbl3 524288 bytes ee097da142bb880864fd5f3808a9dd772096ebdc960c91081428bb886aec94a9
+  aboot 2097152 bytes 5d2772a0e7b7c9a30ff72a76617620539f1bef3f55d7f3e3c87228e6562f9996
+  rpm 524288 bytes 157ac0122f3158b298cf735ed7a001cdde1b98d3d635ae33b472c0d4efec58e8
+  tz 524288 bytes 6635c8e8223434531b67ac01c1b1714f7d3e4fae17d1684cfc7ed699bacedddd
+Their MBN load addresses: SBL2 2e000000, SBL3 8ff00000, aboot 88e00000,
+RPM 00020000, TZ 2a000000.
+
+## Address hypothesis and prior art
+
+Candidate only: physical zero, possible length 0x20000. Qualcomm's APQ8064
+LM80-P0598-1 Rev B datasheet section3.1.1 says ARM7 RPM is the primary boot
+processor; figure4-1 places its 128KiB ROM at zero. This is related-chip
+primary documentation, not proof of MSM8930 readability.
+https://www.qualcomm.com/content/dam/qcomm-martech/dm-assets/documents/snapdragon_600_apq_8064_data_sheet.pdf
+
+Contemporaneous SCH-I535/MSM8960 viewmem extraction report:
+https://xdaforums.com/t/r-d-unlock-bootloaders.1769411/post-30084661
+https://xdaforums.com/t/r-d-unlock-bootloaders.1769411/post-30086307
+No exact MSM8930/Express ROM binary with authenticated chip revision/address/
+size/hash provenance was found. Broad edl APQ806x/MSM8930 configuration at
+0x100000 overlaps this handset's live RPM interface at108000 and is not a
+sufficient basis for probing that range.
+
+## Diagnostic kernel build and verification
+
+Normal tracked kernel configs are unchanged. Output is isolated under
+  target/pbl-lab/build/kernel/qcom/msm8930-samsung-expressltexx
+Kernel source: samcday/linux 3bc07d096bddd33218b8c13b9fa30ffdaba3c050
+Downloaded pinned codeload tarball SHA256:
+  9e27c480d2dae79073c1cb1baafd03e6b14381f1a5d3374868a85af10de3b5de
+Extracted inside this worktree at target/pbl-lab/linux; no external kernel
+checkout was changed. Initial read-only source mount failed because Linux's
+merge_config.sh creates .tmp.config in its working directory; the second
+build permitted temporary files in this disposable source extraction.
+
+CI image:
+  ghcr.io/samcday/pocketboot-ci:df-308fa9a36a632a0c6407cd5e8b241765ff35490924769332169de1459bbf82e8
+Local image ID0553ebc6e821, same toolchain tag as the previous hardware run.
+LLVM=-19, ARCH=arm; eight build CPUs.
+
+The embedded gzip-compressed CPIO was extracted from the actual working
+BOOT zImage and matched byte-for-byte the previously recorded initramfs:
+  2331212 bytes
+  SHA256 02a6c6ff986c40fbda590c46fd9d2a6ab0eb037bce17c37a3c945b26255300ee
+This retains the existing hardware-tested userspace from the earlier CI
+image, rather than silently replacing it with the current branch's loader.
+
+Baseline build in the CI container, workspace mounted at its same path:
+  CARGO_TARGET_DIR="$PWD/target/pbl-lab/build" LLVM=-19 \
+    cargo xtask build qcom/msm8930-samsung-expressltexx \
+    "$PWD/target/pbl-lab/linux" \
+    --initrd "$PWD/target/pbl-lab/working-initrd.cpio"
+
+Saved the generated baseline .config, then:
+  scripts/config --file "$out/.config" --enable DEVMEM --enable IKCONFIG \
+    --enable IKCONFIG_PROC --set-str LOCALVERSION '-pbl'
+  make -C "$kernel" O="$out" ARCH=arm LLVM=-19 olddefconfig
+  make -C "$kernel" O="$out" ARCH=arm LLVM=-19 -j8 \
+    zImage qcom/qcom-msm8930-samsung-expressltexx.dtb
+  cargo xtask bootimg qcom/msm8930-samsung-expressltexx
+
+Effective config diff:
+  DEVMEM n -> y
+  IKCONFIG n -> y
+  IKCONFIG_PROC y (new)
+  LOCALVERSION "" -> "-pbl"
+  STRICT_DEVMEM n (new, ARM32 default)
+  EXCLUSIVE_SYSTEM_RAM y removed as a dependency consequence
+SMP remains n; PHYS_OFFSET80200000; AUTO_ZRELADDR n; KEXEC y.
+Changing kernel policy does not bypass hardware access restrictions.
+
+Produced target/pbl-lab/boot-pbl.img:
+  4415488 bytes
+  SHA256 8181e933cd8f8415fe8be0c670c2f98781efd4bc524490cd38fce57b89384f61
+  Kernel release 7.1.0-rc3-pbl
+Verified package payload exactly equals zImage4389808 bytes + DTB19667 bytes;
+2048-byte boot pages, load80208000, one-byte external ramdisk, explicit UART
+command line. Embedded CPIO equals working-initrd.cpio. Embedded IKCONFIG
+equals the final diagnostic .config, SHA256:
+  78c92ec8cbcfc0284dcee70a86f63958795d3106804bf7b54f75c7aec0196040
+
+check-decompressor.py on compressed/vmlinux:
+  BSS/gap24 bytes, stack4096 bytes; relocation code within image
+nm:
+  _start00000000 _edata0042fbb0 _end0042fbc8 zreladdr80208000
+This validates the destination build contract, not a new device handoff.
+
+## Reader tests and inspection
+
+Host cargo test --locked --manifest-path tools/physread/Cargo.toml: 11 pass.
+Same tests for armv7-unknown-linux-musleabihf under qemu-arm: 12 pass,
+including a real memfd-backed mapping crossing a page boundary, and a
+32-bit musl test proving offset2^44 is rejected rather than truncated by mmap2.
+No unit test opens /dev/mem.
+cargo fmt --check, cargo clippy --all-targets -- -D warnings, git diff --check:
+all pass. Static ARMv7 release build passes.
+Reader retained as target/pbl-lab/physread:
+  361752 bytes
+  SHA256 0d857360bd2c0289acd0e6d9d583f5f754757b69c7471a72ae1a60e94d2e45db
+
+A review concern about mmap2 high-offset wrapping was checked against musl:
+https://git.musl-libc.org/cgit/musl/tree/src/mman/mmap.c
+Musl checks OFF_MASK and returns EINVAL before syscall argument narrowing.
+The new ARM32 regression test covers that behavior; no duplicate libc guard
+was added. Output preserves native memory bytes. O_RDONLY|O_SYNC and
+PROT_READ|MAP_SHARED; aligned volatile32 loads; no physical writes.
+
+Pocketboot spawn_raw_command combines stdout/stderr and has no shell-v2 exit
+status. The documented hardware procedure therefore captures binary output,
+stderr and exit status in separate RAM-backed files before host retrieval.
+Otherwise an error message could be mistaken for dump bytes.
+
+## Next action, not yet authorized/executed
+
+RAM-boot the diagnostic image on the selected handset, verify its release,
+SoC/CPU/memory identities and devmem, then read one word at physical zero.
+A read may bus-fault, hang or reset the handset. No broad scans, register
+writes, security-fuse changes or flash writes are part of this experiment.
+Only after inspecting the first result should a page/full-window dump be
+considered. Stable zeros or plausible disassembly alone are insufficient
+ROM provenance. Keep raw binaries local; record any future acquisition
+address/size/hash and repeated-read evidence in this notes ref.
