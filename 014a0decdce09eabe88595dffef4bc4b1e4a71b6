@@ -95,3 +95,43 @@ card present before PocketBoot startup; missing menu entry vs failed launch;
 /proc/partitions and MMC/SDHCI/discovery logs from that tablet. If visible,
 inspect its partition type/filesystem and BLS/extlinux config/payload paths.
 Do not repartition, flip card-detect polarity or add drivers speculatively.
+
+## pem120 SD-card enumeration evidence
+
+Source: pem120's pasted PocketBoot shell output in the shared TB-X304F
+bring-up thread. Command: cat /proc/partitions; dmesg filtered for mmc,
+sdhci, bootflow and settle. His exact image hash/revision remains unknown;
+this note is attached to the current source-audit context, not proof that
+his image was built from this commit. No agent hardware commands performed.
+
+Relevant reported sequence (seconds since kernel start):
+0.638783: SD host mmc1 registers on 7864900.mmc using ADMA 64-bit.
+0.994666: mmc1 detects a high-speed SDHC card.
+1.030702: mmcblk1 registers as a 14.8 GiB disk.
+1.095236: kernel reports mmcblk1 partitions p1 and p2.
+1.691772: PocketBoot's local-flash-settled snapshot explicitly includes
+          mmcblk1 and both partitions.
+4.918035: PocketBoot logs mmcblk1 in its block-device inventory.
+4.977550 / 5.037064: PocketBoot logs mmcblk1p1 and mmcblk1p2.
+/proc/partitions agrees: mmcblk1 15558144 KiB, p1 248832 KiB (243 MiB),
+p2 15307776 KiB (14949 MiB).
+
+Conclusion: SD controller/card detection and partition-table reads work on
+pem120's captured run. The card was present before PocketBoot settled and
+was included in its userspace inventory. Missing SD drivers/DT plumbing and
+late enumeration are not explanations for this captured missing-menu case.
+This does not yet prove filesystem readability, accepted boot-partition
+type, supported configuration/payloads, or successful kexec.
+
+The prior generic late-card hypothesis does not fit this capture. The
+snapshot also includes this SD device despite the source filter for devices
+reporting removable=1; its actual sysfs removable value was not supplied,
+so do not infer why it passed that filter.
+
+Next read-only evidence from the same PocketBoot shell:
+  fdisk -l /dev/mmcblk1
+  blkid /dev/mmcblk1p1 /dev/mmcblk1p2
+Then inspect the boot filesystem's BLS/extlinux config and referenced files.
+The 0xea-vs-0x83 selection rule is a concrete source restriction, but this
+card's type is not established yet. No repartitioning or kernel change is
+justified by the supplied log.
