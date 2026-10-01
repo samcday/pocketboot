@@ -1,0 +1,20 @@
+[package]
+name = "physread"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+# Keep this diagnostic helper independent of pocketboot's UI/build dependencies.
+[workspace]
+
+[[bin]]
+name = "physread"
+path = "src/main.rs"
+
+[dependencies]
+libc = "0.2"
+
+[profile.release]
+panic = "abort"
+opt-level = "s"
+strip = true
