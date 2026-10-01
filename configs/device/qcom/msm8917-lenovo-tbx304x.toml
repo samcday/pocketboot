@@ -32,11 +32,22 @@ FRAMEBUFFER_CONSOLE = true
 # Retain printk output once the RAM-backed pstore console registers.
 PSTORE_CONSOLE = true
 
-# First boot needs no native display/GPU, remoteproc firmware or charger policy.
-# simpledrm consumes the framebuffer created by LK2nd, not the native DSI panel.
-# Use =n for hidden symbols: this tree's strict merge script distinguishes it
-# from "# CONFIG_... is not set" when the effective .config omits a symbol.
-DRM_MSM = { raw = "n" }
+# Render-node lab kernel: leave display ownership with LK2nd/simpledrm.
+IOMMU_SUPPORT = true
+QCOM_IOMMU = true
+DRM_MSM = true
+DRM_MSM_MDP4 = false
+DRM_MSM_MDP5 = false
+DRM_MSM_DPU = false
+FW_LOADER = true
+PM_DEVFREQ = true
+DEVFREQ_GOV_SIMPLE_ONDEMAND = true
+
+# Keep the test userspace compressed when running entirely from RAM.
+SQUASHFS = true
+SQUASHFS_ZSTD = true
+
+# Keep remoteproc, audio, radios and charger policy out of the lab kernel.
 SOUND = false
 WLAN = { raw = "n" }
 BT = false
@@ -66,4 +77,4 @@ dtb_offset = 0
 # Share LK2nd's mapped ramoops window; never use =zap during retained-log trials.
 # Reboot immediately on panic rather than waiting forever; this is not a hang watchdog.
 # Wait for asynchronous RPM suppliers and select device role without charger/extcon.
-cmdline = "console=tty0 panic=-1 deferred_probe_timeout=5 pocketboot.log=info pocketboot.usb_role=device loglevel=8 ignore_loglevel lk2nd.pass-simplefb lk2nd.pass-ramoops clk_ignore_unused pd_ignore_unused regulator_ignore_unused"
+cmdline = "console=tty0 panic=-1 deferred_probe_timeout=5 pocketboot.log=info pocketboot.usb_role=device loglevel=8 ignore_loglevel lk2nd.pass-simplefb lk2nd.pass-ramoops clk_ignore_unused pd_ignore_unused regulator_ignore_unused msm.separate_gpu_kms=1"

@@ -464,6 +464,7 @@ fn configure_busybox(config: &Path, features: &FeatureSet) -> Result<()> {
         "CLEAR",
         "CHMOD",
         "CHOWN",
+        "CHROOT",
         "CP",
         "CUT",
         "DATE",
