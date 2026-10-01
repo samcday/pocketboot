@@ -1,0 +1,764 @@
+# TB-X304F A308 headless rendering evidence
+
+Recorded UTC: 2026-10-01T22:52:17.256147+00:00
+PocketBoot commit: 37f2fd83d1f3839bc53256339b642200e8c6e29f, branch codex/tbx304f-a308-render-lab.
+Base: 014a0decdce09eabe88595dffef4bc4b1e4a71b6.
+Mesa repository/commit: mesa/mesa 022b8b1871d3049a4bb9032cb3e294095f52a2f3, no tracked source changes.
+Mesa contains 5b20e08af15 (HLSQ flush before indirect const loads).
+Device: Sam's Lenovo TB-X304F, APQ8017, ~2 GB RAM, no detected SD card.
+Host: x86_64 Linux; AArch64 GNU kernel cross-compiler and a Debian trixie Mesa cross-build container.
+
+## Conclusions and limits
+
+The render-node harness works. Firmware-backed GPU initialization reports GPU_ID=308,
+chip ID 0x03000620, 128 KiB GMEM. Hardware surfaceless Mesa reports FD306A.
+Two executions of the GLES2 RGBA8888 POT nearest-filter test and one NPOT execution
+passed. Each test performed four image comparisons and logged four 64x64 PNG readbacks.
+All four POT PNG hashes were identical between executions. No new GPU/IOMMU fault or
+hangcheck messages appeared after initialization. This demonstrates rendering and completed
+readback, not just successful DRM open; fences were not separately instrumented.
+This DOES NOT reproduce, resolve, or rule out the reported STK corruption.
+No STK trace replay, full conformance suite, native KMS, thermal policy, runtime-PM fix,
+kexec, cold-boot repeatability, stock-firmware equivalence, or blob-wrangler extraction is claimed.
+Only one PocketBoot RAM boot was tested in this trial. No eMMC filesystem was mounted,
+no device partition was written, and no SD card was formatted or prepared.
+
+## Boot and kernel
+
+Pinned kernel: pem120/linux-msm89x7 a51b91b503307d35902447dd1f90db765372cf3b
+(Linux 7.0.9+), plus all seven patches/kernel/msm8917 patches from this PocketBoot commit.
+Build: CARGO_BUILD_JOBS=8 taskset -c 0-7 cargo xtask build qcom/msm8917-lenovo-tbx304x.
+Validation: cargo test -p xtask passed 53 tests; git diff --check passed.
+Lab changes: DRM_MSM + QCOM_IOMMU + FW_LOADER + devfreq, no MDP4/MDP5/DPU;
+msm.separate_gpu_kms=1; SquashFS/zstd; BusyBox CHROOT. Existing simpledrm and bootstrap
+clock/domain/regulator flags retained. Thermal cooling registration is not enabled and
+logs a boot-time error; this is a short-lived diagnostic profile, not a production kernel.
+
+The tablet initially presented stock fastboot, not LK2nd: empty lk2nd identity variables
+and unknown `oem log`. RAM-loaded LK2nd from samcday/lk2nd CI artifact 11079374883,
+workflow 36675836688, source d457fa10d9f1c061b65abcca2bebeb4473cfa6fe.
+It then reported lk2nd:version=next-d457fa1-20260930 and
+lk2nd:model=Lenovo Tab 4 10 (TB-X304X).
+Commands, with the development unit explicitly selected:
+  fastboot -s "$SERIAL" boot target/lab/build-lk2nd-msm8952/lk2nd.img
+  fastboot -s "$SERIAL" boot target/kernel/qcom/msm8917-lenovo-tbx304x/boot.img
+
+SHA256 7f85abf8e207d794b795b2622daa01f470a2ac8b1d357557dfbdad59785b3591  target/lab/build-lk2nd-msm8952/lk2nd.img
+SHA256 7cbd101743532a883eef8b7747aab915b70a0cea2ab4679f19a0578ba04030ab  target/kernel/qcom/msm8917-lenovo-tbx304x/boot.img
+SHA256 8fc9ed0837329347dd9bbadcc4d7653947bbc5a82c32cfa84b28fc3980857ae8  target/kernel/qcom/msm8917-lenovo-tbx304x/.config
+SHA256 03629320064345b560dd6dd8ebb7e638ae1129998903b6a5537e3983bc08809b  target/kernel/qcom/msm8917-lenovo-tbx304x/arch/arm64/boot/dts/qcom/msm8917-lenovo-tbx304x.dtb
+SHA256 8857792ed328f039680835c34632b71aa2be9086ff961f4125fcf1e159a19112  target/cpio/qcom/msm8917-lenovo-tbx304x/pocketboot-initrd.cpio
+
+## Effective kernel configuration subset
+
+```text
+CONFIG_MODULES_USE_ELF_RELA=y
+# CONFIG_MODULES is not set
+CONFIG_FW_LOADER=y
+# CONFIG_FW_LOADER_USER_HELPER is not set
+# CONFIG_FW_LOADER_COMPRESS is not set
+CONFIG_DRM_MSM=y
+CONFIG_DRM_MSM_GPU_STATE=y
+# CONFIG_DRM_MSM_GPU_SUDO is not set
+# CONFIG_DRM_MSM_MDP4 is not set
+# CONFIG_DRM_MSM_MDP5 is not set
+# CONFIG_DRM_MSM_DPU is not set
+CONFIG_DRM_SIMPLEDRM=y
+CONFIG_IOMMU_SUPPORT=y
+CONFIG_QCOM_IOMMU=y
+CONFIG_PM_DEVFREQ=y
+CONFIG_DEVFREQ_GOV_SIMPLE_ONDEMAND=y
+# CONFIG_PM_DEVFREQ_EVENT is not set
+CONFIG_SQUASHFS=y
+CONFIG_SQUASHFS_FILE_CACHE=y
+# CONFIG_SQUASHFS_FILE_DIRECT is not set
+CONFIG_SQUASHFS_DECOMP_SINGLE=y
+# CONFIG_SQUASHFS_CHOICE_DECOMP_BY_MOUNT is not set
+CONFIG_SQUASHFS_COMPILE_DECOMP_SINGLE=y
+# CONFIG_SQUASHFS_COMPILE_DECOMP_MULTI is not set
+# CONFIG_SQUASHFS_COMPILE_DECOMP_MULTI_PERCPU is not set
+# CONFIG_SQUASHFS_XATTR is not set
+# CONFIG_SQUASHFS_COMP_CACHE_FULL is not set
+# CONFIG_SQUASHFS_ZLIB is not set
+# CONFIG_SQUASHFS_LZ4 is not set
+# CONFIG_SQUASHFS_LZO is not set
+# CONFIG_SQUASHFS_XZ is not set
+CONFIG_SQUASHFS_ZSTD=y
+# CONFIG_SQUASHFS_4K_DEVBLK_SIZE is not set
+# CONFIG_SQUASHFS_EMBEDDED is not set
+CONFIG_SQUASHFS_FRAGMENT_CACHE_SIZE=3
+```
+
+## Kernel command line
+
+```text
+console=tty0 panic=-1 deferred_probe_timeout=5 pocketboot.log=info pocketboot.usb_role=device loglevel=8 ignore_loglevel lk2nd.pass-simplefb lk2nd.pass-ramoops clk_ignore_unused pd_ignore_unused regulator_ignore_unused msm.separate_gpu_kms=1
+```
+
+## Firmware provenance and initialization
+
+Downloaded from linux-firmware main, then independently re-downloaded at commit
+50c28bbf4158b310fa8463e8937a61940bff76c4; byte-for-byte cmp confirmed the same pair:
+https://gitlab.com/kernel-firmware/linux-firmware/-/raw/50c28bbf4158b310fa8463e8937a61940bff76c4/qcom/a300_pm4.fw
+https://gitlab.com/kernel-firmware/linux-firmware/-/raw/50c28bbf4158b310fa8463e8937a61940bff76c4/qcom/a300_pfp.fw
+
+Uploaded by adb push to outer /lib/firmware/qcom, not inside the chroot. Independent
+ADB readbacks matched the source files. The firmware pair was not changed thereafter.
+The UI attempted a DRM open before upload and logged missing PM4 at 0.232978 s;
+retrying after both files were staged succeeded. Successful DRM open alone is not
+accepted as GPU-initialization evidence: msm_open ignores load_gpu failure.
+
+a300_pm4.fw source/readback SHA256: f78c57e879e96a2c0ceeea31dbd30f7f1d4526f9c876e80481c654f08daaecd3
+a300_pfp.fw source/readback SHA256: b6e66400d46d52dc343d370b94362d564a765994bda47dc026961dd47a9ca7a9
+
+## Firmware load log window
+
+```text
+<4>[    0.232978] adreno 1c00000.gpu: Direct firmware load for qcom/a300_pm4.fw failed with error -2
+<3>[    0.232992] adreno 1c00000.gpu: [drm:adreno_request_fw] *ERROR* failed to load a300_pm4.fw
+<6>[  847.270384] adreno 1c00000.gpu: [drm:adreno_request_fw] loaded qcom/a300_pm4.fw from new location
+<6>[  847.315295] adreno 1c00000.gpu: [drm:adreno_request_fw] loaded qcom/a300_pfp.fw from new location
+```
+
+Probe: static AArch64-musl Rust program, /run/lab/gpu-probe.
+Open /dev/dri/renderD128 O_RDWR; DRM_IOCTL_MSM_GET_PARAM=0xc0186440,
+24-byte drm_msm_param with pipe=MSM_PIPE_3D0 (0x10), len=pad=0;
+query parameter IDs 1/2/3/4 (GPU_ID/GMEM_SIZE/CHIP_ID/MAX_FREQ), require GPU_ID=308.
+Command: adb -s "$SERIAL" shell /run/lab/gpu-probe
+
+## Probe output
+
+```text
+GPU_ID=308 (0x134)
+GMEM_SIZE=131072 (0x20000)
+CHIP_ID=50333216 (0x3000620)
+MAX_FREQ=598000000 (0x23a4c180)
+```
+
+## Test userspace and Mesa build
+
+Input: Mesa CI arm64 GL-test rootfs, Debian 13/trixie:
+https://s3.freedesktop.org/mesa-rootfs/mesa/mesa/debian/arm64_test-gl:20261001-vvl-e4--20260805-spirv-llvm--f0340389--aec7a6ce7bb38902c70641526f6611e27141784a/lava-rootfs.tar.zst
+Its measured expanded file payload is 1,802,290,931 bytes. It was extracted on the HOST,
+not unpacked on the tablet. Do not stage this full uncompressed tree in 2 GB RAM.
+
+Mesa cross-build packages, inside Debian trixie, not on the host:
+  dpkg --add-architecture arm64
+  apt-get update
+  apt-get install -y --no-install-recommends build-essential gcc-aarch64-linux-gnu
+    g++-aarch64-linux-gnu meson ninja-build pkg-config python3-mako python3-yaml
+    python3-packaging bison flex libdrm-dev:arm64 zlib1g-dev:arm64 libzstd-dev:arm64
+    libexpat1-dev:arm64 libelf-dev:arm64
+Cross-file generator:
+  CC=aarch64-linux-gnu-gcc CXX=aarch64-linux-gnu-g++ AR=aarch64-linux-gnu-ar
+  STRIP=aarch64-linux-gnu-strip PKG_CONFIG=pkg-config
+  PKG_CONFIG_LIBDIR=/usr/lib/aarch64-linux-gnu/pkgconfig:/usr/share/pkgconfig
+  meson env2mfile --cross --system linux --subsystem linux --kernel linux
+    --cpu aarch64 --cpu-family aarch64 --endian little -o aarch64.ini
+Mesa setup options:
+  --cross-file aarch64.ini --prefix=/opt/mesa --libdir=lib --buildtype=release
+  -Dgallium-drivers=freedreno -Dvulkan-drivers=[] -Dfreedreno-kmds=msm
+  -Dplatforms=[] -Dglx=disabled -Degl=enabled -Dgbm=enabled -Dgles1=disabled
+  -Dgles2=enabled -Dglvnd=disabled -Dllvm=disabled -Dgallium-va=disabled
+  -Dvideo-codecs=[]
+Then meson compile -j 8 and meson install with a private DESTDIR.
+The build container lacked Git: the GL version string has no Git suffix; the exact
+unchanged source revision and binary hashes are recorded here instead.
+Optional libarchive/libxml2 tooling fallback downloads failed TLS validation in the
+minimal container; Mesa continued without those optional dependencies. Required
+rendering build succeeded. Future builds can use --wrap-mode=nofallback to avoid this detour.
+
+Local Mesa artifacts: _build-a308/build-v2, _build-a308/install.
+Local cached cross-builder: localhost/tbx304f-mesa-cross:trixie (not published).
+The installed Gallium build contains freedreno only, not a software fallback driver.
+No DRM shim or LD_PRELOAD was used.
+
+A small root was assembled from the CI archive's wflinfo, sha256sum, env, eglretrace,
+complete GLES2/GLES3 dEQP module directories, ELF interpreter and recursive DT_NEEDED
+library closure, plus libudev and the NEW /opt/mesa installation. Library resolution
+prefers /opt/mesa/lib, then the CI archive's /usr/lib/aarch64-linux-gnu and /lib equivalents.
+The old Mesa libraries from the input CI rootfs were not included. All generated payload
+file hashes are recorded below. Packaged with:
+  mksquashfs target/lab/smoke-root target/lab/mesa-smoke.squashfs
+    -noappend -all-root -comp zstd -processors 4 -no-progress
+227 regular files, 72,096,009 bytes before filesystem compression;
+20,176,896-byte SquashFS (19.24 MiB).
+
+CI archive SHA256: 6681ef8263fc8b78795fdfb64b510cdfcfc9fd3528d1eeb2f32559903430d3d0
+SquashFS SHA256: 72ccdffc9ff01c2926be791149eecf6d02aaef3e0551bf758cf5af9108407a56
+libgallium-26.3.0-devel.so SHA256: fbbde0cec493b00d1520189e1b78c604fc76289bc65e48d1318c4873c8eec0b4
+libEGL.so.1.0.0 SHA256: c58e92771d3d568facd6758f3da28bdc950ceb5e5b4c58867c6b440aec93d884
+libGLESv2.so.2.0.0 SHA256: 872f19ea9ef508ae07d7bd37f659a371249fafc3a2c6b7bae3264d056cbfb865
+
+## RAM-only staging and execution
+
+Push SquashFS to /run/lab/mesa-smoke.squashfs; create /run/mesa and /run/lab/tmp.
+Mount it with `mount -t squashfs -o loop,ro ... /run/mesa`.
+Bind /dev, /proc and /sys onto the corresponding chroot directories.
+Bind /run/lab onto /run/mesa/run and /run/lab/tmp onto /run/mesa/tmp.
+Verify its hash using `chroot /run/mesa /usr/bin/sha256sum /run/mesa-smoke.squashfs`.
+The device-side hash matched the host hash above. No internal filesystem is involved.
+
+Fixtures held constant: GPU device power/control=on (via
+/sys/class/drm/renderD128/device/power/control), FD_MESA_DEBUG=inorder,
+EGL_PLATFORM=surfaceless, LD_LIBRARY_PATH=/opt/mesa/lib.
+MESA_SHADER_CACHE_DISABLE=true for the dEQP runs, to avoid the read-only root cache path.
+There is no desktop/compositor requirement. Mesa rendering uses the real render node.
+
+## Verified mount and on-device image hash
+
+```text
+-rw-r--r--    1  20176896 /run/lab/mesa-smoke.squashfs
+72ccdffc9ff01c2926be791149eecf6d02aaef3e0551bf758cf5af9108407a56  /run/mesa-smoke.squashfs
+```
+
+## wflinfo --platform=surfaceless_egl --api=gles2
+
+```text
+Failed to create //.cache for shader cache (Read-only file system)---disabling.
+Waffle platform: surfaceless_egl
+Waffle api: gles2
+OpenGL vendor string: freedreno
+OpenGL renderer string: FD306A
+OpenGL version string: OpenGL ES 3.0 Mesa 26.3.0-devel
+```
+
+Exact test shell command, with CASE_SUFFIX=pot or npot and a distinct LOG_NAME per run:
+  LD_LIBRARY_PATH=/opt/mesa/lib FD_MESA_DEBUG=inorder EGL_PLATFORM=surfaceless
+  MESA_SHADER_CACHE_DISABLE=true chroot /run/mesa /usr/bin/env
+  -C /deqp-gles/modules/gles2 ./deqp-gles2
+  --deqp-case=dEQP-GLES2.functional.texture.filtering.2d.nearest_nearest_clamp_rgba8888_$CASE_SUFFIX
+  --deqp-surface-type=pbuffer --deqp-surface-width=256 --deqp-surface-height=256
+  --deqp-visibility=hidden --deqp-gl-config-name=rgba8888d24s8ms0
+  --deqp-log-filename=/run/$LOG_NAME.qpa
+Run through `adb -s "$SERIAL" shell '...'`; retrieve QPA through shell cat.
+dEQP revision reported by the executable: e38fa956a6c69565dcf3ebecc2c271f709266474.
+The tool prints a missing-empty-waiver-file diagnostic, then executes the requested
+case with zero waivers. The results below are actual pass statuses, not skipped cases.
+
+## pot test stdout
+
+```text
+Writing test log into /run/texture-pot.qpa
+dEQP Core e38fa956a6c69565dcf3ebecc2c271f709266474 (0xe38fa956) starting..
+  target implementation = 'Surfaceless'
+ERROR: Waiver file '' could not be opened. No tests will be waived.
+
+Test case 'dEQP-GLES2.functional.texture.filtering.2d.nearest_nearest_clamp_rgba8888_pot'..
+  Pass (Pass)
+
+DONE!
+
+Test run totals:
+  Passed:        1/1 (100.0%)
+  Failed:        0/1 (0.0%)
+  Not supported: 0/1 (0.0%)
+  Warnings:      0/1 (0.0%)
+  Waived:        0/1 (0.0%)
+```
+Rendered PNG SHA256s:
+6b9f0122e04d80425c57c29ac4a0607b5b5cf59af6e9674ef4e88820c7acd1e6
+0a1e3d8a3253b0f98ca496ae9066d3319fd7072edf7e295238a49897fbd6592f
+23ace9a78efbe992dab82fbf05fce5ef54cd3cfe00d9d26c21b99c402c03995a
+1479c7005698801b15b82b200bdd147501afb73a5499ce3984bda37536361f1c
+
+## pot-repeat test stdout
+
+```text
+Writing test log into /run/texture-pot-repeat.qpa
+dEQP Core e38fa956a6c69565dcf3ebecc2c271f709266474 (0xe38fa956) starting..
+  target implementation = 'Surfaceless'
+ERROR: Waiver file '' could not be opened. No tests will be waived.
+
+Test case 'dEQP-GLES2.functional.texture.filtering.2d.nearest_nearest_clamp_rgba8888_pot'..
+  Pass (Pass)
+
+DONE!
+
+Test run totals:
+  Passed:        1/1 (100.0%)
+  Failed:        0/1 (0.0%)
+  Not supported: 0/1 (0.0%)
+  Warnings:      0/1 (0.0%)
+  Waived:        0/1 (0.0%)
+```
+Rendered PNG SHA256s:
+6b9f0122e04d80425c57c29ac4a0607b5b5cf59af6e9674ef4e88820c7acd1e6
+0a1e3d8a3253b0f98ca496ae9066d3319fd7072edf7e295238a49897fbd6592f
+23ace9a78efbe992dab82fbf05fce5ef54cd3cfe00d9d26c21b99c402c03995a
+1479c7005698801b15b82b200bdd147501afb73a5499ce3984bda37536361f1c
+
+## npot test stdout
+
+```text
+Writing test log into /run/texture-npot.qpa
+dEQP Core e38fa956a6c69565dcf3ebecc2c271f709266474 (0xe38fa956) starting..
+  target implementation = 'Surfaceless'
+ERROR: Waiver file '' could not be opened. No tests will be waived.
+
+Test case 'dEQP-GLES2.functional.texture.filtering.2d.nearest_nearest_clamp_rgba8888_npot'..
+  Pass (Pass)
+
+DONE!
+
+Test run totals:
+  Passed:        1/1 (100.0%)
+  Failed:        0/1 (0.0%)
+  Not supported: 0/1 (0.0%)
+  Warnings:      0/1 (0.0%)
+  Waived:        0/1 (0.0%)
+```
+Rendered PNG SHA256s:
+2a4229f7821922fa48a13afea3cec7266c8378f2294cc49daebbbc062bef5dc1
+cdfdc729b22407876d1b545a8cf2d80da2975cb1ee31f08af374d802eed789c6
+2e234fcbee1e76f4180990571fd0f8aee36c9e57258d2e9afbdcb8e40fbbcabb
+1998ab290daf5d5800999fa5ccfe3d9551e5d221527344ac49ca970f296f7050
+
+All four POT image hashes match across both executions.
+
+## Kernel messages added during rendering tests
+
+```text
+<12>[  847.728680]  INFO pocketboot::adb: adb stream closed by host local_id=16 remote_id=4043 kind="shell"
+<12>[  880.943034]  INFO pocketboot::adb: adb stream opened local_id=17 remote_id=4046 kind="shell"
+<12>[  880.966423]  INFO pocketboot::adb: adb stream closed by host local_id=17 remote_id=4046 kind="shell"
+<12>[ 1204.832723]  INFO pocketboot::adb: adb stream opened local_id=18 remote_id=4049 kind="sync"
+<12>[ 1294.826760]  INFO pocketboot::adb: adb stream closed by host local_id=18 remote_id=4049 kind="sync"
+<12>[ 1294.874010]  INFO pocketboot::adb: adb stream opened local_id=19 remote_id=4052 kind="shell"
+<6>[ 1294.875462] loop0: detected capacity change from 0 to 39408
+<3>[ 1294.918449] squashfs: SQUASHFS error: Xattrs in filesystem, these will be ignored
+<3>[ 1294.940270] unable to read xattr id index table
+<12>[ 1295.161810]  INFO pocketboot::adb: adb stream closed by host local_id=19 remote_id=4052 kind="shell"
+<12>[ 1295.521597]  INFO pocketboot::adb: adb stream opened local_id=20 remote_id=4055 kind="shell"
+<12>[ 1295.909989]  INFO pocketboot::adb: adb stream closed by host local_id=20 remote_id=4055 kind="shell"
+<12>[ 1337.121503]  INFO pocketboot::adb: adb stream opened local_id=21 remote_id=4058 kind="shell"
+<12>[ 1337.433890]  INFO pocketboot::adb: adb stream closed by host local_id=21 remote_id=4058 kind="shell"
+<12>[ 1337.793666]  INFO pocketboot::adb: adb stream opened local_id=22 remote_id=4061 kind="shell"
+<12>[ 1337.816748]  INFO pocketboot::adb: adb stream closed by host local_id=22 remote_id=4061 kind="shell"
+<12>[ 1338.177664]  INFO pocketboot::adb: adb stream opened local_id=23 remote_id=4064 kind="shell"
+<12>[ 1338.204007]  INFO pocketboot::adb: adb stream closed by host local_id=23 remote_id=4064 kind="shell"
+<12>[ 1397.196095]  INFO pocketboot::adb: adb stream opened local_id=24 remote_id=4067 kind="shell"
+<12>[ 1397.360226]  INFO pocketboot::adb: adb stream closed by host local_id=24 remote_id=4067 kind="shell"
+<12>[ 1397.717691]  INFO pocketboot::adb: adb stream opened local_id=25 remote_id=4070 kind="shell"
+<12>[ 1397.740525]  INFO pocketboot::adb: adb stream closed by host local_id=25 remote_id=4070 kind="shell"
+<12>[ 1398.097678]  INFO pocketboot::adb: adb stream opened local_id=26 remote_id=4073 kind="shell"
+<12>[ 1398.257551]  INFO pocketboot::adb: adb stream closed by host local_id=26 remote_id=4073 kind="shell"
+<12>[ 1398.617676]  INFO pocketboot::adb: adb stream opened local_id=27 remote_id=4076 kind="shell"
+<12>[ 1398.640769]  INFO pocketboot::adb: adb stream closed by host local_id=27 remote_id=4076 kind="shell"
+<12>[ 1398.997679]  INFO pocketboot::adb: adb stream opened local_id=28 remote_id=4079 kind="shell"
+```
+
+## Transport and handoff limits
+
+PocketBoot ADB shell stayed responsive. Some ADB sync push/pull clients timed out
+AFTER transferring the complete data and reporting byte counts; file readbacks and
+on-device SHA256 independently verify the artifacts. Do not trust progress output alone.
+PocketBoot fastboot product initially worked but its OEM shell/dmesg path subsequently
+stalled; do not depend on it for this session. That transport issue was not investigated.
+The device remains RAM-booted with GPU runtime suspend disabled and the chroot mounted.
+A reboot loses all staged files; this note's boot/staging procedure is required again.
+The parent texture-investigation thread can take over device control after this handoff.
+
+## POT QPA including framebuffer PNG data
+
+```text
+#sessionInfo releaseName e38fa956a6c69565dcf3ebecc2c271f709266474
+#sessionInfo releaseId 0xe38fa956
+#sessionInfo targetName "Surfaceless"
+#sessionInfo logFormatVersion "0.3.4"
+#sessionInfo vendor "freedreno"
+#sessionInfo renderer "FD306A"
+#sessionInfo commandLineParameters "--deqp-case=dEQP-GLES2.functional.texture.filtering.2d.nearest_nearest_clamp_rgba8888_pot --deqp-surface-type=pbuffer --deqp-surface-width=256 --deqp-surface-height=256 --deqp-visibility=hidden --deqp-gl-config-name=rgba8888d24s8ms0 --deqp-log-filename=/run/texture-pot.qpa"
+
+#beginSession
+
+#beginTestCaseResult dEQP-GLES2.functional.texture.filtering.2d.nearest_nearest_clamp_rgba8888_pot
+<?xml version="1.0" encoding="UTF-8"?>
+<TestCaseResult CasePath="dEQP-GLES2.functional.texture.filtering.2d.nearest_nearest_clamp_rgba8888_pot" Version="0.3.4" CaseType="SelfValidate">
+ <Section Name="Test0" Description="Test 0">
+  <Text>Texture coordinates: (-1, -2.7) -&gt; (5.06287, 4.76426)</Text>
+  <ImageSet Name="VerifyResult" Description="Verification result">
+   <Image Name="Rendered" Width="64" Height="64" Format="RGBA8888" CompressionMode="PNG" Description="Rendered image">
+    iVBORw0KGgoAAAANSUhEUgAAAEAAAABACAYAAACqaXHeAAABrElEQVR4nO2Z4UoC
+    URBGv3ZsWElkG9gcSMgnCXr/FxEKA1lJblzph5JmBFcoPi7NWebfZTmcnYVFr/D0
+    qChlMnSwle9n7TA4HA+Nwe1kVNEW35NMwxZgEwHYAmwiAFuATQRgC7CJAGwBNhGA
+    LcAmArAF2EQAtgCbCMAWYBMB2AJsIgBbgM2/DzBC0vKfsJO2x2lapF2LhFbPp6Kw
+    Iyx9UXx6MnRI6oeZIa18iu3CEvwwZgnQ8n8a6Izw3M+LT7+NO2RxZJkhi99k8V6W
+    c8vvbhlTy4Dl2gKsL9iAYej2T179NqlbUndgYWmlljawBNS3Aejvi0/vxl3zIm75
+    OL1ktSzYz7rCDUD5K3CNcWcQt9fPANpLxjGAwPJrXQFuUf4KTDB0BnWD3tlaYUnh
+    ACzpl1FNf2f8y4z6CzZgst8AMwgMAtsK+ufzDZC6AvhlG9AYFKfjm8o3QCDFHy3y
+    05W/Ty1U88X2V0QAtgCbCMAWYBMB2AJsIgBbgE0EYAuwiQBsATYRgC3AJgKwBdhE
+    ALYAmwjAFmATAdgCbCIAW4BNBGALsIkAbAE2EYAtwOYD5cNxPKpY3OkAAAAASUVO
+    RK5CYII=
+</Image>
+</ImageSet>
+</Section>
+ <Section Name="Test1" Description="Test 1">
+  <Text>Texture coordinates: (-0.2, 0.7) -&gt; (0.3, 1.09229)</Text>
+  <ImageSet Name="VerifyResult" Description="Verification result">
+   <Image Name="Rendered" Width="64" Height="64" Format="RGBA8888" CompressionMode="PNG" Description="Rendered image">
+    iVBORw0KGgoAAAANSUhEUgAAAEAAAABACAYAAACqaXHeAAABBklEQVR4nO2UQQ6D
+    QBRCqZrG+9+lF+ixuuqeuFAzDn8G2JFaJeTxXzu+Hwj0xm+v4LcV63Y1fAvxdwV+
+    AYDlavDZ5EwAgBCQApwmsJAHEAKsCODvAwgBKWDmCRwePfYhYGIC+HuH3p4A+wJm
+    msCpo8c+BExEAL//lLcnwL6AkSdw6+ixDwEDE8Dvu+XtCbAvYKQJNDl67O0JsC9g
+    pAnw/5v4EFCYgEeOHnt7AuwLqDwBfv4RHwIKEdDl6LG3J8C+gEoT4N+7+BAgJEBy
+    9NjbE2BfgHICJXwI4GPUSyGgiFKAOoBaKUAdQK0UoA6gVgpQB1ArBagDqJUC1AHU
+    SgHqAGqlAHUAtf5vMxFdM79CuwAAAABJRU5ErkJggg==
+</Image>
+</ImageSet>
+</Section>
+ <Section Name="Test2" Description="Test 2">
+  <Text>Texture coordinates: (-1.5, -1.1) -&gt; (0.70381, 0.109994)</Text>
+  <ImageSet Name="VerifyResult" Description="Verification result">
+   <Image Name="Rendered" Width="64" Height="64" Format="RGBA8888" CompressionMode="PNG" Description="Rendered image">
+    iVBORw0KGgoAAAANSUhEUgAAAEAAAABACAYAAACqaXHeAAAAuUlEQVR4nO3bMQoD
+    MRDFUDvk/ld22t1ASJrwMJba3wgx7cwxxhqbstZdfc7503bdH39y24YCaAFNAbSA
+    pgBaQFMALaApgBbQFEALaAqgBTQF0AKaAmgBTQG0gKYAWkBTAC2gKYAW0BRAC2gK
+    oAU0BdACmgJoAU0BtICmAFpAUwAtoCmAFtAUQAtoCqAFNAXQApoCaAFNAbSApgBa
+    QFMALaApgBbQHB/g+f5kvBOfHqK/bdf9+As4PsALL7ATfszg0J4AAAAASUVORK5C
+    YII=
+</Image>
+</ImageSet>
+</Section>
+ <Section Name="Test3" Description="Test 3">
+  <Text>Texture coordinates: (0.4, -0.1) -&gt; (1.45702, 0.0604282)</Text>
+  <ImageSet Name="VerifyResult" Description="Verification result">
+   <Image Name="Rendered" Width="64" Height="64" Format="RGBA8888" CompressionMode="PNG" Description="Rendered image">
+    iVBORw0KGgoAAAANSUhEUgAAAEAAAABACAYAAACqaXHeAAAAqElEQVR4nO3QMQqA
+    AAwEQeP//xw7K60Ep9kpA4HlZnf3eDAzT+fby9vn37+dOkBrAB2gNYAO0BpAB2gN
+    oAO0BtABWgPoAK0BdIDWADpAawAdoDWADtAaQAdoDaADtAbQAVoD6ACtAXSA1gA6
+    QGsAHaA1gA7QGkAHaA2gA7QG0AFaA+gArQF0gNYAOkBrAB2gNYAO0BpAB2gNoAO0
+    BtABWgPoAK0BdIB2AdxrCnyFZpQCAAAAAElFTkSuQmCC
+</Image>
+</ImageSet>
+</Section>
+ <Number Name="TestDuration" Description="Test case duration in microseconds" Tag="Time" Unit="us">107719</Number>
+ <Result StatusCode="Pass">Pass</Result>
+</TestCaseResult>
+
+#endTestCaseResult
+
+Run took 0.17 seconds
+
+#endSession
+```
+
+## NPOT QPA including framebuffer PNG data
+
+```text
+#sessionInfo releaseName e38fa956a6c69565dcf3ebecc2c271f709266474
+#sessionInfo releaseId 0xe38fa956
+#sessionInfo targetName "Surfaceless"
+#sessionInfo logFormatVersion "0.3.4"
+#sessionInfo vendor "freedreno"
+#sessionInfo renderer "FD306A"
+#sessionInfo commandLineParameters "--deqp-case=dEQP-GLES2.functional.texture.filtering.2d.nearest_nearest_clamp_rgba8888_npot --deqp-surface-type=pbuffer --deqp-surface-width=256 --deqp-surface-height=256 --deqp-visibility=hidden --deqp-gl-config-name=rgba8888d24s8ms0 --deqp-log-filename=/run/texture-npot.qpa"
+
+#beginSession
+
+#beginTestCaseResult dEQP-GLES2.functional.texture.filtering.2d.nearest_nearest_clamp_rgba8888_npot
+<?xml version="1.0" encoding="UTF-8"?>
+<TestCaseResult CasePath="dEQP-GLES2.functional.texture.filtering.2d.nearest_nearest_clamp_rgba8888_npot" Version="0.3.4" CaseType="SelfValidate">
+ <Section Name="Test0" Description="Test 0">
+  <Text>Texture coordinates: (-1, -2.7) -&gt; (5.25844, 5.98569)</Text>
+  <ImageSet Name="VerifyResult" Description="Verification result">
+   <Image Name="Rendered" Width="64" Height="64" Format="RGBA8888" CompressionMode="PNG" Description="Rendered image">
+    iVBORw0KGgoAAAANSUhEUgAAAEAAAABACAYAAACqaXHeAAAB1ElEQVR4nO2WwWrb
+    QBRFr9PRkBGSqd5LYB7NIl60n1Ho/39HaSDYIcXVJONY7qLddKeAxW3IOyBmcxGH
+    wyxmhW9fI+aiO4NsDbrLkGeDwpCx6RVZBSYK6zp8nP2//4ALtgAbD8AWYOMB2AJs
+    PABbgI0HYAuw8QBsATYegC3AxgOwBdh4ALYAGw/AFmAT8HOts9fNiyIc5M+5VTST
+    XLaQdQPtA3TdQLppQdsFCLiz29nrGu3vl1GjXdatGZ42ckDWikEOQN8tJ7sEAd8/
+    fZm9LimjJENJNpSUtSSz44+NlF9BR0AK0L25AHjFDdhFa2rMUqNpjSY15gwEqVto
+    fYBUoO+Xk12CANx8njteI5nu2yxjMi3tIGOCHT9ASoKWBCk79N3Tkr5nJ1whb+aO
+    BU1WRJOpSXofIbVBXgFaI6RGaI3o+v2Svmcn3LziBgjStaKFIEHRQh4T7BggY4KW
+    FjIm9G8twIDheu5YcMKA07/n/hmymjBcnCCrCd2hWdL37Lz7h5AHYAuw8QBsATYe
+    gC3AxgOwBdh4ALYAGw/AFmDjAdgCbDwAW4CNB2ALsPEAbAE2HoAtwMYDsAXYeAC2
+    ABsPwBZg4wHYAmw8AFuAjQdgC7B59wF+Awk0Wau2Z418AAAAAElFTkSuQmCC
+</Image>
+</ImageSet>
+</Section>
+ <Section Name="Test1" Description="Test 1">
+  <Text>Texture coordinates: (-0.2, 0.7) -&gt; (0.316129, 1.15649)</Text>
+  <ImageSet Name="VerifyResult" Description="Verification result">
+   <Image Name="Rendered" Width="64" Height="64" Format="RGBA8888" CompressionMode="PNG" Description="Rendered image">
+    iVBORw0KGgoAAAANSUhEUgAAAEAAAABACAYAAACqaXHeAAABnklEQVR4nO1ZQXLD
+    IBDDYds0/39MH9BXtTPO9JK4QcZgWoo8WelkTRLYEUIsznQJH+9hMM7h8+2Rv4av
+    Gr+0fH/H+Of7s1mI1lJ8D8RglvLrS4lbmC3lETn83orjxTAvz6eGup8S7gWwCPYZ
+    MinM2cHStS1ySvnPx3KAgbojUAu9HSsKDqo55ArzKwQXuBfAIqEP6GBp6CNmDNUJ
+    OMyvEFxwlBDEFa04ZOUY7CxxPuAKwQXuBaCEIHafO0KwcnmaH2km9BSCm3AvAOUU
+    sLqlga+2TEx5uot1CjSAch3OrCic+wZ8/+XmNn7CFYIFuBfA0G5DJm0Mvbh6o7Nt
+    6dv4CS9tETmAFIJNodeyojlecoh7B7gXgNUJ1kJwAg6/L4eeQrABrOswhmAx9BSC
+    /wj3AhwlBEPKf2/pHFcIFnCITjB2XNE8Vwhuwr0ArOsw8H6Wbh3fvQPcC2ARXjGP
+    QLuly//86BT4AyQAuwA2JAC7ADYkALsANiQAuwA2JAC7ADYkALsANiQAuwA2JAC7
+    ADYkALsANiQAuwA2JAC7ADa+AQtDU477puyYAAAAAElFTkSuQmCC
+</Image>
+</ImageSet>
+</Section>
+ <Section Name="Test2" Description="Test 2">
+  <Text>Texture coordinates: (-1.5, -1.1) -&gt; (0.774901, 0.307993)</Text>
+  <ImageSet Name="VerifyResult" Description="Verification result">
+   <Image Name="Rendered" Width="64" Height="64" Format="RGBA8888" CompressionMode="PNG" Description="Rendered image">
+    iVBORw0KGgoAAAANSUhEUgAAAEAAAABACAYAAACqaXHeAAAAwElEQVR4nO3bsQrD
+    MBTFULv0/385HQuGZAsHY2m9ixAGT2+OMa6xIdf1155z3m7rvm6fF9y2ogBaQFMA
+    LaApgBbQFEALaAqgBTQF0AKaAmgBTQG0gKYAWkBTAC2gKYAW0BRAC2gKoAU0BdAC
+    mgJoAU0BtICmAFpAUwAtoCmAFtAUQAtoCqAFNAXQApoCaAFNAbSApgBaQHN8gO96
+    RLQLT4dQT0dU63b8CyiAFtDM0eHk2RwfoG/wBbetOD7A8b/ADx4XMHaIm7rQAAAA
+    AElFTkSuQmCC
+</Image>
+</ImageSet>
+</Section>
+ <Section Name="Test3" Description="Test 3">
+  <Text>Texture coordinates: (0.4, -0.1) -&gt; (1.49112, 0.0866801)</Text>
+  <ImageSet Name="VerifyResult" Description="Verification result">
+   <Image Name="Rendered" Width="64" Height="64" Format="RGBA8888" CompressionMode="PNG" Description="Rendered image">
+    iVBORw0KGgoAAAANSUhEUgAAAEAAAABACAYAAACqaXHeAAAAvElEQVR4nO3bQQrF
+    IBTFUO3+92xXYPvhQ8/AZCoXQnD65lprjQ1zzt3TeJi9bn/Zf8WlBTQF0AKaAmgB
+    TQG0gKYAWkBTAC2gKYAW0BRAC2gKoAU0BdACmgJoAU0BtICmAFpAUwAtoCmAFtAU
+    QAtoCqAFNAXQApoCaAFNAbSApgBaQFMALaApgBbQFEALaAqgBTQF0AKaAmgBTQG0
+    gKYAWkBzfIA5xtjesD6dt/57Gvu2/4rjf0ABtIDm+AA3fqMRes5DOtcAAAAASUVO
+    RK5CYII=
+</Image>
+</ImageSet>
+</Section>
+ <Number Name="TestDuration" Description="Test case duration in microseconds" Tag="Time" Unit="us">71782</Number>
+ <Result StatusCode="Pass">Pass</Result>
+</TestCaseResult>
+
+#endTestCaseResult
+
+Run took 0.09 seconds
+
+#endSession
+```
+
+## Generated userspace file manifest (SHA256)
+
+```text
+cfb5e9edc6df6998ecffd4728af0adfc10bb463a2e269a2073ee447f8e888b6a  apitrace/build/eglretrace
+0ff7993f58357e0efc9dd4e8b7417036015d20c2119bea5972c4924976d9bb2f  deqp-gles/modules/gles2/deqp-gles2
+ad60598714d82e60c9513de5fe3e7ceabd1fab7ec67e832f6d20b2abb3d93b71  deqp-gles/modules/gles2/gles2/data/brick.png
+e10fcec38b4ae139dfcf2d82fba9f215d326933de44d72516f443318b4e36bfd  deqp-gles/modules/gles2/gles2/data/etc1/photo_helsinki_113x89.pkm
+a15c4aae7aea4084b3a978c68602c1766eb489713968ce23bb5572e3dc1bbdf7  deqp-gles/modules/gles2/gles2/data/etc1/photo_helsinki_mip_0.pkm
+e909deec368555467f01f2bb8f49577222812802c956c711a4bb4599bc0e3ca0  deqp-gles/modules/gles2/gles2/data/etc1/photo_helsinki_mip_1.pkm
+e77542cc91b54bc9d0a8e0d442f7610e127ab8ce90c8451e63b38c6b2b1c5d5c  deqp-gles/modules/gles2/gles2/data/etc1/photo_helsinki_mip_2.pkm
+2dc5b143d00700d4dac2cc2bd0b4d98433e3116275a02b3a672d1520974ffc6a  deqp-gles/modules/gles2/gles2/data/etc1/photo_helsinki_mip_3.pkm
+a862156ba39a0796b285837f673b0794d5099778de1633f05f4a42b7c3ea4805  deqp-gles/modules/gles2/gles2/data/etc1/photo_helsinki_mip_4.pkm
+e0d8d7a38f5488045d39b90686c9d18474cc2e2f8dc465a2921e55a011b443e6  deqp-gles/modules/gles2/gles2/data/etc1/photo_helsinki_mip_5.pkm
+a638846264385914b75c2967af24c1b3b06bebce4da68e90214dd9ea2305eef5  deqp-gles/modules/gles2/gles2/data/etc1/photo_helsinki_mip_6.pkm
+4aa08fd3e038e4935d63e2c109f4eda7921d25fe27261000a5b50615532b7e1c  deqp-gles/modules/gles2/gles2/data/etc1/photo_helsinki_mip_7.pkm
+716afa83ff72ed3c4386b88cba02b1d329cb6078752b3a49263233edc893d125  deqp-gles/modules/gles2/gles2/data/etc1/skybox_61x61_neg_x.pkm
+fcbc2a103385e198816c454c802f147d23627e41f40de2c37b7899717f58369a  deqp-gles/modules/gles2/gles2/data/etc1/skybox_61x61_neg_y.pkm
+d1d0c328e515fd3e069beb2f726c0b98f28e4ea746d75460b4224252fe7d9e1f  deqp-gles/modules/gles2/gles2/data/etc1/skybox_61x61_neg_z.pkm
+bbffa69a3a4bee903403fb2a5b775c8f0abad0ec4ce35ff58dc4cdf433b8a541  deqp-gles/modules/gles2/gles2/data/etc1/skybox_61x61_pos_x.pkm
+2598a367099806a4a709a12e388debe74392db8be3ccc59d136cb223a25ac095  deqp-gles/modules/gles2/gles2/data/etc1/skybox_61x61_pos_y.pkm
+bd1ecb4147ab9cc30fd92407e24d38c3e665cea57dbfba5468450f4fa7315c55  deqp-gles/modules/gles2/gles2/data/etc1/skybox_61x61_pos_z.pkm
+b4771b7da762583f68f788af8285e6bc10cc86402ba76197f381a7ccc8eb7f44  deqp-gles/modules/gles2/gles2/data/etc1/skybox_neg_x_mip_0.pkm
+253a4280ac72a654f10054322dd2c06d09468fc85d9e604596cd6a9081bc2a7e  deqp-gles/modules/gles2/gles2/data/etc1/skybox_neg_x_mip_1.pkm
+958584f6d08806c70c02da56e13b298ee5d966c5bd8bf0bba198a68430d5ceb7  deqp-gles/modules/gles2/gles2/data/etc1/skybox_neg_x_mip_2.pkm
+a9ea544deefdae941803bfd9ee9f8c3f2c6bf04305b9ae056ec11888411649cf  deqp-gles/modules/gles2/gles2/data/etc1/skybox_neg_x_mip_3.pkm
+08c57c3ca3a0a3f56ac909c074253c21854e8af02956f4d47daaf071052b603f  deqp-gles/modules/gles2/gles2/data/etc1/skybox_neg_x_mip_4.pkm
+0664fed17862d5e5c63fc2ee25afb321f2701b7e4984d4403c6f48af7a00b64c  deqp-gles/modules/gles2/gles2/data/etc1/skybox_neg_x_mip_5.pkm
+a02706584e30f0976067023c5aabe72f0d6184dad34ca6e663483e39cb564181  deqp-gles/modules/gles2/gles2/data/etc1/skybox_neg_x_mip_6.pkm
+a03038e6f2a090b14d6ed126c7d2a3ec936a65d70e1be2692acc0b38b54f4939  deqp-gles/modules/gles2/gles2/data/etc1/skybox_neg_y_mip_0.pkm
+03ac3de0ed1712a9f73f26c4caedd7112f9dba4e373984494ecf1583a101d185  deqp-gles/modules/gles2/gles2/data/etc1/skybox_neg_y_mip_1.pkm
+36c77bf338facd5e422e20e8ee50029e83a38da02cb72bdd6f2aa4e4426d8b02  deqp-gles/modules/gles2/gles2/data/etc1/skybox_neg_y_mip_2.pkm
+c91cd6e5a1d1a3c057bb258acdeac3f2743519ae312a69ecfadc82ca5fc6139c  deqp-gles/modules/gles2/gles2/data/etc1/skybox_neg_y_mip_3.pkm
+115880c7bffdbeee6523e1d863883d7e22ecc0fbba038cb098a2bcfbc16fd854  deqp-gles/modules/gles2/gles2/data/etc1/skybox_neg_y_mip_4.pkm
+d01d080312e5232c6b86b3ce5ba7406b51cc5454c610cd957b3a09bc66b0d5ed  deqp-gles/modules/gles2/gles2/data/etc1/skybox_neg_y_mip_5.pkm
+f305bfcbb8b80e58616c7a8757d0cfa4dc9782c967738cc27fd3bdaa18e51aea  deqp-gles/modules/gles2/gles2/data/etc1/skybox_neg_y_mip_6.pkm
+9bae99c82a0053984fe499de2dde0e8861fa49ad66ee2c9fc3836fd744f8a4bd  deqp-gles/modules/gles2/gles2/data/etc1/skybox_neg_z_mip_0.pkm
+8bc3cd737dec1ace80ff0165a57e8f966164420eb9adf7a66b41435fee0f011a  deqp-gles/modules/gles2/gles2/data/etc1/skybox_neg_z_mip_1.pkm
+741bdeb732d24028fb976cdf4618ca548d2732faed60f1894d7889067bce816d  deqp-gles/modules/gles2/gles2/data/etc1/skybox_neg_z_mip_2.pkm
+96ed2c08179d67d6efa336b70bcc4456d89d18efa36f220104ca9e3fa667a769  deqp-gles/modules/gles2/gles2/data/etc1/skybox_neg_z_mip_3.pkm
+d59464ef03050468436af52b17dc16c0c856b40b15b02b267bfbadef41e7af66  deqp-gles/modules/gles2/gles2/data/etc1/skybox_neg_z_mip_4.pkm
+d471209c9edf0bfaa9ab338ce7c91c761a9789e59c259f65d90a668d93354790  deqp-gles/modules/gles2/gles2/data/etc1/skybox_neg_z_mip_5.pkm
+a8325bd912865a3ca4e997c7b245f9c31c84b7dae93d5e6fe03f6a56efb2cfa2  deqp-gles/modules/gles2/gles2/data/etc1/skybox_neg_z_mip_6.pkm
+f957cb23932258161001363897737f14b39c65bbe575ba56fc72661cec889dd2  deqp-gles/modules/gles2/gles2/data/etc1/skybox_pos_x_mip_0.pkm
+d17a2eb9a8a2360999b05705e68dcac35e91051c8459077385f83ee32857b8cd  deqp-gles/modules/gles2/gles2/data/etc1/skybox_pos_x_mip_1.pkm
+50f5f2a1d114975d3d37ce4d2d7c86c821ce390622ed1d58b2a76678a1e2537e  deqp-gles/modules/gles2/gles2/data/etc1/skybox_pos_x_mip_2.pkm
+bd441cbc6f2051da6cec9c7198b2c53eca76ebd71e5c31a2ee9cb9b36556022b  deqp-gles/modules/gles2/gles2/data/etc1/skybox_pos_x_mip_3.pkm
+02e78b9510abb03f1ce6ff1c79366a0de058ceab14c7905c11d9185c093763dc  deqp-gles/modules/gles2/gles2/data/etc1/skybox_pos_x_mip_4.pkm
+eb41fafd329ef37e668635d3bcd7b80a9f55c671d31ca0b69410a7e010f5dc45  deqp-gles/modules/gles2/gles2/data/etc1/skybox_pos_x_mip_5.pkm
+ff575c2edbafd5a271a238ab91b9f18393ea9087829352afe9c8cd040505102d  deqp-gles/modules/gles2/gles2/data/etc1/skybox_pos_x_mip_6.pkm
+227fc2fc36d9ed9616eba3fcf25d5562de4418cb4a72358a1a005db9466b092a  deqp-gles/modules/gles2/gles2/data/etc1/skybox_pos_y_mip_0.pkm
+1b5ff99ba8dd0c03cc2ab4b89d7099e0059bcffcd7c1d2437ed931b42f2d393c  deqp-gles/modules/gles2/gles2/data/etc1/skybox_pos_y_mip_1.pkm
+be0d380587954c352a0e3da8f4af42b4da7408086ab5de82a01f916d150bf3f5  deqp-gles/modules/gles2/gles2/data/etc1/skybox_pos_y_mip_2.pkm
+62219670509a58077709754c69cdcb645f5d9d10415d4a3d6120520f95a68c2d  deqp-gles/modules/gles2/gles2/data/etc1/skybox_pos_y_mip_3.pkm
+c1c9a8a428c5287698c8ef208393b94f6e9cff420934d72e4a984c604e806ddf  deqp-gles/modules/gles2/gles2/data/etc1/skybox_pos_y_mip_4.pkm
+ab923663183fb574a55c7dab8d9e82808a1404536e7e7cf9089a7853e507f90d  deqp-gles/modules/gles2/gles2/data/etc1/skybox_pos_y_mip_5.pkm
+affeb29bfc512f15c33fcee4525af1a1370461eb5911dd17827dab1bbcf38621  deqp-gles/modules/gles2/gles2/data/etc1/skybox_pos_y_mip_6.pkm
+1a939abbcf75f50a74570f654dbf240d33a20558a3c25362a8f0d5f4015c2653  deqp-gles/modules/gles2/gles2/data/etc1/skybox_pos_z_mip_0.pkm
+9db6bc7e6c7d15bc8a8fb1696f4c7c36a97aa5b1a133486d7edd7a810853a840  deqp-gles/modules/gles2/gles2/data/etc1/skybox_pos_z_mip_1.pkm
+d1fff2aba47cb4a57bf8235e9850a7e93851f28e51103e08b7f631385732c955  deqp-gles/modules/gles2/gles2/data/etc1/skybox_pos_z_mip_2.pkm
+9ecce536226cb72bc6675d260bac816a789e1c6196e3fc2b8ef38d33877df1ca  deqp-gles/modules/gles2/gles2/data/etc1/skybox_pos_z_mip_3.pkm
+f2517471b68e5468d2ca98dc8e7d81324c919ba6ad4920ba01e308a802f4e76f  deqp-gles/modules/gles2/gles2/data/etc1/skybox_pos_z_mip_4.pkm
+2f565afd35a0c21a8d4ed265f5493c90675efa4c7a342306d186e9649f5137ec  deqp-gles/modules/gles2/gles2/data/etc1/skybox_pos_z_mip_5.pkm
+136a3e22ab04ab999bbf8ac50bbc307784827eb7351a0791e61ea6b6e50dc152  deqp-gles/modules/gles2/gles2/data/etc1/skybox_pos_z_mip_6.pkm
+249bfc96df021e641a0df8621f7ccef7763fd228676252dae3a8658e7c568012  deqp-gles/modules/gles2/gles2/shaders/conditionals.test
+9dd6afd7be0f6388ccf593676c2f265b49497382151d661d56cea618c798f070  deqp-gles/modules/gles2/gles2/shaders/constant_expressions.test
+d1bc456ba5b14874e7d7372cb3fbcbed9b15acaa98494ccc0a5c6b5f13beab20  deqp-gles/modules/gles2/gles2/shaders/constants.test
+453d27d2a16ec5938549421e12246b0d1c3abf122cbabd04ab3045aa536c547c  deqp-gles/modules/gles2/gles2/shaders/conversions.test
+071de7615c9eb1679805cfc52338d2fa3425ec78b7d161704f6f9e508763abaf  deqp-gles/modules/gles2/gles2/shaders/declarations.test
+6e739f2881a145928904598c483cf02081947e263206630c1960b4093518fb07  deqp-gles/modules/gles2/gles2/shaders/fragdata.test
+487ee7afd69d2c61671ce58aa687998559fa087e7c152f79b1f0ca4e3fddcf02  deqp-gles/modules/gles2/gles2/shaders/functions.test
+845d646335cd515cca38e177f2403318ce6cba49f16824dc07c563d4d17309fd  deqp-gles/modules/gles2/gles2/shaders/invalid_constant_expressions.test
+da0432f9cc9ed7672c12d02fb2daa72d20ffb331034c0ea54c5bfafbf836345d  deqp-gles/modules/gles2/gles2/shaders/invalid_implicit_conversions.test
+d3f77788b3e9a198d2242307362d4767656c03469b0698d6c435b3fb07dc92d6  deqp-gles/modules/gles2/gles2/shaders/invalid_texture_functions.test
+ebdee664a1ba6eda8033cf23d10729aecffee73b3749ee5f0fe91caad8680565  deqp-gles/modules/gles2/gles2/shaders/keywords.test
+76a1edf192029760583c71709dbfb2fe8803b58c24c40181e637b76deb204822  deqp-gles/modules/gles2/gles2/shaders/linkage.test
+6b307a44f14d54bbc2e952b390dc95da128c483dcdfa51d7aa53bc68a7cc0798  deqp-gles/modules/gles2/gles2/shaders/loops.test
+eaa717fd4d356eb886c8ebbe14f60038d30d0ab5bd9001f16a7f445bfa1085f4  deqp-gles/modules/gles2/gles2/shaders/misc.test
+63ae0ae0fb32959489084b7b08c6bb2e12644da92b84ce3c85701dcda26db0f5  deqp-gles/modules/gles2/gles2/shaders/preprocessor.test
+26aeac4a098e333d6c2d25de2a156a9e7580f3ae4a4338479144fe07625f5f16  deqp-gles/modules/gles2/gles2/shaders/qualification_order.test
+fe6bb19d213218c81d4c7371abdb2483714bf11c20605ebcce4221b46f918fc6  deqp-gles/modules/gles2/gles2/shaders/reserved_operators.test
+27bcb04ab5f63bb9cd50016575208fe1c105647b71d2c70beffecd9a658048b9  deqp-gles/modules/gles2/gles2/shaders/scoping.test
+57dd2ddc580a3d05f285d771d5853b5d6be62fb0d64a58f0d5fdd461f8b07242  deqp-gles/modules/gles2/gles2/shaders/swizzles.test
+e956b7e4c85706acb56f3e934bc3d8a677af27bac24c1563ecc366dd9697ff19  deqp-gles/modules/gles3/deqp-gles3
+ad60598714d82e60c9513de5fe3e7ceabd1fab7ec67e832f6d20b2abb3d93b71  deqp-gles/modules/gles3/gles3/data/brick.png
+e10fcec38b4ae139dfcf2d82fba9f215d326933de44d72516f443318b4e36bfd  deqp-gles/modules/gles3/gles3/data/etc1/photo_helsinki_113x89.pkm
+a15c4aae7aea4084b3a978c68602c1766eb489713968ce23bb5572e3dc1bbdf7  deqp-gles/modules/gles3/gles3/data/etc1/photo_helsinki_mip_0.pkm
+e909deec368555467f01f2bb8f49577222812802c956c711a4bb4599bc0e3ca0  deqp-gles/modules/gles3/gles3/data/etc1/photo_helsinki_mip_1.pkm
+e77542cc91b54bc9d0a8e0d442f7610e127ab8ce90c8451e63b38c6b2b1c5d5c  deqp-gles/modules/gles3/gles3/data/etc1/photo_helsinki_mip_2.pkm
+2dc5b143d00700d4dac2cc2bd0b4d98433e3116275a02b3a672d1520974ffc6a  deqp-gles/modules/gles3/gles3/data/etc1/photo_helsinki_mip_3.pkm
+a862156ba39a0796b285837f673b0794d5099778de1633f05f4a42b7c3ea4805  deqp-gles/modules/gles3/gles3/data/etc1/photo_helsinki_mip_4.pkm
+e0d8d7a38f5488045d39b90686c9d18474cc2e2f8dc465a2921e55a011b443e6  deqp-gles/modules/gles3/gles3/data/etc1/photo_helsinki_mip_5.pkm
+a638846264385914b75c2967af24c1b3b06bebce4da68e90214dd9ea2305eef5  deqp-gles/modules/gles3/gles3/data/etc1/photo_helsinki_mip_6.pkm
+4aa08fd3e038e4935d63e2c109f4eda7921d25fe27261000a5b50615532b7e1c  deqp-gles/modules/gles3/gles3/data/etc1/photo_helsinki_mip_7.pkm
+716afa83ff72ed3c4386b88cba02b1d329cb6078752b3a49263233edc893d125  deqp-gles/modules/gles3/gles3/data/etc1/skybox_61x61_neg_x.pkm
+fcbc2a103385e198816c454c802f147d23627e41f40de2c37b7899717f58369a  deqp-gles/modules/gles3/gles3/data/etc1/skybox_61x61_neg_y.pkm
+d1d0c328e515fd3e069beb2f726c0b98f28e4ea746d75460b4224252fe7d9e1f  deqp-gles/modules/gles3/gles3/data/etc1/skybox_61x61_neg_z.pkm
+bbffa69a3a4bee903403fb2a5b775c8f0abad0ec4ce35ff58dc4cdf433b8a541  deqp-gles/modules/gles3/gles3/data/etc1/skybox_61x61_pos_x.pkm
+2598a367099806a4a709a12e388debe74392db8be3ccc59d136cb223a25ac095  deqp-gles/modules/gles3/gles3/data/etc1/skybox_61x61_pos_y.pkm
+bd1ecb4147ab9cc30fd92407e24d38c3e665cea57dbfba5468450f4fa7315c55  deqp-gles/modules/gles3/gles3/data/etc1/skybox_61x61_pos_z.pkm
+b4771b7da762583f68f788af8285e6bc10cc86402ba76197f381a7ccc8eb7f44  deqp-gles/modules/gles3/gles3/data/etc1/skybox_neg_x_mip_0.pkm
+253a4280ac72a654f10054322dd2c06d09468fc85d9e604596cd6a9081bc2a7e  deqp-gles/modules/gles3/gles3/data/etc1/skybox_neg_x_mip_1.pkm
+958584f6d08806c70c02da56e13b298ee5d966c5bd8bf0bba198a68430d5ceb7  deqp-gles/modules/gles3/gles3/data/etc1/skybox_neg_x_mip_2.pkm
+a9ea544deefdae941803bfd9ee9f8c3f2c6bf04305b9ae056ec11888411649cf  deqp-gles/modules/gles3/gles3/data/etc1/skybox_neg_x_mip_3.pkm
+08c57c3ca3a0a3f56ac909c074253c21854e8af02956f4d47daaf071052b603f  deqp-gles/modules/gles3/gles3/data/etc1/skybox_neg_x_mip_4.pkm
+0664fed17862d5e5c63fc2ee25afb321f2701b7e4984d4403c6f48af7a00b64c  deqp-gles/modules/gles3/gles3/data/etc1/skybox_neg_x_mip_5.pkm
+a02706584e30f0976067023c5aabe72f0d6184dad34ca6e663483e39cb564181  deqp-gles/modules/gles3/gles3/data/etc1/skybox_neg_x_mip_6.pkm
+a03038e6f2a090b14d6ed126c7d2a3ec936a65d70e1be2692acc0b38b54f4939  deqp-gles/modules/gles3/gles3/data/etc1/skybox_neg_y_mip_0.pkm
+03ac3de0ed1712a9f73f26c4caedd7112f9dba4e373984494ecf1583a101d185  deqp-gles/modules/gles3/gles3/data/etc1/skybox_neg_y_mip_1.pkm
+36c77bf338facd5e422e20e8ee50029e83a38da02cb72bdd6f2aa4e4426d8b02  deqp-gles/modules/gles3/gles3/data/etc1/skybox_neg_y_mip_2.pkm
+c91cd6e5a1d1a3c057bb258acdeac3f2743519ae312a69ecfadc82ca5fc6139c  deqp-gles/modules/gles3/gles3/data/etc1/skybox_neg_y_mip_3.pkm
+115880c7bffdbeee6523e1d863883d7e22ecc0fbba038cb098a2bcfbc16fd854  deqp-gles/modules/gles3/gles3/data/etc1/skybox_neg_y_mip_4.pkm
+d01d080312e5232c6b86b3ce5ba7406b51cc5454c610cd957b3a09bc66b0d5ed  deqp-gles/modules/gles3/gles3/data/etc1/skybox_neg_y_mip_5.pkm
+f305bfcbb8b80e58616c7a8757d0cfa4dc9782c967738cc27fd3bdaa18e51aea  deqp-gles/modules/gles3/gles3/data/etc1/skybox_neg_y_mip_6.pkm
+9bae99c82a0053984fe499de2dde0e8861fa49ad66ee2c9fc3836fd744f8a4bd  deqp-gles/modules/gles3/gles3/data/etc1/skybox_neg_z_mip_0.pkm
+8bc3cd737dec1ace80ff0165a57e8f966164420eb9adf7a66b41435fee0f011a  deqp-gles/modules/gles3/gles3/data/etc1/skybox_neg_z_mip_1.pkm
+741bdeb732d24028fb976cdf4618ca548d2732faed60f1894d7889067bce816d  deqp-gles/modules/gles3/gles3/data/etc1/skybox_neg_z_mip_2.pkm
+96ed2c08179d67d6efa336b70bcc4456d89d18efa36f220104ca9e3fa667a769  deqp-gles/modules/gles3/gles3/data/etc1/skybox_neg_z_mip_3.pkm
+d59464ef03050468436af52b17dc16c0c856b40b15b02b267bfbadef41e7af66  deqp-gles/modules/gles3/gles3/data/etc1/skybox_neg_z_mip_4.pkm
+d471209c9edf0bfaa9ab338ce7c91c761a9789e59c259f65d90a668d93354790  deqp-gles/modules/gles3/gles3/data/etc1/skybox_neg_z_mip_5.pkm
+a8325bd912865a3ca4e997c7b245f9c31c84b7dae93d5e6fe03f6a56efb2cfa2  deqp-gles/modules/gles3/gles3/data/etc1/skybox_neg_z_mip_6.pkm
+f957cb23932258161001363897737f14b39c65bbe575ba56fc72661cec889dd2  deqp-gles/modules/gles3/gles3/data/etc1/skybox_pos_x_mip_0.pkm
+d17a2eb9a8a2360999b05705e68dcac35e91051c8459077385f83ee32857b8cd  deqp-gles/modules/gles3/gles3/data/etc1/skybox_pos_x_mip_1.pkm
+50f5f2a1d114975d3d37ce4d2d7c86c821ce390622ed1d58b2a76678a1e2537e  deqp-gles/modules/gles3/gles3/data/etc1/skybox_pos_x_mip_2.pkm
+bd441cbc6f2051da6cec9c7198b2c53eca76ebd71e5c31a2ee9cb9b36556022b  deqp-gles/modules/gles3/gles3/data/etc1/skybox_pos_x_mip_3.pkm
+02e78b9510abb03f1ce6ff1c79366a0de058ceab14c7905c11d9185c093763dc  deqp-gles/modules/gles3/gles3/data/etc1/skybox_pos_x_mip_4.pkm
+eb41fafd329ef37e668635d3bcd7b80a9f55c671d31ca0b69410a7e010f5dc45  deqp-gles/modules/gles3/gles3/data/etc1/skybox_pos_x_mip_5.pkm
+ff575c2edbafd5a271a238ab91b9f18393ea9087829352afe9c8cd040505102d  deqp-gles/modules/gles3/gles3/data/etc1/skybox_pos_x_mip_6.pkm
+227fc2fc36d9ed9616eba3fcf25d5562de4418cb4a72358a1a005db9466b092a  deqp-gles/modules/gles3/gles3/data/etc1/skybox_pos_y_mip_0.pkm
+1b5ff99ba8dd0c03cc2ab4b89d7099e0059bcffcd7c1d2437ed931b42f2d393c  deqp-gles/modules/gles3/gles3/data/etc1/skybox_pos_y_mip_1.pkm
+be0d380587954c352a0e3da8f4af42b4da7408086ab5de82a01f916d150bf3f5  deqp-gles/modules/gles3/gles3/data/etc1/skybox_pos_y_mip_2.pkm
+62219670509a58077709754c69cdcb645f5d9d10415d4a3d6120520f95a68c2d  deqp-gles/modules/gles3/gles3/data/etc1/skybox_pos_y_mip_3.pkm
+c1c9a8a428c5287698c8ef208393b94f6e9cff420934d72e4a984c604e806ddf  deqp-gles/modules/gles3/gles3/data/etc1/skybox_pos_y_mip_4.pkm
+ab923663183fb574a55c7dab8d9e82808a1404536e7e7cf9089a7853e507f90d  deqp-gles/modules/gles3/gles3/data/etc1/skybox_pos_y_mip_5.pkm
+affeb29bfc512f15c33fcee4525af1a1370461eb5911dd17827dab1bbcf38621  deqp-gles/modules/gles3/gles3/data/etc1/skybox_pos_y_mip_6.pkm
+1a939abbcf75f50a74570f654dbf240d33a20558a3c25362a8f0d5f4015c2653  deqp-gles/modules/gles3/gles3/data/etc1/skybox_pos_z_mip_0.pkm
+9db6bc7e6c7d15bc8a8fb1696f4c7c36a97aa5b1a133486d7edd7a810853a840  deqp-gles/modules/gles3/gles3/data/etc1/skybox_pos_z_mip_1.pkm
+d1fff2aba47cb4a57bf8235e9850a7e93851f28e51103e08b7f631385732c955  deqp-gles/modules/gles3/gles3/data/etc1/skybox_pos_z_mip_2.pkm
+9ecce536226cb72bc6675d260bac816a789e1c6196e3fc2b8ef38d33877df1ca  deqp-gles/modules/gles3/gles3/data/etc1/skybox_pos_z_mip_3.pkm
+f2517471b68e5468d2ca98dc8e7d81324c919ba6ad4920ba01e308a802f4e76f  deqp-gles/modules/gles3/gles3/data/etc1/skybox_pos_z_mip_4.pkm
+2f565afd35a0c21a8d4ed265f5493c90675efa4c7a342306d186e9649f5137ec  deqp-gles/modules/gles3/gles3/data/etc1/skybox_pos_z_mip_5.pkm
+136a3e22ab04ab999bbf8ac50bbc307784827eb7351a0791e61ea6b6e50dc152  deqp-gles/modules/gles3/gles3/data/etc1/skybox_pos_z_mip_6.pkm
+8e95cc3fc83600845b44bd2f763d8edc48cfffe0feb3abd59d30810aef1119c7  deqp-gles/modules/gles3/gles3/graphicsfuzz/LICENSE
+261f5ae92f713db22d3353a50ec296f711a8452fb1a91c0fd81f33a28d324f2d  deqp-gles/modules/gles3/gles3/graphicsfuzz/bubblesort_flag/recipient.frag
+e286d7ce185c7cbb05a0b7f83b97343352fe046523d906902b749087d7bde3a8  deqp-gles/modules/gles3/gles3/graphicsfuzz/bubblesort_flag/variant_1.frag
+1fb4245264e2b9669416ac5a17ba99dd14ce77d54af1c3803c7a671e11ba6ccb  deqp-gles/modules/gles3/gles3/graphicsfuzz/bubblesort_flag/variant_2.frag
+353f2cd0de02cba498c1fcaee0e9b38ad778bfc75dbb4032ccc211a12a3cdde5  deqp-gles/modules/gles3/gles3/graphicsfuzz/synthetic/recipient.frag
+3a1fdd5e0efd0de2e4990f4ee5f42aa5923ab3a4a18d42871e1e24db9cfdda58  deqp-gles/modules/gles3/gles3/graphicsfuzz/synthetic/variant_1.frag
+63034fd63dc04db0e3f86b5cbb0f6edb28f55a9c80d9548fee3557fdc7e7b20d  deqp-gles/modules/gles3/gles3/graphicsfuzz/synthetic/variant_2.frag
+370202bfd6abb7c9cc9b067c5eba127afc5aa79146470417821f53c69aef4ac2  deqp-gles/modules/gles3/gles3/graphicsfuzz/synthetic/variant_3.frag
+6c20ea2d6a2dcddc009a320303e7e177f7565c34143614cc1891e81651023d5f  deqp-gles/modules/gles3/gles3/graphicsfuzz/synthetic/variant_4.frag
+540e4158215a8c12e65440dec5fbe86bb1612e817f3e50bde10427344b5f3f35  deqp-gles/modules/gles3/gles3/graphicsfuzz/vertexShader.glsl
+881fcf936d0c24f73569517059d005377d088ec14d598cd3789a78bb1128e064  deqp-gles/modules/gles3/gles3/shaders/arrays.test
+585af68515ed63058c7d2cd139c2d25c6ca396cb6ad453ddd63fd0df3b9cd840  deqp-gles/modules/gles3/gles3/shaders/conditionals.test
+7d1ea597d864457455c6e09448bfb7bcb8116150250764c6cc1c6ae3f5a96277  deqp-gles/modules/gles3/gles3/shaders/constant_expressions.test
+c68a6bb7fc3db3c36bf1a013b5b7712b5c64e8498a66c8957d276cb3e0748e8f  deqp-gles/modules/gles3/gles3/shaders/constants.test
+1d1d4cb22afc881d6900ad7f503184e94df34c86b656e6fd93c088dcb1610888  deqp-gles/modules/gles3/gles3/shaders/conversions.test
+ec84322ec102e5cb9d314f240001a756c7e36bb8f892ee99799b2c9008757aa2  deqp-gles/modules/gles3/gles3/shaders/declarations.test
+6e739f2881a145928904598c483cf02081947e263206630c1960b4093518fb07  deqp-gles/modules/gles3/gles3/shaders/fragdata.test
+d0afa751a357ee999a5a69fdbd56f12b7c35b8edaf4da671f7f0b6c163ecec6e  deqp-gles/modules/gles3/gles3/shaders/functions.test
+d8ab2ec4e935a6c7bc1d9c95bd0c31bd7fee031eeb4b90611a5915fb20dd7db7  deqp-gles/modules/gles3/gles3/shaders/indexing.test
+b1ab976e34af3f8f0df0b988eda3dee9d92a257bd70008eeff5675249de4a006  deqp-gles/modules/gles3/gles3/shaders/invalid_implicit_conversions.test
+a0220037387bea1c56f6d236477d30b693fbf5132948ecbc6b758d9233cc8311  deqp-gles/modules/gles3/gles3/shaders/invalid_texture_functions.test
+ccdebd6bf41dc25e806d59915a0796acb5cca7d6f3f624646007c812da1d1f5b  deqp-gles/modules/gles3/gles3/shaders/keywords.test
+b8378e279b74381ea5dfc612c7884f7e2f460d55aa157e26065f67ebcf6a944b  deqp-gles/modules/gles3/gles3/shaders/large_constant_arrays.test
+1f4939fc61355f2860709cd21910c5c5cd9d00d30a02823f8c2cd559985118e5  deqp-gles/modules/gles3/gles3/shaders/linkage.test
+10305433988a88c7ea05515c8413e73044c3be50a2118abf204ba9ee4baf3d3a  deqp-gles/modules/gles3/gles3/shaders/loops.test
+e725b3f2bd6924ebb1c9031d03f5935b990294bae04031110ba96329f108e4ef  deqp-gles/modules/gles3/gles3/shaders/negative.test
+f8838fc6d7e396527e87858e870efcd87d09b223724bb8c6514236527e30228f  deqp-gles/modules/gles3/gles3/shaders/preprocessor.test
+db70dbfd527f53b8ff5d0d5bc6f95a57ac0a363643bf340f9635977baf3eec0e  deqp-gles/modules/gles3/gles3/shaders/qualification_order.test
+8595bf4fe815eab76500f50032500e731000c08f16ad4c5c573dc68a03016ae0  deqp-gles/modules/gles3/gles3/shaders/scoping.test
+8c39e24d46c54f4ffa46ab5148f0b462f83bc2efd7384c4ae8d3b77941dcab86  deqp-gles/modules/gles3/gles3/shaders/switch.test
+d9934ab1dd693b073c716b4c946a98d40c2c5b61b01286ef591949c59f9642a2  deqp-gles/modules/gles3/gles3/shaders/swizzle_math_operations.test
+b4705311b8d42a9ad6d2c797757101fdca95f9a778e492d5535ed383297466e0  deqp-gles/modules/gles3/gles3/shaders/swizzles.test
+4425c5c9aaac66525b591015b444a1f6fbc10429854012c483871c3baa2476f7  deqp-gles/modules/gles3/gles3/shaders/uniform_block.test
+1b882eddacd494b060413a8aa4f0a4754ee3f84775e68cecbf8a86092b59cca6  lib/aarch64-linux-gnu/ld-linux-aarch64.so.1
+a7c24c828bf2e1a4dfe6511b4f4812b948a285eb54787074015896976d4da076  opt/mesa/include/EGL/egl.h
+a5f574a0074001400c6c50232235ee00e9a67b2168bfd1c364ba0f6f52e5a75c  opt/mesa/include/EGL/eglext.h
+df92523469632129b6b0c37bcade9fa8cc449e23e487beda2cc130b4e4bd1df5  opt/mesa/include/EGL/eglext_angle.h
+e9119482f23bfa6a4fd006278d16434328fa91abcb6c55033959c262644d85f4  opt/mesa/include/EGL/eglmesaext.h
+25b5391655effcf363a38fa00c3154f356a3eab3d35dc067847875513cf1e441  opt/mesa/include/EGL/eglplatform.h
+f09313b53505928802f07d1b7fa9d40e7abe7728db389ec8fab348778073e4f1  opt/mesa/include/GL/gl.h
+087622fc4b933fc0e5e4f7aa6071111720acd085de039159de0f2d06b91d7486  opt/mesa/include/GL/glcorearb.h
+e7d514287e81e5403c14b02c2bab9d870589353642a8748da4213b9a55dbf56f  opt/mesa/include/GL/glext.h
+03a91da7f918a5a70643ec64b750f19a90832230235d6b66076daf3fbf489149  opt/mesa/include/GL/internal/dri_interface.h
+80f2c16d6543bc5ed3f9431c21fd4825d29af1dd82beab2edf31e377e6e70995  opt/mesa/include/GLES2/gl2.h
+4530230062731e45cd7ea0c931eec6f846434e0295a618b8761f09c972d3c669  opt/mesa/include/GLES2/gl2ext.h
+f5da0747540a50be5f44aad264aae45bdf157a192c40f17487dd9a2f99c71b6c  opt/mesa/include/GLES2/gl2platform.h
+c61394d5166fc7f92db132d4cda66517d3e5e8c14b88267f0529ef298c2333d1  opt/mesa/include/GLES3/gl3.h
+612fc3a3c483baa3b04dfa6be3cb44217ad5ebb92c3af05531dcac2c159b177a  opt/mesa/include/GLES3/gl31.h
+e580e7db6bfc6b86860ae6b02fa27eb9acfe6726bab71f9c268568cdbf80baea  opt/mesa/include/GLES3/gl32.h
+5730da902cec04b86f93152a219b379eabbf4eac97387f271fb8141fdfe4c5c5  opt/mesa/include/GLES3/gl3ext.h
+a9e060dae5a2b11c5a889b679692b7089a10a7e03ebfbb6cf28217f6e322fb08  opt/mesa/include/GLES3/gl3platform.h
+7b1e01aaa7ad8f6fc34b5c7bdf79ebf5189bb09e2c4d2e79fc5d350623d11e83  opt/mesa/include/KHR/khrplatform.h
+95f3b4a6ee5175c7cc5d47368d4efb100063fe49e5a6f5b19030ac2ceed73b81  opt/mesa/include/gbm.h
+4eacf82b37a754dc5e64c89ab9c8a32ad8b96bfac12e91f7e217e7fa5c5602c5  opt/mesa/include/gbm_backend_abi.h
+79e31b77414201ef003ac7d5777a4a7f36074b927c1266977315d2088a874749  opt/mesa/lib/gbm/dri_gbm.so
+c58e92771d3d568facd6758f3da28bdc950ceb5e5b4c58867c6b440aec93d884  opt/mesa/lib/libEGL.so.1.0.0
+872f19ea9ef508ae07d7bd37f659a371249fafc3a2c6b7bae3264d056cbfb865  opt/mesa/lib/libGLESv2.so.2.0.0
+fbbde0cec493b00d1520189e1b78c604fc76289bc65e48d1318c4873c8eec0b4  opt/mesa/lib/libgallium-26.3.0-devel.so
+a7dd240a2e87e95a52b9aa5551b01710a9b04e7034f99af8784fb68561ced3a3  opt/mesa/lib/libgbm.so.1.0.0
+39d95c864708854e4c30f2d8f87cc2219c2066fec3ada7e6f4342b36ce742fd4  opt/mesa/lib/pkgconfig/dri.pc
+30d189dba19cb44135f0a96359ba19fd2c7e8fa706df0d078970d872d5a5f546  opt/mesa/lib/pkgconfig/egl.pc
+daa4b7f4842b1a1241a31c41375b9ab18d4ceca9bc526a79be39fb09edfff64a  opt/mesa/lib/pkgconfig/gbm.pc
+1003d6b154aee38a4246e1558e026dc6900a97a179e408095e2667563f88070f  opt/mesa/lib/pkgconfig/glesv2.pc
+221c24b08c47764aba0ad6fe4590f5351f75da6ed7296b21a069b6a1407c7ff7  opt/mesa/share/drirc.d/00-mesa-defaults.conf
+bf07dc6a0a4679bbc935a41b56d79c201881973f80eb24b6644b001f3acf245b  opt/mesa/share/drirc.d/00-msm-defaults.conf
+a1a366aeec990c18d7ff97358e523925e449e2df224029fe048fc3ae35a97720  usr/bin/env
+7911a1f0aec4678c540bd78ff886f48d42790c8689a82ed0ae25ed79ed5dd512  usr/bin/sha256sum
+c8965a260ee27685e0d164aa790d6044d03ef83cc07759ebaf70dea990934ca3  usr/bin/wflinfo
+1b882eddacd494b060413a8aa4f0a4754ee3f84775e68cecbf8a86092b59cca6  usr/lib/aarch64-linux-gnu/ld-linux-aarch64.so.1
+3827c0df48c2fbcaecc42531a90cda1ce20744e9bad813170b1e3bcf2413e094  usr/lib/aarch64-linux-gnu/libX11-xcb.so.1.0.0
+94938979e2e2030f3471823a186eec66f994b128125ea2f4b4c18b502444b0a0  usr/lib/aarch64-linux-gnu/libX11.so.6.4.0
+66ba1611449064d4beb81d33d9200eed4cfad41771dbbf38895774690c29bb26  usr/lib/aarch64-linux-gnu/libXau.so.6.0.0
+d2374e9168c2d221a527088b18781cd11da9735b8053b8231359f4fe11428298  usr/lib/aarch64-linux-gnu/libXdmcp.so.6.0.0
+077a32bb1d3d9b50d74d03aec2758c6ef94a422f28baab5fa6f3c04f1a0bc69e  usr/lib/aarch64-linux-gnu/libbrotlicommon.so.1.1.0
+3ac5116be503e51a11954f9b4dff0932319368501eb26be8ff06f0618eac624e  usr/lib/aarch64-linux-gnu/libbrotlidec.so.1.1.0
+70fa4c4cf57eabeb96097cce47582d02379c4cd1de3db3e98ade4dd7089a1b13  usr/lib/aarch64-linux-gnu/libc.so.6
+2d74e5a4d536311c2e84d1603edb4c8dd7cdfaa92f1305ec4e317edcd062ddec  usr/lib/aarch64-linux-gnu/libcap.so.2.75
+809909371a1db7d2b9cac4c2fa2eff63eb6169d5979416d94155955a7ad32516  usr/lib/aarch64-linux-gnu/libcrypto.so.3
+9446acd316c0e608a4460475bde00834373b52560a1bd49a55e6d8452e6a3172  usr/lib/aarch64-linux-gnu/libdrm.so.2.133.0
+fce86854472200d93318ae3fa39333025381e769cd1980810f804e49529fed48  usr/lib/aarch64-linux-gnu/libexpat.so.1.12.3
+9a146967dc38c3820c5dc21c3209812655f66b6551264072b187bd0e787947e0  usr/lib/aarch64-linux-gnu/libgcc_s.so.1
+a8afb2d1f4a0c5e14c0fc82f794ec839eafe29738907aa92895410f57630bbe2  usr/lib/aarch64-linux-gnu/libm.so.6
+7113982f81eef42c185f09262d20cd7024da0919df0b092f7918768bad7d6e1e  usr/lib/aarch64-linux-gnu/libpng16.so.16.48.0
+fff1f0050a33ddf29c44634c7639ac16e2573a61e3daab4fcc4c007b432ccf19  usr/lib/aarch64-linux-gnu/libstdc++.so.6.0.33
+bcf309a103288b263adfffded7db309ed393643acc5f60e8daf1962103e3a113  usr/lib/aarch64-linux-gnu/libudev.so.1.7.10
+b958c1591decf185870b4a75cb329e103c7426a19396c8519f3a0443798decd2  usr/lib/aarch64-linux-gnu/libwaffle-1.so.0.8.1
+e8ede627b1ff9101854931904ee57a7c19ed2a359fa7bc2fb9522cf923950210  usr/lib/aarch64-linux-gnu/libxcb.so.1.1.0
+6fe00acadf8119ff245855e5dcc7f26c6c0ffaf4bfa2baa88feab58f23727d65  usr/lib/aarch64-linux-gnu/libz.so.1.3.1
+1279c4edfbfb08878b5b7fb40d392c1bdc9b30100d9b7a019d4aefaf10d2046c  usr/lib/aarch64-linux-gnu/libzstd.so.1.5.7
+```
