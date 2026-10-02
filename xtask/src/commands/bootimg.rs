@@ -1027,6 +1027,50 @@ mod tests {
     }
 
     #[test]
+    fn otter_image_keeps_the_v2_dtb_separate_from_the_gzip_kernel() {
+        let device = KernelDevice::parse("qcom/qcm6490-shift-otter").unwrap();
+        let config = config::load_device_config(&workspace_root().unwrap(), &device).unwrap();
+        let bootimg = config.bootimg.as_ref().unwrap();
+        assert_eq!(bootimg.kernel_image, "Image.gz");
+        assert!(bootimg.preboot.is_none());
+
+        let dir = unique_test_dir("otter-v2");
+        fs::create_dir_all(&dir).unwrap();
+        let kernel = vec![0xab; 4097];
+        let dtb = b"separate dtb";
+        fs::write(dir.join("Image.gz"), &kernel).unwrap();
+        fs::write(dir.join("otter.dtb"), dtb).unwrap();
+        write_bootimg(
+            bootimg,
+            &config.device_path,
+            &dir.join("Image.gz"),
+            &dir.join("otter.dtb"),
+            &dir.join("boot.img"),
+        )
+        .unwrap();
+
+        let image = fs::read(dir.join("boot.img")).unwrap();
+        assert_eq!(&image[..8], b"ANDROID!");
+        assert_eq!(u32_at(&image, 8), kernel.len() as u32);
+        assert_eq!(u32_at(&image, 12), 0x8000);
+        assert_eq!(u32_at(&image, 16), 0); // initramfs is inside the kernel
+        assert_eq!(u32_at(&image, 20), 0x01000000);
+        assert_eq!(u32_at(&image, 24), 0); // no second-stage loader
+        assert_eq!(u32_at(&image, 32), 0x100);
+        assert_eq!(u32_at(&image, 36), 4096);
+        assert_eq!(u32_at(&image, 40), 2);
+        assert_eq!(u32_at(&image, 1632), 0); // no recovery DTBO
+        assert_eq!(u32_at(&image, 1644), 1660);
+        assert_eq!(u32_at(&image, 1648), dtb.len() as u32);
+        assert_eq!(u32_at(&image, 1652), 0x01f00000);
+        assert_eq!(u32_at(&image, 1656), 0);
+        assert_eq!(&image[4096..4096 + kernel.len()], kernel.as_slice());
+        assert_eq!(&image[12288..12288 + dtb.len()], dtb);
+        assert_eq!(image.len(), 16384);
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
     fn appended_dtb_is_written_in_kernel_payload() {
         let temp_dir = unique_test_dir("appended-dtb");
         let kernel_path = temp_dir.join("Image.gz");

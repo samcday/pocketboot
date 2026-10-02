@@ -733,6 +733,7 @@ mod tests {
             "qcom/msm8916-samsung-a5u-eur",
             "qcom/msm8916-samsung-gt510",
             "qcom/msm8953-xiaomi-daisy",
+            "qcom/qcm6490-shift-otter",
             "qcom/sdm670-google-sargo",
             "qcom/sdm845-google-crosshatch",
             "qcom/sdm845-oneplus-fajita",
@@ -756,6 +757,54 @@ mod tests {
             } else {
                 assert!(kconfig.contains("CONFIG_KEYBOARD_GPIO=y\n"));
             }
+        }
+    }
+
+    #[test]
+    fn otter_keeps_the_diagnostic_path_builtin_and_firmware_independent() {
+        let workspace_root = super::super::workspace_root().unwrap();
+        let device = KernelDevice::parse("qcom/qcm6490-shift-otter").unwrap();
+        let config = load_device_config(&workspace_root, &device).unwrap();
+        let source = config.kernel_source.as_ref().unwrap();
+        assert_eq!(source.scope, KernelSourceScope::Device);
+        assert_eq!(source.identity.id, device.id());
+        assert_eq!(source.patches.len(), 1);
+        assert!(workspace_root.join(&source.patches[0]).is_file());
+        assert_eq!(config.cpio.slint_scale_factor, Some(3.0));
+
+        let kconfig = config.kconfig_contents().unwrap();
+        for symbol in [
+            "KEXEC",
+            "HOTPLUG_CPU",
+            "DRM_SIMPLEDRM",
+            "SC_GCC_7280",
+            "PINCTRL_SC7280",
+            "PINCTRL_QCOM_SPMI_PMIC",
+            "INTERCONNECT_QCOM_SC7280",
+            "ARM_SMMU",
+            "ARM_SMMU_QCOM",
+            "REGULATOR_QCOM_RPMH",
+            "SCSI_UFSHCD",
+            "SCSI_UFSHCD_PLATFORM",
+            "SCSI_UFS_QCOM",
+            "PHY_QCOM_QMP",
+            "PHY_QCOM_QMP_UFS",
+            "USB_DWC3",
+            "USB_DWC3_GADGET",
+            "USB_DWC3_QCOM",
+            "PHY_QCOM_USB_SNPS_FEMTO_V2",
+            "USB_CONFIGFS_F_FS",
+            "KEYBOARD_GPIO",
+            "INPUT_PM8941_PWRKEY",
+            "SERIAL_QCOM_GENI_CONSOLE",
+        ] {
+            assert!(
+                kconfig.contains(&format!("CONFIG_{symbol}=y\n")),
+                "missing built-in CONFIG_{symbol}"
+            );
+        }
+        for symbol in ["REMOTEPROC", "DRM_MSM", "PHY_QCOM_QMP_COMBO"] {
+            assert!(kconfig.contains(&format!("# CONFIG_{symbol} is not set\n")));
         }
     }
 
