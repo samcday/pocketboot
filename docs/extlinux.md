@@ -29,12 +29,24 @@ or from other labels. Repeating a setting replaces its previous value, including
 `append` and `initrd`. Unknown directives, including `timeout`, are ignored.
 
 Unlike lk2nd, pocketboot presents all usable entries in its own menu, with the
-preferred entry first and the others in config order. Missing kernels,
-initrds, or requested DTBs exclude an entry with a diagnostic; other entries
-remain available. An invalid default is not silently assigned to another label.
-If the selected default is excluded, none of the surviving entries is marked
-preferred. They remain available for manual selection or the caller's fallback
-policy.
+preferred entry first and the others in declaration order. When both config
+paths exist on one boot filesystem, both contribute entries: their surviving
+defaults come first in the path order listed above, followed by the remaining
+labels in config-path and declaration order. Label names and the defaults'
+positions within their configs do not override config-path priority.
+
+Global ordering still compares partition role, then preferred status, then
+disk/partition. An implicit first-label default is preferred just like an
+explicit default, including against BLS entries on other partitions of the same
+role.
+
+Missing kernels, initrds, or requested DTBs exclude an entry with a diagnostic;
+other entries remain available. An invalid default is not silently assigned to
+another label. If the selected default is excluded, none of that config's
+surviving entries is marked preferred; a surviving default from the other config
+still sorts ahead of them. Non-preferred entries remain available for manual
+selection or the caller's fallback policy. In particular, fastboot `continue`
+boots the first directly bootable entry even if it is not marked preferred.
 
 ## Paths and DTBs
 

@@ -1149,6 +1149,11 @@ fn scan_extlinux_entries(
             }
         }
     }
+    // Number entries across configs so their search-path priority survives sorting,
+    // including when both configs contribute a preferred/default entry.
+    for (index, entry) in boot_entries.iter_mut().enumerate() {
+        entry.boot_order = u32::try_from(index).unwrap_or(u32::MAX);
+    }
     boot_entries
 }
 
@@ -2530,7 +2535,133 @@ mod tests {
             assert_eq!(entry.cmdline(), "root=LABEL=pmOS_root quiet");
         }
         assert!(entries[2..].iter().all(|entry| !entry.preferred));
+        assert_eq!(
+            entries
+                .iter()
+                .map(|entry| entry.source.strip_prefix(&root).unwrap())
+                .collect::<Vec<_>>(),
+            [
+                Path::new(EXTLINUX_CONFIG_PATHS[0]),
+                Path::new(EXTLINUX_CONFIG_PATHS[1]),
+                Path::new(EXTLINUX_CONFIG_PATHS[0]),
+                Path::new(EXTLINUX_CONFIG_PATHS[1]),
+            ]
+        );
         fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[test]
+    fn extlinux_menu_order_preserves_config_priority_before_label_order() {
+        let root = temp_root("extlinux-config-order");
+        let partition = test_boot_partition();
+        let mount = MountedPartition {
+            root: root.clone(),
+            fstype: "ext4",
+        };
+        fs::write(root.join("vmlinuz"), b"kernel").unwrap();
+        for config_path in EXTLINUX_CONFIG_PATHS {
+            fs::create_dir_all(root.join(config_path).parent().unwrap()).unwrap();
+        }
+        fs::write(
+            root.join(EXTLINUX_CONFIG_PATHS[1]),
+            "label zulu\nlinux /vmlinuz\n\
+             label yankee\nlinux /vmlinuz\nlabel xray\nlinux /vmlinuz\n",
+        )
+        .unwrap();
+
+        for (default, expected, preferred_count) in [
+            ("", ["alpha", "zulu", "beta", "gamma", "yankee", "xray"], 2),
+            (
+                "default missing\n",
+                ["alpha", "zulu", "beta", "gamma", "yankee", "xray"],
+                2,
+            ),
+            (
+                "default gamma\n",
+                ["gamma", "zulu", "alpha", "beta", "yankee", "xray"],
+                2,
+            ),
+            (
+                "default broken\n",
+                ["zulu", "alpha", "beta", "gamma", "yankee", "xray"],
+                1,
+            ),
+        ] {
+            fs::write(
+                root.join(EXTLINUX_CONFIG_PATHS[0]),
+                format!(
+                    "{default}label alpha\nlinux /vmlinuz\n\
+                     label beta\nlinux /vmlinuz\nlabel broken\nlinux /missing\n\
+                     label gamma\nlinux /vmlinuz\n"
+                ),
+            )
+            .unwrap();
+            let mut entries = scan_extlinux_entries(&partition, &mount);
+            // Discovery re-sorts entries; scan insertion order alone is not enough.
+            entries.reverse();
+            entries.sort_by(compare_boot_entries);
+            assert_eq!(
+                entries
+                    .iter()
+                    .map(|entry| entry.id.as_str())
+                    .collect::<Vec<_>>(),
+                expected.map(|label| format!("extlinux:{label}")),
+                "{default:?}"
+            );
+            assert!(
+                entries[..preferred_count]
+                    .iter()
+                    .all(|entry| entry.preferred)
+            );
+            assert!(
+                entries[preferred_count..]
+                    .iter()
+                    .all(|entry| !entry.preferred)
+            );
+        }
+        fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[test]
+    fn extlinux_secondary_config_remains_available_without_a_usable_primary() {
+        for primary in [
+            None,
+            Some(""),
+            Some("default broken\nlabel broken\nlinux /missing\n"),
+        ] {
+            let root = temp_root("extlinux-secondary-config");
+            fs::write(root.join("vmlinuz"), b"kernel").unwrap();
+            for config_path in EXTLINUX_CONFIG_PATHS {
+                fs::create_dir_all(root.join(config_path).parent().unwrap()).unwrap();
+            }
+            if let Some(text) = primary {
+                fs::write(root.join(EXTLINUX_CONFIG_PATHS[0]), text).unwrap();
+            }
+            let source = root.join(EXTLINUX_CONFIG_PATHS[1]);
+            fs::write(
+                &source,
+                "default alpha\nlabel zulu\nlinux /vmlinuz\nlabel alpha\nlinux /vmlinuz\n",
+            )
+            .unwrap();
+            let mount = MountedPartition {
+                root: root.clone(),
+                fstype: "ext4",
+            };
+            let mut entries = scan_extlinux_entries(&test_boot_partition(), &mount);
+            entries.sort_by(compare_boot_entries);
+            assert_eq!(
+                entries
+                    .iter()
+                    .map(|entry| entry.id.as_str())
+                    .collect::<Vec<_>>(),
+                ["extlinux:alpha", "extlinux:zulu"],
+                "{primary:?}"
+            );
+            assert!(entries.iter().all(|entry| entry.source == source));
+            assert!(entries[0].preferred);
+            assert!(!entries[1].preferred);
+            fs::remove_dir_all(&root).unwrap();
+        }
     }
 
     #[test]
