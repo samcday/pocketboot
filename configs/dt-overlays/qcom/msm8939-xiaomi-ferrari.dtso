@@ -1,0 +1,12 @@
+/dts-v1/;
+/plugin/;
+
+/* lk2nd installs the spin table and brings up all eight CPUs itself. */
+&{/cpus/cpu@0} { enable-method = "spin-table"; };
+&{/cpus/cpu@1} { enable-method = "spin-table"; };
+&{/cpus/cpu@2} { enable-method = "spin-table"; };
+&{/cpus/cpu@3} { enable-method = "spin-table"; };
+&{/cpus/cpu@100} { enable-method = "spin-table"; };
+&{/cpus/cpu@101} { enable-method = "spin-table"; };
+&{/cpus/cpu@102} { enable-method = "spin-table"; };
+&{/cpus/cpu@103} { enable-method = "spin-table"; };

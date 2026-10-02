@@ -1,5 +1,12 @@
 // pocketboot,spin-table-v1 resident image. All addresses are PC-relative;
 // this section is copied once into the no-map reservation before CPU startup.
+//
+// PB_SPIN_TABLE_CPUS is set by the Rust global_asm before this file is
+// included. Standalone assembler users (the QEMU tests) get the four-core
+// default.
+.ifndef PB_SPIN_TABLE_CPUS
+.set PB_SPIN_TABLE_CPUS, 4
+.endif
 .section .rodata.spin_table, "a"
 .balign 8
 .global pocketboot_spin_table_start
@@ -10,7 +17,7 @@ pocketboot_spin_table_start:
     .ascii  "spin-tab"
     .quad   0                       // unused legacy shared release address
     .ascii  "PBSPIN01"
-    .long   1, 4096, 0x100, 0x400, 0x80, 4
+    .long   1, 4096, 0x100, 0x400, 0x80, PB_SPIN_TABLE_CPUS
     .ascii  "PBSDIAG1"              // optional CPUECTLR snapshot at slot+0x50
     .space  0x100 - (. - pocketboot_spin_table_start)
 .Lpark_entry:
@@ -33,14 +40,24 @@ pocketboot_spin_table_start:
     tst     x9, #4
     b.ne    .Lhalt
     mrs     x10, mpidr_el1
-    // MPIDR.MT/U are not affinity fields. Aff3 and Aff2:Aff0 must encode 1..3.
+    // Derive the same dense parking index as the kernel's pb_index():
+    // Aff1 selects the cluster, Aff0 the core. Reject anything out of range.
+    // Slot 0 is valid: on MSM8939 the primary is MPIDR 0x100 and MPIDR 0 is a
+    // secondary that must park. The primary never executes this code.
     ubfx    x11, x10, #32, #8
     cbnz    x11, .Lhalt
-    and     x10, x10, #0xffffff
-    cmp     x10, #1
-    b.lo    .Lhalt
-    cmp     x10, #3
-    b.hi    .Lhalt
+    ubfx    x11, x10, #16, #8
+    cbnz    x11, .Lhalt
+    lsr     x11, x10, #8
+    and     x11, x11, #0xff
+    cmp     x11, #PB_SPIN_TABLE_CPUS / 4
+    b.hs    .Lhalt
+    and     x10, x10, #0xff
+    cmp     x10, #4
+    b.hs    .Lhalt
+    orr     x10, x10, x11, lsl #2
+    cmp     x10, #PB_SPIN_TABLE_CPUS
+    b.hs    .Lhalt
     adr     x9, pocketboot_spin_table_start
     add     x9, x9, #0x400
     add     x9, x9, x10, lsl #7

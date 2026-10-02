@@ -732,6 +732,7 @@ mod tests {
             "qcom/msm8930-samsung-expressltexx",
             "qcom/msm8916-samsung-a5u-eur",
             "qcom/msm8916-samsung-gt510",
+            "qcom/msm8939-xiaomi-ferrari",
             "qcom/msm8953-xiaomi-daisy",
             "qcom/sdm670-google-sargo",
             "qcom/sdm845-google-crosshatch",
@@ -869,6 +870,79 @@ mod tests {
                 "GPU isolation path must remain disabled: {disabled_path}"
             );
         }
+    }
+
+    #[test]
+    fn ferrari_uses_lk2nd_smp_and_an_appended_dtb() {
+        let workspace_root = super::super::workspace_root().unwrap();
+        let device = KernelDevice::parse("qcom/msm8939-xiaomi-ferrari").unwrap();
+        let config = load_device_config(&workspace_root, &device).unwrap();
+        let source = config.kernel_source.as_ref().unwrap();
+        assert_eq!(source.identity.id, "qcom/msm8939");
+        assert_eq!(source.remote, "https://github.com/pem120/linux.git");
+        assert_eq!(source.sha, "45add32603ee4aa28979ad6ec70c10b14af4ac29");
+        assert_eq!(
+            source.patches,
+            [
+                "patches/kernel/msm8939/0002-usb-chipidea-msm-enable-sg-bounce.patch",
+                "patches/kernel/msm8939/0003-iommu-qcom-kexec-context.patch",
+            ]
+            .iter()
+            .map(PathBuf::from)
+            .collect::<Vec<_>>()
+        );
+
+        let kconfig = config.kconfig_contents().unwrap();
+        for symbol in [
+            "ARCH_QCOM",
+            "MSM_GCC_8939",
+            "QCOM_A53PLL",
+            "QCOM_CLK_APCS_MSM8916",
+            "PINCTRL_MSM8916",
+            "USB_CHIPIDEA_MSM",
+            "TOUCHSCREEN_ATMEL_MXT",
+            "EXTCON_USB_GPIO",
+            "PM8916_WATCHDOG",
+            "REGULATOR_QCOM_SPMI",
+            "PSTORE_CONSOLE",
+            "DRM_FBDEV_EMULATION",
+            "FRAMEBUFFER_CONSOLE",
+        ] {
+            assert!(
+                kconfig.contains(&format!("CONFIG_{symbol}=y\n")),
+                "missing built-in CONFIG_{symbol}:\n{kconfig}"
+            );
+        }
+        assert!(kconfig.contains("CONFIG_NR_CPUS=8\n"));
+        assert!(!kconfig.contains("CONFIG_ARM64_SPIN_TABLE_KEXEC=y\n"));
+
+        let bootimg = config.bootimg.as_ref().unwrap();
+        assert_eq!(bootimg.kernel_image, "Image.gz");
+        assert_eq!(bootimg.header_version, 0);
+        assert_eq!(bootimg.page_size, 2048);
+        assert_eq!(bootimg.base + bootimg.kernel_offset, 0x80080000);
+        // lk2nd owns SMP; no pocketpreboot shim is packaged.
+        assert!(bootimg.preboot.is_none());
+        // Xiaomi MSM8939 uses an appended DTB, not a QCDT vendor table.
+        assert!(bootimg.append_dtb);
+        assert!(bootimg.qcdt.is_none());
+        assert!(bootimg.dtbh.is_none());
+
+        let overlay = fs::read_to_string(
+            workspace_root.join("configs/dt-overlays/qcom/msm8939-xiaomi-ferrari.dtso"),
+        )
+        .unwrap();
+        for cpu in [
+            "cpu@0", "cpu@1", "cpu@2", "cpu@3", "cpu@100", "cpu@101", "cpu@102", "cpu@103",
+        ] {
+            assert!(
+                overlay.contains(&format!(
+                    "&{{/cpus/{cpu}}} {{ enable-method = \"spin-table\"; }};"
+                )),
+                "missing lk2nd spin-table method for {cpu}"
+            );
+        }
+        assert!(!overlay.contains("pocketboot,spin-table-v1"));
     }
 
     #[test]

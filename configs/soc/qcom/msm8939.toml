@@ -1,0 +1,81 @@
+name = "Qualcomm MSM8939"
+
+[kernel-source]
+remote = "https://github.com/pem120/linux.git"
+# https://github.com/pem120/linux/tree/ferrari/lkml
+sha = "45add32603ee4aa28979ad6ec70c10b14af4ac29"
+patches = [
+    "patches/kernel/msm8939/0002-usb-chipidea-msm-enable-sg-bounce.patch",
+    "patches/kernel/msm8939/0003-iommu-qcom-kexec-context.patch",
+]
+
+[kconfig]
+# Platform sizing: two clusters of four Cortex-A53s
+ARCH_QCOM = true
+NR_CPUS = 8
+# lk2nd owns SMP bringup; the pocketboot spin-table parking patch is not
+# applied, so there is no ARM64_SPIN_TABLE_KEXEC symbol to enable.
+
+# Core Qualcomm firmware/resource plumbing
+QCOM_SOC = true
+QCOM_SCM = true
+QCOM_SMEM = true
+QCOM_SOCINFO = true
+HWSPINLOCK = true
+HWSPINLOCK_QCOM = true
+MAILBOX = true
+QCOM_APCS_IPC = true
+RPMSG_QCOM_SMD = true
+QCOM_SMD_RPM = true
+QCOM_CLK_SMD_RPM = true
+QCOM_RPMPD = true
+
+# Clocks, resets, pinctrl, GPIO and PMIC access
+COMMON_CLK_QCOM = true
+MSM_GCC_8939 = true
+# The APCS syscon (RPM's qcom,ipc target) takes its "pll" clock from the A53
+# PLL provider; without QCOM_A53PLL of_syscon_register() defers forever and
+# RPM/RPMCC/regulators/GCC never come up. Also the APCS CPU mux clock.
+QCOM_A53PLL = true
+QCOM_CLK_APCS_MSM8916 = true
+PINCTRL_MSM = true
+PINCTRL_MSM8916 = true
+GPIO_SHARED_PROXY = true
+SPMI = true
+SPMI_MSM_PMIC_ARB = true
+MFD_SPMI_PMIC = true
+PINCTRL_QCOM_SPMI_PMIC = true
+REGULATOR = true
+# PM8916 SPMI LDOs (USB HS PHY v1p8/v3p3, panel, touchscreen rails)
+REGULATOR_QCOM_SPMI = true
+REGULATOR_QCOM_SMD_RPM = true
+POWER_RESET_MSM = true
+POWER_RESET_QCOM_PON = true
+PM_DEVFREQ = true
+
+# The boot chain arms the PM8916 PMIC watchdog. Linux must take it over or
+# the device bark-resets a few seconds into the kernel.
+WATCHDOG = true
+PM8916_WATCHDOG = true
+
+# BLSP UART/I2C/SPI buses
+SERIAL_MSM = true
+SERIAL_MSM_CONSOLE = true
+I2C_QUP = true
+SPI_QUP = true
+DMADEVICES = true
+QCOM_BAM_DMA = true
+
+# eMMC/SD storage
+MMC_SDHCI = true
+MMC_SDHCI_PLTFM = true
+MMC_SDHCI_MSM = true
+
+# USB HS ChipIdea controller/PHY. Gadget functions belong in userland config.
+USB_EHCI_HCD = true
+USB_CHIPIDEA = true
+USB_CHIPIDEA_UDC = true
+USB_CHIPIDEA_HOST = true
+USB_CHIPIDEA_MSM = true
+GENERIC_PHY = true
+PHY_QCOM_USB_HS = true

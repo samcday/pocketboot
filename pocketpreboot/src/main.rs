@@ -22,7 +22,11 @@ core::arch::global_asm!(
 #[cfg(all(target_os = "none", feature = "debug-ram-trace"))]
 mod ram_trace;
 
-#[cfg(any(all(target_os = "none", feature = "soc-msm8916"), test))]
+#[cfg(any(
+    all(target_os = "none", feature = "soc-msm8916"),
+    all(target_os = "none", feature = "soc-msm8939"),
+    test
+))]
 mod fdt;
 
 #[cfg(all(target_os = "none", feature = "soc-exynos7870"))]
@@ -32,25 +36,38 @@ mod exynos7870;
 use exynos7870 as soc;
 
 #[cfg(any(
-    all(target_os = "none", feature = "soc-msm8916"),
-    all(test, feature = "soc-msm8916")
+    all(
+        target_os = "none",
+        any(feature = "soc-msm8916", feature = "soc-msm8939")
+    ),
+    all(test, any(feature = "soc-msm8916", feature = "soc-msm8939"))
 ))]
 mod msm8916;
 
-#[cfg(all(target_os = "none", feature = "soc-msm8916"))]
+#[cfg(all(
+    target_os = "none",
+    any(feature = "soc-msm8916", feature = "soc-msm8939")
+))]
 use msm8916 as soc;
 
 #[cfg(all(
     target_os = "none",
-    not(any(feature = "soc-exynos7870", feature = "soc-msm8916"))
+    not(any(
+        feature = "soc-exynos7870",
+        feature = "soc-msm8916",
+        feature = "soc-msm8939"
+    ))
 ))]
 compile_error!("pocketpreboot needs a supported soc-* Cargo feature");
 
 #[cfg(all(
     target_os = "none",
     feature = "soc-exynos7870",
-    feature = "soc-msm8916"
+    any(feature = "soc-msm8916", feature = "soc-msm8939")
 ))]
+compile_error!("pocketpreboot supports only one soc-* Cargo feature at a time");
+
+#[cfg(all(target_os = "none", feature = "soc-msm8916", feature = "soc-msm8939"))]
 compile_error!("pocketpreboot supports only one soc-* Cargo feature at a time");
 
 #[cfg(target_os = "none")]

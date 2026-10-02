@@ -1,0 +1,23 @@
+diff --git a/drivers/iommu/arm/arm-smmu/qcom_iommu.c b/drivers/iommu/arm/arm-smmu/qcom_iommu.c
+index 21d18ce67b98..7ab1a251d594 100644
+--- a/drivers/iommu/arm/arm-smmu/qcom_iommu.c
++++ b/drivers/iommu/arm/arm-smmu/qcom_iommu.c
+@@ -306,6 +306,9 @@ static int qcom_iommu_init_domain(struct iommu_domain *domain,
+ 		ctx->domain = domain;
+ 	}
+ 
++	/* Discard cached walks/translations belonging to the previous kernel. */
++	qcom_iommu_tlb_inv_context(qcom_domain);
++
+ 	/* Publish page table ops for map/unmap */
+ 	qcom_domain->pgtbl_ops = pgtbl_ops;
+ 
+@@ -764,7 +767,7 @@ static struct platform_driver qcom_iommu_ctx_driver = {
+ 
+ static bool qcom_iommu_has_secure_context(struct qcom_iommu_dev *qcom_iommu)
+ {
+-	for_each_child_of_node_scoped(qcom_iommu->dev->of_node, child) {
++	for_each_available_child_of_node_scoped(qcom_iommu->dev->of_node, child) {
+ 		if (of_device_is_compatible(child, "qcom,msm-iommu-v1-sec") ||
+ 		    of_device_is_compatible(child, "qcom,msm-iommu-v2-sec"))
+ 			return true;

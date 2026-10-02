@@ -10,8 +10,23 @@ use crate::fdt::{
 };
 
 const MAX_DTB_SIZE: usize = 512 * 1024;
+#[cfg(feature = "soc-msm8939")]
+const MAX_CPUS: usize = 8;
+#[cfg(not(feature = "soc-msm8939"))]
 const MAX_CPUS: usize = 4;
+const CPUS_PER_CLUSTER: u32 = 4;
 const MAX_DEPTH: usize = 32;
+
+// MSM8916 has one four-core cluster based at 0x0b088000. MSM8939 adds a
+// second cluster: the big cluster (MPIDR Aff1=1) keeps the MSM8916 bases and
+// the little cluster (Aff1=0) sits at 0x0b188000. The MSM8939 LK DTs label
+// these "acc0".."acc3" (big) and "acc4".."acc7" (little).
+#[cfg(not(feature = "soc-msm8939"))]
+const ACC_BASE: u64 = 0x0b08_8000;
+#[cfg(feature = "soc-msm8939")]
+const ACC_BIG_CLUSTER_BASE: u64 = 0x0b08_8000;
+#[cfg(feature = "soc-msm8939")]
+const ACC_LITTLE_CLUSTER_BASE: u64 = 0x0b18_8000;
 
 // Fixed ABI shared with arm64 spin-table CPU operations and the kexec loader.
 const SPIN_TABLE_COMPATIBLE: &[u8] = b"pocketboot,spin-table-v1";
@@ -36,8 +51,10 @@ const CLAMP: u32 = 1 << 0;
 const CPUECTLR_SMPEN: u64 = 1 << 6;
 const STARTUP_TIMEOUT_US: u64 = 1_000_000;
 
-#[cfg(target_arch = "aarch64")]
-core::arch::global_asm!(include_str!("spin_table.S"));
+#[cfg(all(target_arch = "aarch64", feature = "soc-msm8939"))]
+core::arch::global_asm!(".set PB_SPIN_TABLE_CPUS, 8", include_str!("spin_table.S"));
+#[cfg(all(target_arch = "aarch64", not(feature = "soc-msm8939")))]
+core::arch::global_asm!(".set PB_SPIN_TABLE_CPUS, 4", include_str!("spin_table.S"));
 
 #[repr(align(64))]
 #[allow(dead_code)]
@@ -151,10 +168,13 @@ pub fn prepare_fdt(fdt: usize, payload: usize, payload_size: usize) -> Option<us
 }
 
 fn prepare_fdt_inner(fdt: usize, payload: usize, payload_size: usize) -> Result<usize> {
-    if read_mpidr() != 0 || !cache_mmu_off() || timer_frequency() == 0 {
+    if !cache_mmu_off() || timer_frequency() == 0 {
         return Err(Error::EntryState);
     }
-    uart::write_str("msm8916: primary CurrentEL=");
+    let primary_reg = read_mpidr();
+    uart::write_str("msm8916: primary mpdir=");
+    uart::write_hex64(primary_reg as u64);
+    uart::write_str(" CurrentEL=");
     uart::write_hex64(current_el());
     uart::writeln("");
     let primary_cpuectlr = read_cpuectlr();
@@ -169,6 +189,9 @@ fn prepare_fdt_inner(fdt: usize, payload: usize, payload_size: usize) -> Result<
     validate_memory(&reader, spin_table, payload, payload_size)?;
     uart::writeln("msm8916: collect CPUs");
     let cpus = collect_cpus(&reader)?;
+    // MSM8939 is booted on the big cluster (MPIDR 0x100); do not assume
+    // MPIDR 0 there. The four-core kernel contract still requires it.
+    let primary_slot = cpus.primary_slot(primary_reg)?;
 
     // Finish all fallible DT work before releasing a secondary or touching
     // its ACC. Keep WFI idle; power collapse needs a separate resume protocol.
@@ -187,10 +210,13 @@ fn prepare_fdt_inner(fdt: usize, payload: usize, payload_size: usize) -> Result<
         // those CPUs may currently be executing the code we are inspecting.
         let prefix = unsafe { slice::from_raw_parts(spin_table.addr as *const u8, 0xb8) };
         validate_resident_descriptor(prefix)?;
-        validate_parked_slots(spin_table, current_el(), read64)?;
+        validate_parked_slots(spin_table, primary_slot, current_el(), read64)?;
         if has_coherency_diagnostics(prefix) {
-            for cpu in 1..MAX_CPUS as u32 {
-                report_secondary_coherency(spin_table, cpu)?;
+            for cpu in cpus.as_slice() {
+                if cpu.slot == primary_slot {
+                    continue;
+                }
+                report_secondary_coherency(spin_table, cpu.reg, cpu.slot)?;
             }
         } else {
             uart::writeln("msm8916: older resident page has no CPUECTLR snapshots");
@@ -200,7 +226,7 @@ fn prepare_fdt_inner(fdt: usize, payload: usize, payload_size: usize) -> Result<
     }
 
     uart::writeln("msm8916: install resident code");
-    init_spin_table(spin_table, &cpus)?;
+    init_spin_table(spin_table, &cpus, primary_slot)?;
     uart::writeln("msm8916: configure SCM entry");
     scm::set_boot_addr_mc(
         spin_table.code_addr(),
@@ -208,7 +234,7 @@ fn prepare_fdt_inner(fdt: usize, payload: usize, payload_size: usize) -> Result<
     )?;
 
     for cpu in cpus.as_slice() {
-        if cpu.reg == 0 {
+        if cpu.slot == primary_slot {
             continue;
         }
         uart::write_str("msm8916: boot cpu");
@@ -217,7 +243,7 @@ fn prepare_fdt_inner(fdt: usize, payload: usize, payload_size: usize) -> Result<
         uart::write_hex64(cpu.acc_base);
         uart::writeln("");
         boot_cortex_a53(cpu.acc_base as usize);
-        let ack = spin_table.ack_addr(cpu.reg) as usize;
+        let ack = spin_table.ack_addr(cpu.slot) as usize;
         let mut acknowledged = false;
         for _ in 0..STARTUP_TIMEOUT_US / 10 {
             if read64(ack) == 1 {
@@ -233,14 +259,14 @@ fn prepare_fdt_inner(fdt: usize, payload: usize, payload_size: usize) -> Result<
             return Err(Error::StartupTimeout);
         }
         let entry_el =
-            read64(spin_table.release_addr(cpu.reg) as usize + SPIN_TABLE_ENTRY_EL_OFFSET);
+            read64(spin_table.release_addr(cpu.slot) as usize + SPIN_TABLE_ENTRY_EL_OFFSET);
         uart::write_str("msm8916: secondary CurrentEL=");
         uart::write_hex64(entry_el);
         uart::writeln("");
         if entry_el != current_el() {
             return Err(Error::EntryState);
         }
-        report_secondary_coherency(spin_table, cpu.reg)?;
+        report_secondary_coherency(spin_table, cpu.reg, cpu.slot)?;
         uart::writeln("msm8916: secondary parked");
     }
 
@@ -250,6 +276,21 @@ fn prepare_fdt_inner(fdt: usize, payload: usize, payload_size: usize) -> Result<
     uart::write_hex64(patched.len() as u64);
     uart::writeln("");
     Ok(patched.as_ptr() as usize)
+}
+
+/// Dense parking slot for a CPU reg (MPIDR affinity bits) value. Aff1 selects
+/// the cluster and Aff0 the core, matching both the resident trampoline's
+/// cache-off computation and the kernel's `pb_index()`.
+fn cpu_slot_index(reg: u32) -> Result<u32> {
+    let cluster = (reg >> 8) & 0xff;
+    let core = reg & 0xff;
+    if reg != (cluster << 8) | core
+        || cluster >= MAX_CPUS as u32 / CPUS_PER_CLUSTER
+        || core >= CPUS_PER_CLUSTER
+    {
+        return Err(Error::MissingCpu);
+    }
+    Ok(cluster * CPUS_PER_CLUSTER + core)
 }
 
 #[derive(Clone, Copy)]
@@ -262,18 +303,19 @@ impl SpinTable {
         self.addr + SPIN_TABLE_ENTRY_OFFSET as u64
     }
 
-    fn release_addr(self, cpu: u32) -> u64 {
-        self.addr + SPIN_TABLE_SLOTS_OFFSET as u64 + cpu as u64 * SPIN_TABLE_SLOT_STRIDE as u64
+    fn release_addr(self, slot: u32) -> u64 {
+        self.addr + SPIN_TABLE_SLOTS_OFFSET as u64 + slot as u64 * SPIN_TABLE_SLOT_STRIDE as u64
     }
 
-    fn ack_addr(self, cpu: u32) -> u64 {
-        self.release_addr(cpu) + SPIN_TABLE_ACK_OFFSET as u64
+    fn ack_addr(self, slot: u32) -> u64 {
+        self.release_addr(slot) + SPIN_TABLE_ACK_OFFSET as u64
     }
 }
 
 #[derive(Clone, Copy)]
 struct CpuInfo {
     reg: u32,
+    slot: u32,
     acc_base: u64,
 }
 
@@ -293,6 +335,7 @@ impl CpuList {
     fn new() -> Self {
         const EMPTY: CpuInfo = CpuInfo {
             reg: 0,
+            slot: 0,
             acc_base: 0,
         };
         Self {
@@ -313,6 +356,20 @@ impl CpuList {
 
     fn as_slice(&self) -> &[CpuInfo] {
         &self.values[..self.len]
+    }
+
+    fn primary_slot(&self, primary_reg: u32) -> Result<u32> {
+        // The MSM8916 kernel patch and userspace handoff require physical CPU0.
+        // Do not silently expand that contract when enabling Ferrari's 0x100.
+        #[cfg(not(feature = "soc-msm8939"))]
+        if primary_reg != 0 {
+            return Err(Error::EntryState);
+        }
+        self.as_slice()
+            .iter()
+            .find(|cpu| cpu.reg == primary_reg)
+            .map(|cpu| cpu.slot)
+            .ok_or(Error::MissingCpu)
     }
 }
 
@@ -581,17 +638,17 @@ fn collect_cpus(reader: &Reader<'_>) -> Result<CpuList> {
         }
 
         let reg = reader.prop_u32(child, b"reg")?;
+        let slot = cpu_slot_index(reg)?;
         let mode = match reader.prop_str(child, b"enable-method")? {
             b"spin-table" => CpuBootMode::Resident,
-            b"psci" | b"pocketboot,msm8916-acc" => CpuBootMode::Cold,
+            b"psci" | b"pocketboot,msm8916-acc" | b"pocketboot,msm8939-acc" => CpuBootMode::Cold,
             _ => return Err(Error::MissingCpu),
         };
         if cpus.len != 0 && cpus.mode != mode {
             return Err(Error::OccupiedSpinTable);
         }
         cpus.mode = mode;
-        if reg >= MAX_CPUS as u32
-            || cpus.as_slice().iter().any(|cpu| cpu.reg == reg)
+        if cpus.as_slice().iter().any(|cpu| cpu.reg == reg)
             || reader
                 .prop_str(child, b"status")
                 .is_ok_and(|s| s != b"okay" && s != b"ok")
@@ -601,7 +658,7 @@ fn collect_cpus(reader: &Reader<'_>) -> Result<CpuList> {
         let acc_base = if mode == CpuBootMode::Resident {
             let release = reader.prop(child, b"cpu-release-addr")?;
             if release.len() != 8
-                || fdt::read_cells(release, 0, 2)? != find_spin_table(reader)?.release_addr(reg)
+                || fdt::read_cells(release, 0, 2)? != find_spin_table(reader)?.release_addr(slot)
             {
                 return Err(Error::BadSpinTable);
             }
@@ -609,21 +666,14 @@ fn collect_cpus(reader: &Reader<'_>) -> Result<CpuList> {
             // the destination DT. Never touch ACC or SCM in this mode.
             0
         } else {
-            let acc_phandle = reader.prop_u32(child, b"qcom,acc")?;
-            let acc = reader.find_phandle(acc_phandle)?;
-            let acc_reg = reader.prop(acc, b"reg")?;
-            let base = fdt::read_cells(acc_reg, 0, 1)?;
-            if acc_reg.len() != 8
-                || fdt::read_cells(acc_reg, 4, 1)? < 0x18
-                || base != 0x0b088000 + reg as u64 * 0x10000
-                || !fdt::stringlist_contains(reader.prop(acc, b"compatible")?, b"qcom,msm8916-acc")
-            {
-                return Err(Error::MissingCpu);
-            }
-            base
+            collect_acc_base(reader, child, reg)?
         };
 
-        cpus.push(CpuInfo { reg, acc_base })?;
+        cpus.push(CpuInfo {
+            reg,
+            slot,
+            acc_base,
+        })?;
     }
 
     if cpus.as_slice().len() != MAX_CPUS {
@@ -631,6 +681,39 @@ fn collect_cpus(reader: &Reader<'_>) -> Result<CpuList> {
     }
 
     Ok(cpus)
+}
+
+fn collect_acc_base(reader: &Reader<'_>, cpu: Node, reg: u32) -> Result<u64> {
+    let acc_phandle = reader.prop_u32(cpu, b"qcom,acc")?;
+    let acc = reader.find_phandle(acc_phandle)?;
+    let acc_reg = reader.prop(acc, b"reg")?;
+    let compatible = reader.prop(acc, b"compatible")?;
+    let base = fdt::read_cells(acc_reg, 0, 1)?;
+    if acc_reg.len() != 8 || fdt::read_cells(acc_reg, 4, 1)? < 0x18 {
+        return Err(Error::MissingCpu);
+    }
+
+    #[cfg(not(feature = "soc-msm8939"))]
+    {
+        if base != ACC_BASE + reg as u64 * 0x10000
+            || !fdt::stringlist_contains(compatible, b"qcom,msm8916-acc")
+        {
+            return Err(Error::MissingCpu);
+        }
+    }
+    #[cfg(feature = "soc-msm8939")]
+    {
+        let expected = if reg & 0x100 != 0 {
+            ACC_BIG_CLUSTER_BASE + (reg & 0xf) as u64 * 0x10000
+        } else {
+            ACC_LITTLE_CLUSTER_BASE + reg as u64 * 0x10000
+        };
+        if base != expected || !fdt::stringlist_contains(compatible, b"qcom,kpss-acc-v2") {
+            return Err(Error::MissingCpu);
+        }
+    }
+
+    Ok(base)
 }
 
 fn occupied_prefix(prefix: &[u8]) -> bool {
@@ -646,7 +729,7 @@ fn validate_resident_descriptor(prefix: &[u8]) -> Result<()> {
     {
         return Err(Error::BadSpinTable);
     }
-    let fields = [1u32, 4096, 0x100, 0x400, 0x80, 4];
+    let fields = [1u32, 4096, 0x100, 0x400, 0x80, MAX_CPUS as u32];
     for (index, value) in fields.iter().enumerate() {
         let offset = 0x98 + index * 4;
         if prefix.get(offset..offset + 4) != Some(&value.to_le_bytes()) {
@@ -669,10 +752,10 @@ fn require_coherency(cpuectlr: u64) -> Result<()> {
     }
 }
 
-fn report_secondary_coherency(table: SpinTable, cpu: u32) -> Result<()> {
-    let cpuectlr = read64(table.release_addr(cpu) as usize + SPIN_TABLE_CPUECTLR_OFFSET);
+fn report_secondary_coherency(table: SpinTable, reg: u32, slot: u32) -> Result<()> {
+    let cpuectlr = read64(table.release_addr(slot) as usize + SPIN_TABLE_CPUECTLR_OFFSET);
     uart::write_str("msm8916: cpu");
-    uart::write_hex64(cpu as u64);
+    uart::write_hex64(reg as u64);
     uart::write_str(" CPUECTLR=");
     uart::write_hex64(cpuectlr);
     uart::writeln("");
@@ -681,14 +764,18 @@ fn report_secondary_coherency(table: SpinTable, cpu: u32) -> Result<()> {
 
 fn validate_parked_slots(
     table: SpinTable,
+    primary_slot: u32,
     entry_el: u64,
     mut read: impl FnMut(usize) -> u64,
 ) -> Result<()> {
-    if !matches!(entry_el, 4 | 8) || read(table.release_addr(0) as usize) != 0 {
+    if !matches!(entry_el, 4 | 8) || read(table.release_addr(primary_slot) as usize) != 0 {
         return Err(Error::UnparkedResident);
     }
-    for cpu in 1..MAX_CPUS as u32 {
-        let slot = table.release_addr(cpu) as usize;
+    for slot in 0..MAX_CPUS as u32 {
+        if slot == primary_slot {
+            continue;
+        }
+        let slot = table.release_addr(slot) as usize;
         let request = read(slot + SPIN_TABLE_REQUEST_OFFSET);
         if request == 0
             || read(slot) != 0
@@ -707,18 +794,24 @@ fn validate_parked_slots(
 /// A secondary held in reset cannot fetch from the resident page, whatever the
 /// page contains. Cores started by an lk2nd trampoline, parked in resident
 /// code or running a kernel all report CORE_PWRD_UP with reset released.
-fn secondaries_held_in_reset(cpus: &[CpuInfo], mut read: impl FnMut(usize) -> u32) -> bool {
-    cpus.iter().filter(|cpu| cpu.reg != 0).all(|cpu| {
-        if cpu.acc_base == 0 {
-            return false;
-        }
-        let ctl = read(cpu.acc_base as usize + APCS_CPU_PWR_CTL);
-        ctl & (CORE_RST | COREPOR_RST) != 0 && ctl & CORE_PWRD_UP == 0
-    })
+fn secondaries_held_in_reset(
+    cpus: &[CpuInfo],
+    primary_slot: u32,
+    mut read: impl FnMut(usize) -> u32,
+) -> bool {
+    cpus.iter()
+        .filter(|cpu| cpu.slot != primary_slot)
+        .all(|cpu| {
+            if cpu.acc_base == 0 {
+                return false;
+            }
+            let ctl = read(cpu.acc_base as usize + APCS_CPU_PWR_CTL);
+            ctl & (CORE_RST | COREPOR_RST) != 0 && ctl & CORE_PWRD_UP == 0
+        })
 }
 
-fn report_secondary_power(cpus: &[CpuInfo]) {
-    for cpu in cpus.iter().filter(|cpu| cpu.reg != 0) {
+fn report_secondary_power(cpus: &[CpuInfo], primary_slot: u32) {
+    for cpu in cpus.iter().filter(|cpu| cpu.slot != primary_slot) {
         uart::write_str("msm8916: cpu");
         uart::write_hex64(cpu.reg as u64);
         uart::write_str(" PWR_CTL=");
@@ -727,7 +820,7 @@ fn report_secondary_power(cpus: &[CpuInfo]) {
     }
 }
 
-fn init_spin_table(spin_table: SpinTable, cpus: &CpuList) -> Result<()> {
+fn init_spin_table(spin_table: SpinTable, cpus: &CpuList, primary_slot: u32) -> Result<()> {
     let table = spin_table.addr as *mut u8;
     // DRAM largely survives a firmware reset, so this is usually our own page
     // from the previous boot. The contents cannot show whether it is live, but
@@ -736,8 +829,8 @@ fn init_spin_table(spin_table: SpinTable, cpus: &CpuList) -> Result<()> {
     // rather than yanked out of whatever it is executing.
     let prefix = unsafe { slice::from_raw_parts(table, 0xb0) };
     if occupied_prefix(prefix) {
-        report_secondary_power(cpus.as_slice());
-        if !secondaries_held_in_reset(cpus.as_slice(), read32) {
+        report_secondary_power(cpus.as_slice(), primary_slot);
+        if !secondaries_held_in_reset(cpus.as_slice(), primary_slot, read32) {
             return Err(Error::OccupiedSpinTable);
         }
         uart::writeln("msm8916: reclaiming occupied page; secondaries held in reset");
@@ -749,8 +842,11 @@ fn init_spin_table(spin_table: SpinTable, cpus: &CpuList) -> Result<()> {
     unsafe {
         ptr::write_bytes(table, 0, SPIN_TABLE_SIZE);
         ptr::copy_nonoverlapping(image.as_ptr(), table, image.len());
-        for cpu in 1..MAX_CPUS as u32 {
-            (spin_table.release_addr(cpu) as *mut u64)
+        for slot in 0..MAX_CPUS as u32 {
+            if slot == primary_slot {
+                continue;
+            }
+            (spin_table.release_addr(slot) as *mut u64)
                 .add(SPIN_TABLE_REQUEST_OFFSET / 8)
                 .write_volatile(1u64.to_le());
         }
@@ -1164,7 +1260,7 @@ fn patch_structure(
                         writer,
                         patch_strings.offset(NAME_CPU_RELEASE_ADDR),
                         &spin_table
-                            .release_addr(reader.prop_u32(node, b"reg")?)
+                            .release_addr(cpu_slot_index(reader.prop_u32(node, b"reg")?)?)
                             .to_be_bytes(),
                     )?;
                 }
@@ -1655,6 +1751,133 @@ mod tests {
         write_prop_vec,
     };
 
+    /// Test topology matching the compiled SoC: MPIDR reg, ACC base, ACC
+    /// phandle and node name for every CPU. Order is the little cluster then
+    /// the big cluster on MSM8939, so the primary (reg 0) is first.
+    struct TestCpu {
+        reg: u32,
+        acc_base: u32,
+        phandle: u32,
+        name: String,
+    }
+
+    fn test_cpus() -> Vec<TestCpu> {
+        #[cfg(not(feature = "soc-msm8939"))]
+        let cpus: &[(u32, u32, u32)] = &[
+            (0, 0x0b08_8000, 0x100),
+            (1, 0x0b09_8000, 0x101),
+            (2, 0x0b0a_8000, 0x102),
+            (3, 0x0b0b_8000, 0x103),
+        ];
+        #[cfg(feature = "soc-msm8939")]
+        let cpus: &[(u32, u32, u32)] = &[
+            (0, 0x0b18_8000, 0x104),
+            (1, 0x0b19_8000, 0x105),
+            (2, 0x0b1a_8000, 0x106),
+            (3, 0x0b1b_8000, 0x107),
+            (0x100, 0x0b08_8000, 0x100),
+            (0x101, 0x0b09_8000, 0x101),
+            (0x102, 0x0b0a_8000, 0x102),
+            (0x103, 0x0b0b_8000, 0x103),
+        ];
+        cpus.iter()
+            .map(|(reg, acc_base, phandle)| TestCpu {
+                reg: *reg,
+                acc_base: *acc_base,
+                phandle: *phandle,
+                name: format!("cpu@{reg:x}"),
+            })
+            .collect()
+    }
+
+    fn test_cpu_infos() -> Vec<CpuInfo> {
+        test_cpus()
+            .iter()
+            .map(|cpu| CpuInfo {
+                reg: cpu.reg,
+                slot: cpu_slot_index(cpu.reg).unwrap(),
+                acc_base: cpu.acc_base as u64,
+            })
+            .collect()
+    }
+
+    /// The CPU the firmware boots on: MPIDR 0 on MSM8916, big-cluster core 0
+    /// (MPIDR 0x100) on MSM8939.
+    fn test_primary_reg() -> u32 {
+        #[cfg(feature = "soc-msm8939")]
+        {
+            0x100
+        }
+        #[cfg(not(feature = "soc-msm8939"))]
+        {
+            0
+        }
+    }
+
+    fn test_primary_slot() -> u32 {
+        cpu_slot_index(test_primary_reg()).unwrap()
+    }
+
+    fn test_acc_compatible() -> &'static [u8] {
+        #[cfg(feature = "soc-msm8939")]
+        {
+            b"qcom,kpss-acc-v2\0"
+        }
+        #[cfg(not(feature = "soc-msm8939"))]
+        {
+            b"qcom,msm8916-acc\0"
+        }
+    }
+
+    fn test_enable_method() -> &'static [u8] {
+        #[cfg(feature = "soc-msm8939")]
+        {
+            b"pocketboot,msm8939-acc\0"
+        }
+        #[cfg(not(feature = "soc-msm8939"))]
+        {
+            b"pocketboot,msm8916-acc\0"
+        }
+    }
+
+    #[test]
+    fn cpu_slots_are_dense_and_reject_invalid_affinity() {
+        let mut slots: Vec<u32> = test_cpus()
+            .iter()
+            .map(|cpu| cpu_slot_index(cpu.reg).unwrap())
+            .collect();
+        slots.sort_unstable();
+        assert_eq!(slots, (0..MAX_CPUS as u32).collect::<Vec<_>>());
+
+        #[cfg(not(feature = "soc-msm8939"))]
+        let invalid = [4u32, 0x100, 0x101, 0x1_0000];
+        #[cfg(feature = "soc-msm8939")]
+        let invalid = [4u32, 0x200, 0x1_0000, 0x1_0100];
+        for reg in invalid {
+            assert!(cpu_slot_index(reg).is_err(), "reg {reg:#x}");
+        }
+    }
+
+    #[test]
+    fn primary_selection_preserves_the_platform_contract() {
+        let dtb = msm8916_test_dtb(false);
+        let reader = Reader::new(&dtb).unwrap();
+        let cpus = collect_cpus(&reader).unwrap();
+        assert_eq!(
+            cpus.primary_slot(test_primary_reg()).unwrap(),
+            test_primary_slot()
+        );
+        for cpu in cpus.as_slice() {
+            if MAX_CPUS == 4 && cpu.reg != 0 {
+                assert!(matches!(cpus.primary_slot(cpu.reg), Err(Error::EntryState)));
+            } else {
+                assert_eq!(cpus.primary_slot(cpu.reg).unwrap(), cpu.slot);
+            }
+        }
+        assert!(cpus.primary_slot(0x10000).is_err());
+        assert!(CpuList::new().primary_slot(test_primary_reg()).is_err());
+    }
+
     #[test]
     fn discovers_uart_from_stdout_alias() {
         let dtb = msm8916_test_dtb(false);
@@ -1728,13 +1951,21 @@ mod tests {
 
     #[test]
     fn reclaims_only_while_every_secondary_is_held_in_reset() {
-        let cpus: [CpuInfo; MAX_CPUS] = core::array::from_fn(|reg| CpuInfo {
-            reg: reg as u32,
-            acc_base: 0x0b08_8000 + reg as u64 * 0x10000,
-        });
-        let held = |pwr_ctl: [u32; MAX_CPUS]| {
-            secondaries_held_in_reset(&cpus, |address| {
-                pwr_ctl[(address - 0x0b08_8000 - APCS_CPU_PWR_CTL) / 0x10000]
+        let cpus = test_cpu_infos();
+        let topology = test_cpus();
+        let primary_slot = test_primary_slot();
+        let primary_index = topology
+            .iter()
+            .position(|cpu| cpu_slot_index(cpu.reg).unwrap() == primary_slot)
+            .unwrap();
+        let secondary = (primary_index + 1) % MAX_CPUS;
+        let held = |pwr_ctl: &[u32]| {
+            secondaries_held_in_reset(&cpus, primary_slot, |address| {
+                let index = topology
+                    .iter()
+                    .position(|cpu| address as u64 == cpu.acc_base as u64 + APCS_CPU_PWR_CTL as u64)
+                    .unwrap();
+                pwr_ctl[index]
             })
         };
         let running = CORE_PWRD_UP | CORE_MEM_HS;
@@ -1744,39 +1975,47 @@ mod tests {
         // A5U after a warm reset reads 0x88 for CPU0 and 0x23 for the others.
         assert_eq!(running, 0x88);
         assert_eq!(firmware_reset, 0x23);
-        assert!(held([
-            running,
-            firmware_reset,
-            firmware_reset,
-            firmware_reset
-        ]));
-        assert!(held([
-            running,
-            preboot_reset,
-            firmware_reset,
-            preboot_reset
-        ]));
-        // CPU0 is the caller; its own state is irrelevant.
-        assert!(held([0, firmware_reset, firmware_reset, firmware_reset]));
+        let all_reset = || {
+            let mut values = vec![firmware_reset; MAX_CPUS];
+            values[primary_index] = running;
+            values
+        };
+        assert!(held(&all_reset()));
+
+        let mut mixed = all_reset();
+        mixed[secondary] = preboot_reset;
+        assert!(held(&mixed));
+        // The primary is the caller; its own state is irrelevant.
+        let mut caller_arbitrary = all_reset();
+        caller_arbitrary[primary_index] = 0;
+        assert!(held(&caller_arbitrary));
 
         // Parked in resident code, or released into a kernel.
-        assert!(!held([running, firmware_reset, running, firmware_reset]));
+        let mut parked = all_reset();
+        parked[secondary] = running;
+        assert!(!held(&parked));
         // Reset released without power-up is not a reset state.
-        assert!(!held([running, firmware_reset, firmware_reset, 0]));
+        let mut released = all_reset();
+        released[secondary] = 0;
+        assert!(!held(&released));
         // Inconsistent reset plus power-up is refused.
-        assert!(!held([
-            running,
-            firmware_reset,
-            firmware_reset,
-            firmware_reset | CORE_PWRD_UP
-        ]));
+        let mut inconsistent = all_reset();
+        inconsistent[secondary] = firmware_reset | CORE_PWRD_UP;
+        assert!(!held(&inconsistent));
 
         // Resident-mode entries carry no ACC and can never be reclaimed.
-        let resident: [CpuInfo; MAX_CPUS] = core::array::from_fn(|reg| CpuInfo {
-            reg: reg as u32,
-            acc_base: 0,
-        });
-        assert!(!secondaries_held_in_reset(&resident, |_| unreachable!()));
+        let resident: Vec<CpuInfo> = cpus
+            .iter()
+            .map(|cpu| CpuInfo {
+                acc_base: 0,
+                ..*cpu
+            })
+            .collect();
+        assert!(!secondaries_held_in_reset(
+            &resident,
+            primary_slot,
+            |_| unreachable!()
+        ));
     }
 
     fn replace_prop(dtb: &mut [u8], path: &[u8], name: &[u8], replacement: &[u8]) {
@@ -1789,14 +2028,15 @@ mod tests {
     }
 
     #[test]
-    fn validates_four_cpu_topology_and_reserved_memory() {
+    fn validates_cpu_topology_and_reserved_memory() {
         let dtb = msm8916_test_dtb(true);
         let reader = Reader::new(&dtb).unwrap();
         let table = find_spin_table(&reader).unwrap();
-        assert_eq!(collect_cpus(&reader).unwrap().as_slice().len(), 4);
+        assert_eq!(collect_cpus(&reader).unwrap().as_slice().len(), MAX_CPUS);
         assert_eq!(table.code_addr(), 0x90000100);
-        assert_eq!(table.release_addr(3), 0x90000580);
-        assert_eq!(table.ack_addr(3), 0x900005c0);
+        let last = MAX_CPUS as u32 - 1;
+        assert_eq!(table.release_addr(last), 0x9000_0400 + last as u64 * 0x80);
+        assert_eq!(table.ack_addr(last), 0x9000_0440 + last as u64 * 0x80);
         validate_memory(&reader, table, 0x80200000, 0x1000000).unwrap();
         assert!(validate_memory(&reader, table, 0x90000000, 4096).is_err());
         assert!(validate_memory(&reader, table, 0x80200000, 0).is_err());
@@ -1805,7 +2045,7 @@ mod tests {
 
     #[test]
     fn rejects_duplicate_affinity_and_incorrect_acc() {
-        for reg in [0u32, 0x101, 4] {
+        for reg in [0u32, 4, 0x1_0000] {
             let mut dtb = msm8916_test_dtb(true);
             replace_prop(&mut dtb, b"/cpus/cpu@1", b"reg", &reg.to_be_bytes());
             assert!(collect_cpus(&Reader::new(&dtb).unwrap()).is_err());
@@ -1859,13 +2099,15 @@ mod tests {
         let cpus = collect_cpus(&reader).unwrap();
         assert_eq!(cpus.mode, CpuBootMode::Resident);
         assert!(cpus.as_slice().iter().all(|cpu| cpu.acc_base == 0));
-        for cpu in 0..4u32 {
+        for cpu in test_cpus() {
             let node = reader
-                .find_path(format!("/cpus/cpu@{cpu:x}").as_bytes())
+                .find_path(format!("/cpus/{}", cpu.name).as_bytes())
                 .unwrap();
             assert_eq!(
                 reader.prop(node, b"cpu-release-addr").unwrap(),
-                table.release_addr(cpu).to_be_bytes()
+                table
+                    .release_addr(cpu_slot_index(cpu.reg).unwrap())
+                    .to_be_bytes()
             );
         }
     }
@@ -1876,7 +2118,10 @@ mod tests {
         prefix[..4].copy_from_slice(&0x14000040u32.to_le_bytes());
         prefix[0x80..0x88].copy_from_slice(b"spin-tab");
         prefix[0x90..0x98].copy_from_slice(b"PBSPIN01");
-        for (index, value) in [1u32, 4096, 0x100, 0x400, 0x80, 4].iter().enumerate() {
+        for (index, value) in [1u32, 4096, 0x100, 0x400, 0x80, MAX_CPUS as u32]
+            .iter()
+            .enumerate()
+        {
             prefix[0x98 + index * 4..0x9c + index * 4].copy_from_slice(&value.to_le_bytes());
         }
         validate_resident_descriptor(&prefix).unwrap();
@@ -1889,24 +2134,33 @@ mod tests {
             );
         }
         let table = SpinTable { addr: 0 };
+        let primary_slot = test_primary_slot();
         let mut words = [0u64; SPIN_TABLE_SIZE / 8];
-        for cpu in 1..4 {
-            let slot = table.release_addr(cpu) as usize / 8;
-            words[slot + SPIN_TABLE_REQUEST_OFFSET / 8] = cpu as u64 + 2;
-            words[slot + SPIN_TABLE_ACK_OFFSET / 8] = cpu as u64 + 2;
-            words[slot + SPIN_TABLE_ENTRY_EL_OFFSET / 8] = 4;
+        for slot in 0..MAX_CPUS as u32 {
+            if slot == primary_slot {
+                continue;
+            }
+            let word = table.release_addr(slot) as usize / 8;
+            words[word + SPIN_TABLE_REQUEST_OFFSET / 8] = slot as u64 + 2;
+            words[word + SPIN_TABLE_ACK_OFFSET / 8] = slot as u64 + 2;
+            words[word + SPIN_TABLE_ENTRY_EL_OFFSET / 8] = 4;
         }
-        validate_parked_slots(table, 4, |addr| words[addr / 8]).unwrap();
-        assert!(validate_parked_slots(table, 8, |addr| words[addr / 8]).is_err());
-        for cpu in 1..4 {
+        validate_parked_slots(table, primary_slot, 4, |addr| words[addr / 8]).unwrap();
+        assert!(validate_parked_slots(table, primary_slot, 8, |addr| words[addr / 8]).is_err());
+        for slot in 0..MAX_CPUS as u32 {
+            if slot == primary_slot {
+                continue;
+            }
             for (offset, value) in [(0, 0x80200000), (8, 0), (0x40, 1), (0x48, 8)] {
                 let mut bad = words;
-                bad[(table.release_addr(cpu) as usize + offset) / 8] = value;
-                assert!(validate_parked_slots(table, 4, |addr| bad[addr / 8]).is_err());
+                bad[(table.release_addr(slot) as usize + offset) / 8] = value;
+                assert!(
+                    validate_parked_slots(table, primary_slot, 4, |addr| bad[addr / 8]).is_err()
+                );
             }
         }
-        words[table.release_addr(0) as usize / 8] = 0x80200000;
-        assert!(validate_parked_slots(table, 4, |addr| words[addr / 8]).is_err());
+        words[table.release_addr(primary_slot) as usize / 8] = 0x80200000;
+        assert!(validate_parked_slots(table, primary_slot, 4, |addr| words[addr / 8]).is_err());
     }
 
     #[test]
@@ -1933,14 +2187,17 @@ mod tests {
         let table = find_spin_table(&reader).unwrap();
         let mut output = vec![0; 16384];
         let patched = patch_fdt(&reader, &mut output, table).unwrap().to_vec();
-        for cpu in 0..4 {
-            let path = format!("/cpus/cpu@{cpu:x}");
+        for cpu in test_cpus() {
+            let path = format!("/cpus/{}", cpu.name);
+            let slot = cpu_slot_index(cpu.reg).unwrap();
             let mut bad = patched.clone();
             replace_prop(
                 &mut bad,
                 path.as_bytes(),
                 b"cpu-release-addr",
-                &table.release_addr((cpu + 1) % 4).to_be_bytes(),
+                &table
+                    .release_addr((slot + 1) % MAX_CPUS as u32)
+                    .to_be_bytes(),
             );
             assert!(collect_cpus(&Reader::new(&bad).unwrap()).is_err());
             let mut bad = patched.clone();
@@ -2051,15 +2308,15 @@ mod tests {
 
     #[test]
     fn accepts_lk2nd_bypass_method_then_patches_to_spin_table() {
-        let dtb = msm8916_test_dtb_with_method(true, b"pocketboot,msm8916-acc\0");
+        let dtb = msm8916_test_dtb_with_method(true, test_enable_method());
         let reader = Reader::new(&dtb).unwrap();
-        assert_eq!(collect_cpus(&reader).unwrap().as_slice().len(), 4);
+        assert_eq!(collect_cpus(&reader).unwrap().as_slice().len(), MAX_CPUS);
         let mut output = vec![0; 16384];
         let patched = patch_fdt(&reader, &mut output, find_spin_table(&reader).unwrap()).unwrap();
         let patched = Reader::new(patched).unwrap();
-        for cpu in 0..4 {
+        for cpu in test_cpus() {
             let node = patched
-                .find_path(format!("/cpus/cpu@{cpu:x}").as_bytes())
+                .find_path(format!("/cpus/{}", cpu.name).as_bytes())
                 .unwrap();
             assert_eq!(
                 patched.prop_str(node, b"enable-method").unwrap(),
@@ -2129,7 +2386,7 @@ mod tests {
             write_begin_node_vec(structure, b"cpus");
             write_prop_vec(structure, address_cells, &1u32.to_be_bytes());
             write_prop_vec(structure, size_cells, &0u32.to_be_bytes());
-            for cpu in 0..4 {
+            for cpu in test_cpus() {
                 write_cpu_node(
                     structure,
                     device_type,
@@ -2140,8 +2397,8 @@ mod tests {
                     power_domain_names,
                     qcom_acc,
                     qcom_saw,
-                    cpu,
-                    0x100 + cpu,
+                    cpu.reg,
+                    cpu.phandle,
                     0x200,
                     cpu_idle_states,
                     method,
@@ -2180,9 +2437,8 @@ mod tests {
             write_prop_vec(structure, reg, &uart_reg);
             write_be32_vec(structure, FDT_END_NODE);
 
-            for cpu in 0..4 {
-                let base = 0x0b088000 + cpu * 0x10000;
-                let name = format!("power-manager@{base:x}");
+            for cpu in test_cpus() {
+                let name = format!("power-manager@{:x}", cpu.acc_base);
                 write_acc_or_saw(
                     structure,
                     reg,
@@ -2190,8 +2446,8 @@ mod tests {
                     status,
                     phandle,
                     name.as_bytes(),
-                    base,
-                    0x100 + cpu,
+                    cpu.acc_base,
+                    cpu.phandle,
                 );
             }
             write_acc_or_saw(
@@ -2219,17 +2475,17 @@ mod tests {
         power_domain_names: u32,
         qcom_acc: u32,
         qcom_saw: u32,
-        cpu: u32,
+        cpu_reg: u32,
         acc: u32,
         saw: u32,
         cpu_idle_states: u32,
         method: &[u8],
     ) {
-        let name = format!("cpu@{cpu:x}");
+        let name = format!("cpu@{cpu_reg:x}");
         write_begin_node_vec(structure, name.as_bytes());
         write_prop_vec(structure, device_type, b"cpu\0");
         write_prop_vec(structure, compatible, b"arm,cortex-a53\0");
-        write_prop_vec(structure, reg, &cpu.to_be_bytes());
+        write_prop_vec(structure, reg, &cpu_reg.to_be_bytes());
         write_prop_vec(structure, enable_method, method);
         write_prop_vec(structure, power_domains, &0x300u32.to_be_bytes());
         write_prop_vec(structure, power_domain_names, b"psci\0");
@@ -2250,7 +2506,7 @@ mod tests {
         phandle_value: u32,
     ) {
         write_begin_node_vec(structure, name);
-        write_prop_vec(structure, compatible, b"qcom,msm8916-acc\0");
+        write_prop_vec(structure, compatible, test_acc_compatible());
         let mut value = Vec::new();
         write_be32_vec(&mut value, base);
         write_be32_vec(&mut value, 0x1000);

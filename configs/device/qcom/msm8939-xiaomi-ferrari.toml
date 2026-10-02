@@ -1,0 +1,42 @@
+name = "Xiaomi Mi 4i (ferrari)"
+
+[kconfig]
+# The devicetree stdout-path is the simple-framebuffer, so kernel logs and
+# panics need fbcon on the simpledrm device. No UART is required.
+DRM_FBDEV_EMULATION = true
+FRAMEBUFFER_CONSOLE = true
+
+# Keep the console log in the lk2nd-provided ramoops region so panics survive
+# a reset ("lk2nd.pass-ramoops" below, then `fastboot oem ramoops raw`).
+PSTORE_CONSOLE = true
+
+# Power and volume keys on the PM8916 PMIC
+INPUT_PM8941_PWRKEY = true
+
+# Atmel maxtouch controller; the kernel tree adds the T97 key array enable
+TOUCHSCREEN_ATMEL_MXT = true
+
+# Board GPIO-controlled rails and USB MUX
+REGULATOR_FIXED_VOLTAGE = true
+EXTCON = true
+EXTCON_USB_GPIO = true
+
+[bootimg]
+header_version = 0
+page_size = 2048
+kernel_image = "Image.gz"
+base = 0x80000000
+# Stock MSM8939 ABL places ARM64 images at DDR + 0x80000.
+kernel_offset = 0x00080000
+ramdisk_offset = 0x02000000
+second_offset = 0x00f00000
+tags_offset = 0x00000100
+dtb_offset = 0x0
+# Xiaomi MSM8939 boot flow carries the DTB appended to the kernel payload
+# (like the msm8953 daisy images); lk2nd finds it after the gzip stream.
+append_dtb = true
+ramdisk_size = 1
+append_seandroid_enforce = true
+# lk2nd injects the vendor ramoops region into the DT. No "=zap" so a panic
+# from the previous boot is still readable from lk2nd fastboot afterwards.
+cmdline = "lk2nd.pass-ramoops"

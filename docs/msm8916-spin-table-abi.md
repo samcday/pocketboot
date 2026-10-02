@@ -6,6 +6,11 @@ interface. Hardware acceptance requires non-PSCI ACC/SCM startup, useful work on
 all four CPUs, acknowledged parking, and useful work on all four CPUs after
 kexec. A DB410c PSCI baseline alone does not establish that result.
 
+The MSM8939 port extends this layout to eight CPUs. Its userspace DTB handling
+has host and ARM64/QEMU regression coverage, but the complete eight-CPU parking
+path has no hardware acceptance yet and is not enabled in the Ferrari build.
+The four-core results do not validate the eight-core extension.
+
 ## Ownership and device tree
 
 One enabled child of `/reserved-memory` has
@@ -14,9 +19,25 @@ One enabled child of `/reserved-memory` has
 overlap another reservation owner. MSM8916 builds use `0x854ff000` when that
 page is available in the board's memory map.
 
-Version 1 supports the four Cortex-A53 CPUs with MPIDRs 0, 1, 2 and 3. CPU0 is
-the boot and reboot CPU. Each enabled CPU has `enable-method = "spin-table"`
-and a 64-bit big-endian FDT `cpu-release-addr` pointing to its slot below.
+The MSM8916 variant supports exactly four Cortex-A53 CPUs with MPIDRs
+0, 1, 2 and 3; physical CPU0 is the boot and reboot CPU. The experimental
+MSM8939 variant supports exactly those four plus 0x100, 0x101, 0x102 and 0x103.
+Its boot/reboot CPU is Linux logical CPU0, which on Ferrari is physical MPIDR
+0x100. The loader requires live and destination FDT `boot_cpuid_phys` values
+to agree and name an enabled CPU; it retains the physical-CPU-zero restriction
+for the legacy four-core variant. Node order does not determine the boot CPU.
+
+This header check is metadata validation, not a probe of the executing CPU.
+Packaged Ferrari DTBs can have `boot_cpuid_phys = 0` even though firmware boots
+on MPIDR 0x100. The shim and kernel identify the actual primary independently.
+Matching zero headers are accepted for the eight-core variant; a zero destination
+header versus a live 0x100 header is rejected rather than silently rewritten.
+
+Each enabled CPU has `enable-method = "spin-table"` and a 64-bit big-endian FDT
+`cpu-release-addr` pointing to its slot below. Slots are dense:
+`slot = Aff1 * 4 + Aff0`, giving indices 0..3 on MSM8916 and 0..7 on MSM8939.
+Do not multiply a raw MPIDR such as 0x100 by the slot stride. Incomplete clusters,
+other MPIDR sets, and disagreement between live and destination CPUs are rejected.
 PSCI CPU startup, CPU PSCI power domains and CPU idle-state references are
 removed from the handed-off description; unrelated power domains remain.
 The versioned binding fixes the other offsets, so no redundant per-CPU
@@ -43,10 +64,10 @@ are little-endian; FDT integers remain big-endian.
 | `0x0a0` | u32 entry offset: `0x100` |
 | `0x0a4` | u32 slot array offset: `0x400` |
 | `0x0a8` | u32 slot stride: `0x80` |
-| `0x0ac` | u32 CPU count: 4 |
+| `0x0ac` | u32 CPU count: 4, or 8 for the experimental MSM8939 variant |
 | `0x0b0` | Optional eight-byte diagnostic tag `PBSDIAG1` |
 | `0x100` | Immutable, position-independent resident parking code |
-| `0x400 + MPIDR * 0x80` | u64 release address, primary-owned |
+| `0x400 + slot * 0x80` | u64 release address, primary-owned |
 | slot + `0x08` | u64 request generation, primary-owned |
 | slot + `0x40` | u64 acknowledgement generation, secondary-owned |
 | slot + `0x48` | u64 `CurrentEL` on resident entry (4 for EL1, 8 for EL2) |
@@ -93,7 +114,7 @@ relocation. A failure after CPU teardown must halt handoff rather than warn
 and overwrite memory a secondary might still execute.
 
 Ordinary CPU hotplug and crash kexec are initially rejected for this contract.
-Eligibility and CPU0 reboot affinity must be checked before device/CPU teardown.
+Eligibility and logical-CPU0 reboot affinity must be checked before device/CPU teardown.
 The reservation, code and acknowledgements must not refer to outgoing-kernel
 storage, and final cache cleaning must not be followed by stack writes in that
 storage.
@@ -101,8 +122,9 @@ storage.
 ## Entering pocketpreboot again
 
 A packaged kexec destination may enter pocketpreboot before its kernel. It may
-reuse the resident page only when all four incoming CPU nodes already describe
-the matching v1 spin-table contract, CPU0's release remains zero, and each
+reuse the resident page only when all incoming CPU nodes already describe
+the matching v1 spin-table contract and descriptor CPU count, the primary's
+release remains zero, and each
 secondary has release=0, a nonzero request, ack=request, and the primary's
 exception level. Tagged snapshots must also show SMPEN. Mixed CPU methods,
 unknown descriptors, active release slots and stale acknowledgments are errors.

@@ -1277,9 +1277,22 @@ mod fdt {
     const SPIN_TABLE_BYTES: u64 = 0x1000;
     const SPIN_TABLE_SLOTS: u64 = 0x400;
     const SPIN_TABLE_STRIDE: u64 = 0x80;
+    // Slot order is Aff1 * 4 + Aff0, not the raw MPIDR or DT node order.
+    // The legacy MSM8916 topology is the first four entries; MSM8939 uses all eight.
+    const SPIN_TABLE_MPIDRS: [u64; 8] = [0, 1, 2, 3, 0x100, 0x101, 0x102, 0x103];
 
     struct SpinTableContract {
         base: u64,
+    }
+
+    impl SpinTableContract {
+        fn release_addr(&self, mpidr: u64) -> io::Result<u64> {
+            let slot = SPIN_TABLE_MPIDRS
+                .iter()
+                .position(|&id| id == mpidr)
+                .ok_or_else(|| invalid_data_error("unsupported spin-table CPU MPIDR"))?;
+            Ok(self.base + SPIN_TABLE_SLOTS + slot as u64 * SPIN_TABLE_STRIDE)
+        }
     }
 
     /// Preserve the running CPUs' boot protocol when a boot entry supplies its
@@ -1289,10 +1302,6 @@ mod fdt {
         let Some(contract) = spin_table_contract(&live)? else {
             return Ok(dtb.to_vec());
         };
-        if Header::parse(live_dtb)?.boot_cpuid_phys != 0 || Header::parse(dtb)?.boot_cpuid_phys != 0
-        {
-            return invalid_data("spin-table v1 requires CPU0 as the boot CPU");
-        }
         // Validate the live ownership too: a second overlapping reservation
         // would make the persistent code's lifetime ambiguous.
         graft_parking_reservation(&mut live, &contract)?;
@@ -1302,6 +1311,22 @@ mod fdt {
         let target_cpus = cpu_nodes(&target)?;
         if live_cpus.keys().ne(target_cpus.keys()) {
             return invalid_data("destination CPU MPIDRs do not match the live spin-table CPUs");
+        }
+        let boot_cpuid_phys = Header::parse(live_dtb)?.boot_cpuid_phys;
+        // The legacy four-core kernel patch requires physical CPU 0. The
+        // MSM8939 port uses logical CPU0, which may be physical CPU 0x100.
+        // These header checks establish metadata consistency, not the running
+        // CPU's identity: a packaged Ferrari DTB can still declare CPU 0.
+        // The shim/kernel identify the real primary from MPIDR/logical CPU0.
+        if (live_cpus.len() == 4 && boot_cpuid_phys != 0)
+            || !live_cpus.contains_key(&u64::from(boot_cpuid_phys))
+        {
+            return invalid_data("unsupported boot CPU for the live spin-table topology");
+        }
+        if Header::parse(dtb)?.boot_cpuid_phys != boot_cpuid_phys {
+            return invalid_data(
+                "destination boot CPU does not match the live spin-table boot CPU",
+            );
         }
 
         let providers = power_domain_providers(&target)?;
@@ -1315,7 +1340,7 @@ mod fdt {
             cpu.set(b"enable-method", b"spin-table\0");
             cpu.set(
                 b"cpu-release-addr",
-                &(contract.base + SPIN_TABLE_SLOTS + mpidr * SPIN_TABLE_STRIDE).to_be_bytes(),
+                &contract.release_addr(mpidr)?.to_be_bytes(),
             );
             cpu.remove(b"cpu-idle-states");
             remove_psci_cpu_domains(cpu, &providers)?;
@@ -1429,13 +1454,23 @@ mod fdt {
             return invalid_data("spin-table v1 requires one aligned 4 KiB page");
         }
         let cpus = cpu_nodes(root)?;
-        if !cpus.keys().copied().eq(0..4) {
-            return invalid_data("spin-table v1 requires enabled CPU MPIDRs 0 through 3");
+        let expected_mpidrs = match cpus.len() {
+            4 => &SPIN_TABLE_MPIDRS[..4],
+            8 => &SPIN_TABLE_MPIDRS[..],
+            _ => {
+                return invalid_data(
+                    "spin-table v1 requires a complete four- or eight-CPU topology",
+                );
+            }
+        };
+        if !cpus.keys().eq(expected_mpidrs.iter()) {
+            return invalid_data("unsupported spin-table CPU MPIDR topology");
         }
+        let contract = SpinTableContract { base };
         let nodes = &root.child(b"cpus").unwrap().children;
         for (mpidr, index) in cpus {
             let cpu = &nodes[index];
-            let expected = (base + SPIN_TABLE_SLOTS + mpidr * SPIN_TABLE_STRIDE).to_be_bytes();
+            let expected = contract.release_addr(mpidr)?.to_be_bytes();
             if cpu.get(b"enable-method") != Some(b"spin-table\0")
                 || cpu.get(b"cpu-release-addr") != Some(expected.as_slice())
             {
@@ -1444,7 +1479,7 @@ mod fdt {
                 );
             }
         }
-        Ok(Some(SpinTableContract { base }))
+        Ok(Some(contract))
     }
 
     fn reserved_cells(root: &ContractNode, reserved: &ContractNode) -> io::Result<(u32, u32)> {
@@ -2846,19 +2881,27 @@ mod fdt {
             reverse_cpus: bool,
             address_cells: u32,
         ) -> ContractNode {
+            contract_fixture_with_cpus(spin_table, reverse_cpus, address_cells, &[0, 1, 2, 3])
+        }
+
+        fn contract_fixture_with_cpus(
+            spin_table: bool,
+            reverse_cpus: bool,
+            address_cells: u32,
+            mpidrs: &[u64],
+        ) -> ContractNode {
             let mut root = ContractNode::new(b"");
             root.set(PROP_ADDRESS_CELLS, &address_cells.to_be_bytes());
             root.set(PROP_SIZE_CELLS, &address_cells.to_be_bytes());
             let mut cpus = ContractNode::new(b"cpus");
             cpus.set(PROP_ADDRESS_CELLS, &address_cells.to_be_bytes());
             cpus.set(PROP_SIZE_CELLS, &0u32.to_be_bytes());
-            let ids: Vec<u64> = if reverse_cpus {
-                (0..4).rev().collect()
-            } else {
-                (0..4).collect()
-            };
+            let mut ids = mpidrs.to_vec();
+            if reverse_cpus {
+                ids.reverse();
+            }
             for id in ids {
-                let mut cpu = ContractNode::new(format!("cpu@{id}").as_bytes());
+                let mut cpu = ContractNode::new(format!("cpu@{id:x}").as_bytes());
                 cpu.set(b"device_type", b"cpu\0");
                 cpu.set(PROP_REG, &encode_cells(id, address_cells).unwrap());
                 cpu.set(b"phandle", &(0x200 + id as u32).to_be_bytes());
@@ -2871,9 +2914,10 @@ mod fdt {
                     },
                 );
                 if spin_table {
+                    let slot = (id >> 8) * 4 + (id & 0xff);
                     cpu.set(
                         b"cpu-release-addr",
-                        &(PARKING_BASE + 0x400 + id * 0x80).to_be_bytes(),
+                        &(PARKING_BASE + 0x400 + slot * 0x80).to_be_bytes(),
                     );
                 }
                 cpus.children.push(cpu);
@@ -2905,6 +2949,25 @@ mod fdt {
         fn fixture_dtb_with_reservations(root: &ContractNode, reserve_map: &[u8]) -> Vec<u8> {
             let template = test_dtb(|_, _| {});
             build_contract_tree(&template, root, reserve_map).unwrap()
+        }
+
+        fn fixture_dtb_with_boot_cpu(root: &ContractNode, boot_mpidr: u32) -> Vec<u8> {
+            let mut dtb = fixture_dtb(root);
+            dtb[28..32].copy_from_slice(&boot_mpidr.to_be_bytes());
+            dtb
+        }
+
+        fn ferrari_contract_fixture(
+            spin_table: bool,
+            reverse_cpus: bool,
+            address_cells: u32,
+        ) -> ContractNode {
+            contract_fixture_with_cpus(
+                spin_table,
+                reverse_cpus,
+                address_cells,
+                &[0, 1, 2, 3, 0x100, 0x101, 0x102, 0x103],
+            )
         }
 
         fn fixture_cpu(root: &mut ContractNode, index: usize) -> &mut ContractNode {
@@ -2993,6 +3056,186 @@ mod fdt {
                 reserved_ranges(&grafted).unwrap()
             );
             assert_eq!(graft_spin_table(&grafted, &live).unwrap(), grafted);
+        }
+
+        #[test]
+        fn spin_table_graft_uses_dense_slots_for_ferrari_and_preserves_boot_cpu() {
+            let live = fixture_dtb_with_boot_cpu(&ferrari_contract_fixture(true, false, 2), 0x100);
+            let target =
+                fixture_dtb_with_boot_cpu(&ferrari_contract_fixture(false, true, 1), 0x100);
+            let grafted = graft_spin_table(&target, &live).unwrap();
+            let root = contract_tree(&grafted).unwrap();
+            let cpus = root.child(b"cpus").unwrap();
+            let nodes = cpu_nodes(&root).unwrap();
+            assert_eq!(Header::parse(&grafted).unwrap().boot_cpuid_phys, 0x100);
+            assert_eq!(
+                cpus.children[0].get(PROP_REG),
+                Some(0x103u32.to_be_bytes().as_slice()),
+                "keep destination node order; match CPUs by MPIDR"
+            );
+            for (mpidr, offset) in [
+                (0, 0x400),
+                (1, 0x480),
+                (2, 0x500),
+                (3, 0x580),
+                (0x100, 0x600),
+                (0x101, 0x680),
+                (0x102, 0x700),
+                (0x103, 0x780),
+            ] {
+                let cpu = &cpus.children[nodes[&mpidr]];
+                assert_eq!(cpu.get(b"enable-method"), Some(b"spin-table\0".as_slice()));
+                assert_eq!(
+                    cpu.get(b"cpu-release-addr"),
+                    Some((PARKING_BASE + offset).to_be_bytes().as_slice())
+                );
+                assert_eq!(
+                    cpu.get(b"phandle"),
+                    Some((0x200 + mpidr as u32).to_be_bytes().as_slice())
+                );
+            }
+            assert_eq!(
+                reserved_ranges(&grafted).unwrap(),
+                [(PARKING_BASE, PARKING_BASE + 0x1000); 2]
+            );
+            assert_eq!(graft_spin_table(&grafted, &live).unwrap(), grafted);
+            // This also covers the live-tree fallback and /chosen rewriting.
+            let fallback = graft_spin_table(&live, &live).unwrap();
+            let patched = patch_chosen(&fallback, "quiet", None).unwrap();
+            assert_eq!(Header::parse(&patched).unwrap().boot_cpuid_phys, 0x100);
+            assert_eq!(
+                reserved_ranges(&patched).unwrap(),
+                reserved_ranges(&grafted).unwrap()
+            );
+        }
+
+        #[test]
+        fn spin_table_graft_does_not_infer_two_cluster_boot_cpu_from_node_order() {
+            // The two-cluster shim discovers the running CPU by MPIDR rather
+            // than requiring Ferrari's usual 0x100 or the first DT node.
+            for boot_mpidr in [0, 0x100] {
+                let live =
+                    fixture_dtb_with_boot_cpu(&ferrari_contract_fixture(true, true, 1), boot_mpidr);
+                let target = fixture_dtb_with_boot_cpu(
+                    &ferrari_contract_fixture(false, false, 2),
+                    boot_mpidr,
+                );
+                let grafted = graft_spin_table(&target, &live).unwrap();
+                assert_eq!(Header::parse(&grafted).unwrap().boot_cpuid_phys, boot_mpidr);
+            }
+        }
+
+        #[test]
+        fn spin_table_graft_rejects_unsupported_or_mismatched_boot_cpus() {
+            let quad_live = contract_fixture(true, false, 2);
+            let quad_target = contract_fixture(false, true, 1);
+            // Preserve the legacy four-core ABI's physical-CPU-zero requirement.
+            for (live_boot, target_boot) in [(1, 1), (0, 1), (1, 0), (0x100, 0x100)] {
+                assert!(
+                    graft_spin_table(
+                        &fixture_dtb_with_boot_cpu(&quad_target, target_boot),
+                        &fixture_dtb_with_boot_cpu(&quad_live, live_boot),
+                    )
+                    .is_err()
+                );
+            }
+            let live = ferrari_contract_fixture(true, false, 2);
+            let target = ferrari_contract_fixture(false, false, 2);
+            for (live_boot, target_boot) in [
+                (0x100, 0),
+                (0, 0x100),
+                (0x100, 0x101),
+                (4, 4),
+                (0x104, 0x104),
+                (0x200, 0x200),
+            ] {
+                assert!(
+                    graft_spin_table(
+                        &fixture_dtb_with_boot_cpu(&target, target_boot),
+                        &fixture_dtb_with_boot_cpu(&live, live_boot),
+                    )
+                    .is_err(),
+                    "accepted live boot CPU {live_boot:#x} / target {target_boot:#x}"
+                );
+            }
+        }
+
+        #[test]
+        fn spin_table_graft_rejects_incomplete_or_unsupported_live_topologies() {
+            for mpidrs in [
+                vec![0, 1, 2],
+                vec![0, 1, 2, 4],
+                vec![0x100, 0x101, 0x102, 0x103],
+                vec![0, 1, 2, 3, 0x100, 0x101, 0x102],
+                vec![0, 1, 2, 3, 4, 5, 6, 7],
+                vec![0, 1, 2, 3, 0x100, 0x101, 0x102, 0x104],
+                vec![0, 1, 2, 3, 0x100, 0x101, 0x102, 0x200],
+                vec![0, 1, 2, 3, 0x100, 0x101, 0x102, 0x103, 0x200],
+            ] {
+                let live = fixture_dtb(&contract_fixture_with_cpus(true, false, 2, &mpidrs));
+                let target = fixture_dtb(&contract_fixture_with_cpus(false, false, 2, &mpidrs));
+                assert!(
+                    graft_spin_table(&target, &live).is_err(),
+                    "accepted unsupported MPIDR set {mpidrs:x?}"
+                );
+            }
+        }
+
+        #[test]
+        fn spin_table_graft_rejects_invalid_ferrari_release_addresses_and_ownership() {
+            let valid = ferrari_contract_fixture(true, false, 2);
+            let target =
+                fixture_dtb_with_boot_cpu(&ferrari_contract_fixture(false, false, 2), 0x100);
+            let mut cases = Vec::new();
+            for offset in [0x400, 0x680, 0x8400] {
+                let mut live = valid.clone();
+                // MPIDR 0x100 must have offset 0x600: not a duplicate slot, a
+                // neighboring slot, or the old raw-MPIDR-derived address.
+                fixture_cpu(&mut live, 4)
+                    .set(b"cpu-release-addr", &(PARKING_BASE + offset).to_be_bytes());
+                cases.push(live);
+            }
+            let mut missing = valid.clone();
+            fixture_cpu(&mut missing, 7).remove(b"cpu-release-addr");
+            cases.push(missing);
+            let mut mixed = valid.clone();
+            fixture_cpu(&mut mixed, 7).set(b"enable-method", b"psci\0");
+            cases.push(mixed);
+            let mut disabled = valid.clone();
+            fixture_cpu(&mut disabled, 7).set(PROP_STATUS, b"disabled\0");
+            cases.push(disabled);
+            let mut unowned = valid.clone();
+            unowned
+                .children
+                .retain(|node| node.name != b"reserved-memory");
+            cases.push(unowned);
+            let mut wrong_version = valid;
+            fixture_parking(&mut wrong_version).set(b"compatible", b"pocketboot,spin-table-v2\0");
+            cases.push(wrong_version);
+            for (index, live) in cases.iter().enumerate() {
+                assert!(
+                    graft_spin_table(&target, &fixture_dtb_with_boot_cpu(live, 0x100)).is_err(),
+                    "accepted invalid Ferrari live contract {index}"
+                );
+            }
+        }
+
+        #[test]
+        fn spin_table_graft_rejects_changed_ferrari_destination_cpu_sets() {
+            let live = fixture_dtb_with_boot_cpu(&ferrari_contract_fixture(true, false, 2), 0x100);
+            let valid = ferrari_contract_fixture(false, true, 1);
+            for replacement in [0u32, 4, 0x104, 0x200] {
+                let mut target = valid.clone();
+                fixture_cpu(&mut target, 0).set(PROP_REG, &replacement.to_be_bytes());
+                assert!(
+                    graft_spin_table(&fixture_dtb_with_boot_cpu(&target, 0x100), &live).is_err()
+                );
+            }
+            let mut target = valid;
+            fixture_cpu(&mut target, 0).set(PROP_STATUS, b"disabled\0");
+            assert!(graft_spin_table(&fixture_dtb_with_boot_cpu(&target, 0x100), &live).is_err());
+            let quad_target = fixture_dtb_with_boot_cpu(&contract_fixture(false, false, 2), 0x100);
+            assert!(graft_spin_table(&quad_target, &live).is_err());
         }
 
         #[test]
