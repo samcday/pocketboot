@@ -200,3 +200,5 @@ is 362232 bytes, not 361752. The smaller size belonged to the earlier
 pre-review binary (SHA256 e9697b2514c940a24dc4b1b849626056475bf6a9a42bf3c41182d79308ca2ae7).
 The final reader hash and test results above are correct. The local build
 and preparation pass was completed on 2026-10-01 UTC.
+
+Acquisition completed after explicit approval: two identical 128 KiB physical-address-zero PBL reads, with no exploit or flash-writing commands. Full run/provenance/restoration evidence is on 4b7685eac406948aed645f2f4377649af3b3b28e in this notes ref. The handset was returned to its original Pocketboot image.
