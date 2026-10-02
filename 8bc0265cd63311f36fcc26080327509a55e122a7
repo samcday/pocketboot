@@ -1,0 +1,134 @@
+Extlinux config-source priority regression and validation
+Repository: samcday/pocketboot, PR #38
+Commit: 8bc0265cd63311f36fcc26080327509a55e122a7
+Parent/baseline: eeb3dc2123e2efac84be47c3bc9546b957df6bb6
+Validated: 2026-10-02T16:07:57+10:00
+Host: Linux 7.2.7-300.fc45.x86_64 x86_64 GNU/Linux
+Toolchain: rustc 1.96.0 (ac68faa20 2026-05-25); cargo 1.96.0 (30a34c682 2026-05-25)
+Device: none. No hardware access, card changes, VM trials, or new platform claims.
+
+Scope and conclusion
+--------------------
+The two supported extlinux paths independently assigned preferred/default and
+per-config boot_order values. Sorting could put boot/extlinux/extlinux.conf
+ahead of extlinux/extlinux.conf because of reverse label ID or path ties.
+Assign one boot_order sequence over the concatenated usable entries after scanning
+both paths. Preserve each config's preferred flag and the existing global
+role/preference/disk/partition comparator. Surviving defaults come first in
+config-source order, followed by non-defaults in source/declaration order.
+
+An explicit config-priority field was considered but is unnecessary: the existing
+ordered scan plus one ordinal encodes the same extlinux ordering without adding a
+field and initialization to every BLS/BootEntry constructor. No parser, DTB search,
+partition-discovery, or hardware changes are included.
+
+Regression evidence
+-------------------
+Baseline eeb3dc2 plus only the new tests/source-path assertions (before the fix):
+cargo test --locked -p pocketboot bootflow::tests:: -- --nocapture
+Exit: 101
+thread 'bootflow::tests::extlinux_menu_order_preserves_config_priority_before_label_order' (2287118) panicked at src/bootflow.rs:2591:13:
+assertion `left == right` failed: ""
+  left: ["extlinux:zulu", "extlinux:alpha", "extlinux:yankee", "extlinux:beta", "extlinux:xray", "extlinux:gamma"]
+ right: ["extlinux:alpha", "extlinux:zulu", "extlinux:beta", "extlinux:gamma", "extlinux:yankee", "extlinux:xray"]
+
+thread 'bootflow::tests::scans_extlinux_configs_with_partition_and_config_relative_payloads' (2287145) panicked at src/bootflow.rs:2533:9:
+assertion `left == right` failed
+  left: ["boot/extlinux/extlinux.conf", "extlinux/extlinux.conf", "boot/extlinux/extlinux.conf", "extlinux/extlinux.conf"]
+ right: ["extlinux/extlinux.conf", "boot/extlinux/extlinux.conf", "extlinux/extlinux.conf", "boot/extlinux/extlinux.conf"]
+test result: FAILED. 43 passed; 2 failed; 0 ignored; 0 measured; 153 filtered out; finished in 0.00s
+
+This reproduced incorrect ordering for both different labels and identical labels
+in the two configs; it was not merely a unit test of numeric ordering fields.
+The final fixtures exercise the actual scan and production comparator, including:
+- Absent, unknown, explicit later-position, and excluded defaults.
+- Conflicting label names and repeated label names across configs.
+- Non-default source/declaration order after defaults, including filtered labels.
+- The secondary config when the primary is absent, empty, or has no usable entry.
+- A surviving secondary default ahead of non-preferred primary survivors.
+The new multi-source fixture reverses scan output before sorting so insertion-order
+stability cannot make the test pass accidentally.
+
+Validation on the final tracked tree (same tree as commit 8bc0265cd63311f36fcc26080327509a55e122a7)
+--------------------------------------------------------------------------
+cargo fmt --all -- --check
+Exit: 0
+
+git diff --check
+Exit: 0
+
+cargo test --locked -p pocketboot
+Exit: 0
+test result: ok. 198 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.03s
+
+cargo check --locked -p pocketboot --target aarch64-unknown-linux-musl --release
+Exit: 0
+warning: use of deprecated type alias `libc::time_t`: This type is changed to 64-bit in musl 1.2.0, we'll follow that change in the future release. See #1848 for more info.
+warning: use of deprecated type alias `libc::time_t`: This type is changed to 64-bit in musl 1.2.0, we'll follow that change in the future release. See #1848 for more info.
+warning: associated function `continue_then` is never used
+warning: `pocketboot` (bin "pocketboot") generated 3 warnings
+    Finished `release` profile [optimized] target(s) in 17.44s
+
+cargo check --locked -p pocketboot --target armv7-unknown-linux-musleabihf --release
+Exit: 0
+warning: use of deprecated type alias `libc::time_t`: This type is changed to 64-bit in musl 1.2.0, we'll follow that change in the future release. See #1848 for more info.
+warning: use of deprecated type alias `libc::time_t`: This type is changed to 64-bit in musl 1.2.0, we'll follow that change in the future release. See #1848 for more info.
+warning: associated function `continue_then` is never used
+warning: `pocketboot` (bin "pocketboot") generated 3 warnings
+    Finished `release` profile [optimized] target(s) in 5.64s
+
+The cross-target checks used the same production code; the final edits afterward
+only extended a test case and clarified documentation. These are compile checks,
+not claims of linked firmware or hardware boot success. The warnings name
+unchanged adb.rs and fastboot/mod.rs code, not the extlinux change.
+
+PR feedback audit
+-----------------
+Read all current feedback before publishing: 2 inline threads (4 comments),
+4 submitted reviews, and 8 general comments; all pagination complete.
+The source-order finding is:
+https://github.com/samcday/pocketboot/pull/38#discussion_r4128372635
+It is addressed by this commit; resolution/approval is left to review.
+
+The other inline finding (config-symlink target directory) was withdrawn/resolved:
+https://github.com/samcday/pocketboot/pull/38#discussion_r4122819195
+The opened/configured-directory policy matches the pinned lk2nd reference and is
+already documented/tested. It is not changed here.
+
+The 16-finding sweep is:
+https://github.com/samcday/pocketboot/pull/38#issuecomment-5904107565
+Disposition:
+1: duplicate of the source-order defect, fixed here.
+2: real policy consequence, retained and explicitly documented: implicit first-label
+   defaults are preferred globally and may outrank same-role BLS entries on earlier
+   disks. Changing that would be a separate global-ranking decision, not this fix.
+3-4: evidence/body housekeeping, not another extlinux defect; this note records the
+   exact new commands, context, and outputs without rewriting older evidence.
+5-6,9: optional canonicalization/identity caching and resolver simplification; no
+   measured regression or functional failure established.
+7,15: inherited BLS host-namespace symlink limitation; independent follow-up, not
+   introduced by #38. Shared filename layouts do not promise identical symlink
+   policy. No BLS resolver changes here.
+8,10-13: nonblocking test-hygiene or style suggestions, left alone.
+14: clarified docs: excluding a default does not reassign preferred, but fastboot
+    continue still selects the first directly bootable survivor.
+16: optional board-only vendor-flat filename compatibility extension, not a failure
+    of the documented SoC/board layouts. Extlinux/BLS candidate order is shared.
+Earlier Claude findings on symlink base, warning levels, excluded defaults, BLS
+layout order, and fail-closed escaping DTB candidates were addressed/documented
+already or are deliberate policies. Alias-config deduplication remains optional.
+Hardware-evidence comments were read but not independently hardware-validated.
+This audit is not a user-facing Delta review or a merge approval.
+
+Branch and stack safety
+-----------------------
+Verified origin is samcday/pocketboot and #38 targets main from astra/extlinux.
+Fetched refs/notes/evidence explicitly before work and again before adding this
+note. The change is a new commit, preserving existing authorship and all previous
+notes. No force-push, rebase, stack edit, or merge was performed.
+Read https://docs.github.com/en/pull-requests/reference/stacked-pull-requests and
+live REST stack metadata: native stack #52 has #38 position 1, #51 position 2;
+#37 targets astra/extlinux but its stack field is null. gh-stack is v0.1.1.
+Only astra/extlinux and refs/notes/evidence are intended for publication. Updating
+the lower branch does not restack its children; any cascading rebase/landing must
+be separately authorized by Sam. No duplicate PR is needed.
