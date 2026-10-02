@@ -1027,6 +1027,46 @@ mod tests {
     }
 
     #[test]
+    fn instantnoodle_v2_image_keeps_dtb_separate_from_uncompressed_kernel() {
+        let config = device_bootimg_config("qcom/sm8250-oneplus-instantnoodle");
+        assert_eq!(config.header_version, 2);
+        assert_eq!(config.page_size, 4096);
+        assert_eq!(config.kernel_image, "Image");
+        assert_eq!(config.base, 0);
+        assert!(!config.append_dtb);
+        assert!(config.preboot.is_none());
+
+        let dir = unique_test_dir("instantnoodle-bootimg");
+        fs::create_dir_all(&dir).unwrap();
+        let kernel = dir.join("Image");
+        let dtb = dir.join("board.dtb");
+        let output = dir.join("boot.img");
+        fs::write(&kernel, b"kernel").unwrap();
+        fs::write(&dtb, b"dtb").unwrap();
+        write_bootimg(&config, Path::new("test.toml"), &kernel, &dtb, &output).unwrap();
+
+        let image = fs::read(&output).unwrap();
+        assert_eq!(&image[..8], ANDROID_BOOT_MAGIC);
+        assert_eq!(u32_at(&image, 8), 6);
+        assert_eq!(u32_at(&image, 12), 0x00008000);
+        assert_eq!(u32_at(&image, 16), 0); // initramfs is built into the kernel
+        assert_eq!(u32_at(&image, 20), 0x01000000);
+        assert_eq!(u32_at(&image, 28), 0x00f00000);
+        assert_eq!(u32_at(&image, 32), 0x00000100);
+        assert_eq!(u32_at(&image, 36), 4096);
+        assert_eq!(u32_at(&image, 40), 2);
+        assert_eq!(u32_at(&image, 1648), 3); // v2 DTB size
+        assert_eq!(
+            u64::from_le_bytes(image[1652..1660].try_into().unwrap()),
+            0x01f00000
+        );
+        assert_eq!(&image[4096..4102], b"kernel");
+        assert_eq!(&image[8192..8195], b"dtb");
+        assert_eq!(image.len(), 12288);
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
     fn appended_dtb_is_written_in_kernel_payload() {
         let temp_dir = unique_test_dir("appended-dtb");
         let kernel_path = temp_dir.join("Image.gz");

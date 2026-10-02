@@ -1,0 +1,24 @@
+/dts-v1/;
+/plugin/;
+
+/* Pocketboot only needs the device role, not the board's full Type-C stack. */
+&{/soc@0/usb@a6f8800/usb@a600000} {
+	dr_mode = "peripheral";
+};
+
+/*
+ * Keep the three rails described by the board's panel node enabled while
+ * simpledrm uses the bootloader's framebuffer. There is no panel driver in
+ * this kernel configuration to hold regulator references or restore the panel.
+ */
+&{/regulator-panel-avdd} {
+	regulator-always-on;
+};
+
+&{/soc@0/rsc@18200000/regulators-0/ldo14} {
+	regulator-always-on;
+};
+
+&{/soc@0/rsc@18200000/regulators-1/ldo11} {
+	regulator-always-on;
+};
