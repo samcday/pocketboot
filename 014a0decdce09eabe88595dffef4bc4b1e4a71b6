@@ -135,3 +135,28 @@ Then inspect the boot filesystem's BLS/extlinux config and referenced files.
 The 0xea-vs-0x83 selection rule is a concrete source restriction, but this
 card's type is not established yet. No repartitioning or kernel change is
 justified by the supplied log.
+
+## pem120 active-Linux MBR selection blocker confirmed
+
+Follow-up supplied by pem120 from the same PocketBoot shell:
+- fdisk -l /dev/mmcblk1: MBR disk, 31,116,288 sectors.
+- Primary p1: active, type 0x83 Linux, start 2,048, length 497,664 sectors
+  (243 MiB). blkid reports LABEL=pmOS_boot.
+- Primary p2: inactive, type 0x83 Linux, start 499,712, length 30,615,552
+  sectors. blkid reports LABEL=pmOS_root.
+Filesystem UUIDs are omitted. This blkid output did not report filesystem
+TYPE, so neither filesystem type nor boot configuration is established.
+
+At the audited source revision, parse_mbr_boot_entries in src/bootflow.rs
+579-620 skips every primary entry whose type is not 0xea. Thus both entries
+on this card are excluded before a filesystem mount or boot-config scan.
+This confirms a top-level partition-selection blocker, independently of
+any additional missing/unsupported boot configuration. Filesystem label and
+active flag do not bypass that filter. Existing active-0x83 support is only
+for nested userdata images (694-759), not this top-level card layout.
+
+No card repartitioning, filesystem write, code change or new hardware action
+was performed. Next inspect the boot partition read-only with journal replay
+disabled and identify BLS/extlinux configuration and its payloads. Prefer a
+coherent generic discovery fix over changing the user's partition type;
+keep it separate from the already-reviewed tablet-specific bring-up change.
