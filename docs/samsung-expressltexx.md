@@ -74,6 +74,10 @@ partition limits, and recovery method. Do not overwrite a working bootloader
 as the first test. The mainlining workspace uses a separate `Image.gz` path
 for lk2nd; do not assume this stock-style `zImage` is interchangeable.
 
+The [PBL investigation](expressltexx-pbl.md) uses a separate diagnostic
+kernel and read-only physical-memory helper; normal device builds do not
+enable `/dev/mem` for that experiment.
+
 Record the bootloader version, kernel/DTB identity, UART output through
 `/init`, display refresh, touch/key events, eMMC/SD enumeration, USB debug
 operation, and return to the previous boot chain. Validate kernel handoff,
