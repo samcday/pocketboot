@@ -1,0 +1,201 @@
+# Verified Expressltexx/MSM8930 PBL acquisition
+
+Repository: https://github.com/samcday/pocketboot
+Result commit: 4b7685eac406948aed645f2f4377649af3b3b28e
+Reader/preparation commit: fc27b695f5bf04d5b567c3d6172601c98326deaf
+Hardware run started: 2026-10-01T23:39:54Z
+The user explicitly approved a RAM-only diagnostic boot and physical ROM read.
+
+## Outcome and scope
+
+Read physical [0x00000000,0x00020000) twice through /dev/mem. Both complete
+131072-byte acquisitions are byte-identical, SHA256:
+  c1a7d8ffc9a3b9581953107861e61d9d7d9b9b2c5dafd929571446614884f92e
+
+Coherent reset/startup code, PBL source identifiers, authentication/flash/USB
+code, ROM version strings, and fixed low-address references identify the
+captured contents convincingly as Qualcomm PBL. The layout agrees with the
+related-chip ROM mapping. Repeat reads alone do not prove silicon mask-ROM
+backing, rule out a mirror/alias, or establish that every ROM on the SoC was
+captured. No unsigned-loader execution or secure-boot bypass was attempted.
+The repeats are from one diagnostic boot, not independent cold-boot captures.
+
+No EDL programmer or TrustZone exploit was used. The reader makes aligned
+volatile 32-bit reads through an O_RDONLY|O_SYNC, PROT_READ|MAP_SHARED mapping.
+No flash-writing commands, physical-memory writes, or manual security-register
+writes were issued. The full persistent BOOT partition remained identical.
+The device was returned to its original Pocketboot kernel with ADB/fastboot
+working; /dev/mem is absent again.
+
+## Hardware and exact artifacts
+
+Device: Samsung Galaxy Express GT-I8730 / samsung,expressltexx
+USB serial used on every command: 00001EB100006FAB
+SoC: MSM8930, soc_id116, revision1.2
+Bootloader identifier: I8730XWANE1
+CPU possible/online: 0/0
+Original kernel: 7.1.0-rc3+ #2 Wed Sep 30 01:05:24 UTC 2026 armv7l
+Diagnostic kernel on hardware:
+  7.1.0-rc3-pbl #2 Thu Oct 1 23:27:23 UTC 2026 armv7l
+  Debian clang/LLD19.1.7
+  Kernel source samcday/linux 3bc07d096bddd33218b8c13b9fa30ffdaba3c050
+  Kernel code80208000-807e1fff; first RAM bank80200000-889fffff
+  /chosen/linux,booted-from-kexec present; /dev/mem major1 minor1 present
+  /proc/config.gz decompressed byte-identically to the prepared .config:
+    SHA256 78c92ec8cbcfc0284dcee70a86f63958795d3106804bf7b54f75c7aec0196040
+
+Diagnostic image, target/pbl-lab/boot-pbl.img:
+  4415488 bytes
+  SHA256 8181e933cd8f8415fe8be0c670c2f98781efd4bc524490cd38fce57b89384f61
+Reader, target/pbl-lab/physread (static ARM EABI5):
+  362232 bytes
+  SHA256 0d857360bd2c0289acd0e6d9d583f5f754757b69c7471a72ae1a60e94d2e45db
+Working built-in initramfs retained byte-for-byte:
+  SHA256 02a6c6ff986c40fbda590c46fd9d2a6ab0eb037bce17c37a3c945b26255300ee
+
+Full build commands, config changes, container identity, decompressor checks
+and native/ARM32 tests are in the evidence note on fc27b695f5bf04d5b567c3d6172601c98326deaf.
+The destination retained that already-hardware-tested userspace, not the latest
+ARM32 review-fix userspace. This is not a hardware retest of all PR47 fixes.
+
+Raw local artifacts, all ignored and not published:
+  target/pbl-lab/20261001T233954Z-rom-probe/
+    first-word.bin, first-page.bin, rom-window-a.bin, rom-window-b.bin
+    running-config.gz, diagnostic-inventory.txt, diagnostic-dmesg.txt
+    before-dmesg.txt, after-dmesg.txt, after-long-command-dmesg.txt
+    boot-after.img, restored-inventory.txt, restored-fastboot.txt, SHA256SUMS
+Canonical local dump copy:
+  target/pbl-lab/msm8930-r1.2-pbl-0x00000000-0x00020000.bin
+Its base is zero and length is0x20000; the complete zero-padded window is kept.
+
+## Acquisition sequence
+
+Verified prepared image/reader hashes and handset identity before:
+  fastboot -s 00001EB100006FAB boot target/pbl-lab/boot-pbl.img
+Result: download OKAY0.166s, boot OKAY0.168s. Destination release, SoC116,
+CPU0, RAM map, kexec DT marker and devmem were verified over ADB. The minimal
+BusyBox has no zcat applet; config.gz was retrieved and decompressed on host.
+
+  adb -s 00001EB100006FAB push target/pbl-lab/physread /run/physread
+The upload reported completion but did not exit within20s. No physical read
+had run at that point. Fastboot remained healthy, and these commands proved
+that the complete correct helper reached RAM:
+  fastboot -s 00001EB100006FAB oem cat:/run/physread
+  fastboot -s 00001EB100006FAB get_staged physread-readback
+  cmp target/pbl-lab/physread physread-readback
+  fastboot -s 00001EB100006FAB oem 'shell:chmod 0755 /run/physread'
+
+Actual reads (each OEM command reported shell exited0, followed by a staged
+upload of the exact requested length):
+  fastboot -s 00001EB100006FAB oem 'shell:/run/physread 0x0 4'
+  fastboot -s 00001EB100006FAB get_staged first-word.bin
+    4 bytes: 06 00 00 ea = ARM EA000006 = b0x20
+
+  fastboot -s 00001EB100006FAB oem 'shell:/run/physread 0x0 0x1000'
+  fastboot -s 00001EB100006FAB get_staged first-page.bin
+    4096 bytes
+    SHA256 56aca7ee40c8199dfde0381c77d3e92e6a52940a672a2dc854bcf1bc92700925
+
+  fastboot -s 00001EB100006FAB oem 'shell:/run/physread 0x0 0x20000'
+  fastboot -s 00001EB100006FAB get_staged rom-window-a.bin
+  fastboot -s 00001EB100006FAB oem 'shell:/run/physread 0x0 0x20000'
+  fastboot -s 00001EB100006FAB get_staged rom-window-b.bin
+    Each131072 bytes; both same SHA256 c1a7d8ff...4884f92e above
+    cmp succeeds; full-window prefix matches the independent page/word reads
+
+OEM shells stage combined stdout/stderr but explicitly report child status.
+Both successful child status and exact byte count were required. There was
+no error text masquerading as binary data. Raw ADB exec lacks shell-v2 status,
+so it was not used for the actual physical reads.
+
+## Offline interpretation (bounded inspection, not full reverse engineering)
+
+Capstone and ARM binutils agree on checked little-endian ARM code. Internal
+Thumb execution was not substantiated; BX alone is not evidence of Thumb.
+
+Reset vector0x0 branches0x20; seven other vectors branch0x18c..0x1ec.
+Startup switches privileged modes, preserves arguments in banked FIQ
+registers and performs clock-region RMWs. Literal addresses include
+902ba4,902ba0,902b80,90214c,902280, inside the live clock-controller resource.
+
+One early selector is:
+  000000ac ldr r0,[pc,#0x290] ; literal344 contains00706034
+  000000b0 ldr r1,[r0]
+  000000b4 tst r1,#1
+  000000b8 bne c0
+  000000bc mov pc,#20000
+Bit0 clear reaches the unconditional PC assignment; bit0 set continues ROM
+startup. This is NOT identified here as a secure-boot-enable flag, nor was the
+register read live. Destination20000 agrees with the inspected RPM image's
+load address, but its control-register semantics/path selection need analysis.
+
+Continuing startup sets SP=2e000 and reaches bx r0 at188, target8ed0.
+The8ed0 path has another selector using helper8890 and bits100/80 at20002c;
+one path dispatches through43fe0, another initializes state then enters6720.
+Boot main walks a function-pointer table at10ce0 and hands off via bx r1 at67bc.
+These are static control-flow observations, not traces of this boot.
+
+Initialization templates and writable destinations are separate:
+  table11f3c: copy124c0 ->43fe0, length20
+  table11f48: copy12050 ->20358, length64
+  table11f5c: clear20008, length1e0
+  table11fa4: copy120b4 ->206a8, length94
+  table11f90: copy122f8 ->26a4c, length198
+Copy helper268 reads r1 and writes r0; clear helper2bc writes zeros. Exception
+stubs use pointers43fe4..43ffc, matching the copied default table. This layout
+strongly fits fixed ROM with separate SRAM work areas, rather than a random
+RAM acquisition. An identical RAM mirror/ROM alias remains observationally
+possible from these reads alone.
+
+Selected identifying strings:
+  023d0 pbl_error_handler.c
+  05e78 pbl_auth.c
+  064b8 pbl_mc.c
+  083c0 pbl_hw_init.c
+  08ccc pbl_loader.c
+  10d66 PBL_DloadVER2.0
+  11fe0 QUALCOMM COPYRIGHT 2011
+  11ff7 BOOT ROM VERSION: 2.0
+  1200c QHSUSB VERSION: 02.02.07
+Also pbl_flash_sdcc.c, pbl_flash_spi.c, RSA/X509 filenames and USB driver paths.
+
+0x12000 is NOT an exact code endpoint. There are referenced code islands:
+  e7fc branches124e8; that island returns to e7a4
+  2f34 calls12550; final routine ends12570 with e12fff1e, bx lr
+Last nonzero byte12573=e1; [12574,20000) is entirely zero:
+  0xda8c =55948 bytes of zero suffix.
+
+The code is consistent with the RPM ARM7 primary-boot role documented for
+APQ8064. This corroborates related-chip documentation; it does not independently
+identify the executing core or validate the original generic boot-chain diagram.
+
+## Transport incident and restored device
+
+After successful acquisition and a successful post-read dmesg retrieval, an
+inline final-inventory command exceeded fastboot's64-byte command buffer:
+  oem shell:uname -a; cat /proc/uptime /sys/devices/soc0/soc_id /sys/devices/system/cpu/online
+This request is92 bytes. It timed out, and a subsequent short getvar product
+also timed out. ADB still executed uname and dmesg; kernel remained7.1.0-rc3-pbl.
+No explicit transport-error/overflow log was found in the captured dmesg.
+The overlong request is the observed trigger, not a diagnosed kernel fault.
+Longer scripts must use stage + oem shell-staged; documented read commands are
+29..35 bytes including the oem prefix. USB robustness is a separate follow-up.
+
+Before reboot, retrieved the full persistent BOOT through ADB and compared it:
+  adb -s 00001EB100006FAB exec-out 'cat /dev/mmcblk0p7' > boot-after.img
+  cmp target/pbl-lab/boot-before.img boot-after.img
+Both10485760 bytes, SHA256:
+  5097189bc623493f9c8ffcbdff08fa407cc087a2673ccabac9e148f93c1ddffd
+This also matches the earlier fixed-BOOT readback in cf2ebd6's evidence.
+Only RAM/proc/sysfs/devtmpfs/configfs/functionfs mounts were present.
+
+Returned to the persistent image:
+  adb -s 00001EB100006FAB exec-out 'reboot -f'
+Then verified:
+  Linux7.1.0-rc3+ #2 Wed Sep30 01:05:24 UTC2026 armv7l
+  soc_id116; online0; uptime20.75s
+  /dev/mem absent
+  fastboot -s 00001EB100006FAB getvar product -> pocketboot, success
+The phone is no longer running the devmem diagnostic kernel. Raw ROM and
+BOOT backups remain local/ignored; only conclusions and evidence notes are
+published. No subsequent device operations were performed for documentation.
