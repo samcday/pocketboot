@@ -199,3 +199,5 @@ Then verified:
 The phone is no longer running the devmem diagnostic kernel. Raw ROM and
 BOOT backups remain local/ignored; only conclusions and evidence notes are
 published. No subsequent device operations were performed for documentation.
+
+Notation clarification: bare address, bit-mask and length literals in the offline-interpretation section are hexadecimal (for example, table11f3c means offset 0x11f3c, and length20 means 0x20 = 32 bytes). Explicit file sizes and counts stated as bytes elsewhere are decimal.
