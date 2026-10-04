@@ -3,3 +3,63 @@ Volume-key Ferrari CI candidate, 2026-10-04
 Pocketboot962f8c19143cd435c9d08d70c099ef336d849e81, immutable tag ferrari/volume-20261004-v1, selects Linux08aa2e8d8cfae38a6e7617a4ce4d9c85872db95f. Relative to core candidate418aeda, it changes the source pin and adds regression assertions for GPIO/PMIC key drivers, CPU0/panic/ACM command line and zero external ramdisk. Source-backed GPIO107 volume-up and PMIC RESIN volume-down are documented in the Linux commit evidence note.
 
 Requested manual CI run37197785302, attempt1, https://github.com/samcday/pocketboot/actions/runs/37197785302 with device=qcom/msm8939-xiaomi-ferrari. Final CI result and artifact hashes will be recorded separately. Physical key presses, UI navigation and manual-reset recovery remain a morning hardware gate; no such test or successful device boot is claimed for this revision.
+
+CI artifact verification: volume candidate, 2026-10-04 UTC
+
+The exact run attempt and Ferrari job completed successfully. Artifact selection used immutable artifact ID, checked the API head SHA and attempt, verified the downloaded ZIP against the GitHub artifact digest, and allowed only boot.img plus .config during extraction. The image, effective configuration and packaged DT were inspected locally; no device boot was performed.
+
+Checks covered built-in core clock/USB/input/simpledrm options; disabled kexec/touch/fixed-regulator/native-DRM/radio drivers; legacy Android v0 raw ARM64 Image and QCDT v2/three matching ID entries; CPU0/panic/ACM header arguments; and packaged framebuffer/ramoops geometry. The core image has no volume-up node, while the volume image has GPIO107 active-low/code115 and RESIN/code114. Static Image+BSS extent fits below the earlier DT placement for the checked legacy/aligned load-address range; this is not a measurement of actual loader placement or full runtime memory use.
+
+The two CI effective configs have the same digest, but their kernel payload hashes differ. No byte-for-byte reproducibility or fully hermetic-build claim is made. Recorded CI toolchain is GCC14.2.0/Rust1.99.0, distinct from the earlier local hardware-tested compiler environment. Accordingly these exact CI artifacts still require physical regression testing.
+
+Receipt:
+{
+  "label": "volume",
+  "repo": "samcday/pocketboot",
+  "run_id": 37197785302,
+  "run_attempt": 1,
+  "run_url": "https://github.com/samcday/pocketboot/actions/runs/37197785302",
+  "pocketboot_commit": "962f8c19143cd435c9d08d70c099ef336d849e81",
+  "kernel_commit": "08aa2e8d8cfae38a6e7617a4ce4d9c85872db95f",
+  "artifact_id": 11301780924,
+  "artifact_name": "bootimg-qcom-msm8939-xiaomi-ferrari",
+  "artifact_archive_sha256": "cda77b3671e9c37ea815d5b08ed4e7deca58ffc0deccf2a8dd85e912a224d7ad",
+  "boot_img_sha256": "0aba6ca874dc0155a0730690e914478c267001a41022e272b3c3976d2bb7ed6c",
+  "boot_img_bytes": 10813440,
+  "config_sha256": "10afe29161014f830dd9dd51dc7124e5d2c62d2ca9de671bd1ad94f7c52d2bc7",
+  "packaged_dtb_sha256": "e83b86aafc4178159abdae360265cd823452d4fbb1cad45e85ec0c355b58c754",
+  "kernel_payload_sha256": "5e349b338161b7c5cd6d7f53fc9f45141b26282a4624b9ee667685cf78b22211",
+  "kernel_file_bytes": 10758152,
+  "kernel_runtime_bytes": 11075584,
+  "kernel_text_offset": 0,
+  "cmdline": "maxcpus=1 panic=-1 initcall_debug loglevel=8 pocketboot.acm",
+  "verified_at_utc": "2026-10-04T11:25:29.510268+00:00",
+  "hardware_tested": false,
+  "checks": [
+    "CI attempt/job/head",
+    "archive digest",
+    "artifact allowlist",
+    "effective config",
+    "legacy Android/raw ARM64/QCDT envelope",
+    "bounded image footprint",
+    "packaged DT exclusions and key distinction",
+    "packaged framebuffer geometry and lk2nd ramoops overlay",
+    "touch/fixed-regulator/native-DRM/radio drivers not enabled"
+  ],
+  "ci_job_id": 111423345035,
+  "ci_job_url": "https://github.com/samcday/pocketboot/actions/runs/37197785302/job/111423345035",
+  "ci_container_pull_digests": [
+    "sha256:f39ae5f5a93cc9e6f607bdcb14ae0827fc5f66da53a82a87f54e850f7f058e89"
+  ],
+  "toolchain_config": {
+    "CONFIG_CC_VERSION_TEXT": "aarch64-linux-gnu-gcc (Debian 14.2.0-19) 14.2.0",
+    "CONFIG_GCC_VERSION": "140200",
+    "CONFIG_CLANG_VERSION": "0",
+    "CONFIG_LD_VERSION": "24400",
+    "CONFIG_RUSTC_VERSION": "109900"
+  }
+}
+
+Retrieval: gh api repos/samcday/pocketboot/actions/artifacts/11301780924/zip > artifact.zip ; verify the recorded ZIP SHA256, then extract only boot.img and .config and verify their recorded hashes. The convenient gh run download route must still be checked against this run/attempt/artifact identity rather than a floating latest build.
+
+Morning test scope: exclusive DUT ownership, RAM-only stock-fastboot -> pinned official lk2nd23.1 -> candidate image, confirm USB identity/live logs/DRM and eMMC enumeration, and compare new warnings/deferred probes. For the volume candidate additionally obtain physical press/release events115/114, visible navigation, and manual long-power-reset recovery. No flashing, HYP, touch power changes, radio activation or kexec/OS-boot qualification. Keep the known-good dcbe3781 image available; stop and ask for physical recovery if a candidate does not return USB.
