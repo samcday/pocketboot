@@ -1,6 +1,6 @@
 use std::{
     cmp::Ordering,
-    collections::HashMap,
+    collections::{HashMap, VecDeque},
     ffi::CString,
     fs::{self, File, OpenOptions},
     future::Future,
@@ -1139,17 +1139,20 @@ fn scan_extlinux_entries(
     let mut boot_entries = Vec::new();
     for config_path in EXTLINUX_CONFIG_PATHS {
         let path = mount.root.join(config_path);
-        if !path.is_file() {
-            tracing::debug!(path = %path.display(), "extlinux config not found");
-            continue;
-        }
-
         match parse_extlinux_file(partition, &mount.root, &path) {
             Ok(entries) => boot_entries.extend(entries),
+            Err(err) if err.kind() == io::ErrorKind::NotFound => {
+                tracing::debug!(path = %path.display(), "extlinux config not found");
+            }
             Err(err) => {
                 tracing::warn!(path = %path.display(), error = ?err, "failed to parse extlinux config")
             }
         }
+    }
+    // Number entries across configs so their search-path priority survives sorting,
+    // including when both configs contribute a preferred/default entry.
+    for (index, entry) in boot_entries.iter_mut().enumerate() {
+        entry.boot_order = u32::try_from(index).unwrap_or(u32::MAX);
     }
     boot_entries
 }
@@ -1159,17 +1162,26 @@ fn parse_extlinux_file(
     root: &Path,
     source: &Path,
 ) -> io::Result<Vec<BootEntry>> {
-    let text = fs::read_to_string(source).map_err(|err| {
+    let relative = source
+        .strip_prefix(root)
+        .map_err(|_| invalid_data("extlinux config is outside boot filesystem"))?;
+    let config_path = resolve_boot_fs_path(root, relative)?;
+    let text = fs::read_to_string(config_path).map_err(|err| {
         io::Error::new(
             err.kind(),
             format!("read extlinux config {}: {err}", source.display()),
         )
     })?;
     let config = ExtlinuxConfig::parse(&text);
+    let default_index = extlinux_default_index(&config);
     let mut entries = Vec::new();
-    for entry in config.entries {
-        match extlinux_boot_entry(partition, root, source, &config.default, entry) {
-            Ok(Some(entry)) => entries.push(entry),
+    for (index, entry) in config.entries.into_iter().enumerate() {
+        match extlinux_boot_entry(partition, root, source, entry, read_fdt_compatibles) {
+            Ok(Some(mut entry)) => {
+                entry.preferred = index == default_index;
+                entry.boot_order = u32::try_from(index).unwrap_or(u32::MAX);
+                entries.push(entry);
+            }
             Ok(None) => {}
             Err(err) => {
                 tracing::warn!(path = %source.display(), error = ?err, "failed to build extlinux entry")
@@ -1183,14 +1195,26 @@ fn extlinux_boot_entry(
     partition: &BootPartitionCandidate,
     root: &Path,
     source: &Path,
-    default: &Option<String>,
     entry: ExtlinuxEntry,
+    read_compatibles: impl FnOnce() -> io::Result<Vec<String>>,
 ) -> io::Result<Option<BootEntry>> {
+    // Ignoring a requested overlay can boot a materially different hardware
+    // description. Do not advertise such an entry until we can apply DTBOs.
+    if entry
+        .overlays
+        .as_deref()
+        .is_some_and(|value| !value.is_empty())
+    {
+        return Err(invalid_data(format!(
+            "extlinux entry {:?} requires unsupported device-tree overlays",
+            entry.label
+        )));
+    }
     let Some(kernel) = entry.kernel.as_deref().filter(|value| !value.is_empty()) else {
         tracing::debug!(path = %source.display(), label = %entry.label, "skipping extlinux entry without kernel payload");
         return Ok(None);
     };
-    let linux = resolve_boot_path(root, kernel)?;
+    let linux = resolve_extlinux_path(root, source, kernel)?;
     if !linux.is_file() {
         tracing::warn!(source = %source.display(), label = %entry.label, linux = %linux.display(), "extlinux kernel payload is missing");
         return Ok(None);
@@ -1198,7 +1222,7 @@ fn extlinux_boot_entry(
 
     let mut initrds = Vec::new();
     for initrd in &entry.initrds {
-        let path = resolve_boot_path(root, initrd)?;
+        let path = resolve_extlinux_path(root, source, initrd)?;
         if !path.is_file() {
             tracing::warn!(source = %source.display(), label = %entry.label, initrd = %path.display(), "extlinux initrd payload is missing");
             return Ok(None);
@@ -1206,19 +1230,8 @@ fn extlinux_boot_entry(
         initrds.push(path);
     }
 
-    let dtb = entry
-        .fdt
-        .as_deref()
-        .map(|fdt| resolve_boot_path(root, fdt))
-        .transpose()?;
-    if let Some(dtb) = &dtb {
-        if !dtb.is_file() {
-            tracing::warn!(source = %source.display(), label = %entry.label, dtb = %dtb.display(), "extlinux DTB payload is missing");
-            return Ok(None);
-        }
-    }
+    let dtb = extlinux_dtb_path(root, source, &entry, read_compatibles)?;
 
-    let is_default = default.as_deref() == Some(entry.label.as_str());
     Ok(Some(BootEntry {
         id: format!("extlinux:{}", entry.label),
         title: entry.menu_label.or_else(|| Some(entry.label.clone())),
@@ -1228,12 +1241,12 @@ fn extlinux_boot_entry(
         role: partition.role,
         disk: partition.disk.clone(),
         partition: partition.partition.clone(),
-        preferred: is_default,
+        preferred: false,
         linux,
         initrds,
         dtb,
-        options: entry.append,
-        boot_order: if is_default { 0 } else { 1 },
+        options: entry.append.into_iter().collect(),
+        boot_order: 0,
     }))
 }
 
@@ -1249,8 +1262,10 @@ struct ExtlinuxEntry {
     menu_label: Option<String>,
     kernel: Option<String>,
     fdt: Option<String>,
+    fdtdir: Option<String>,
+    overlays: Option<String>,
     initrds: Vec<String>,
-    append: Vec<String>,
+    append: Option<String>,
 }
 
 impl ExtlinuxConfig {
@@ -1291,16 +1306,25 @@ impl ExtlinuxConfig {
                         entry.fdt = Some(value.to_string());
                     }
                 }
+                "fdtdir" | "devicetreedir" => {
+                    if let Some(entry) = &mut current {
+                        entry.fdtdir = Some(value.to_string());
+                    }
+                }
+                "fdtoverlays" | "devicetree-overlay" => {
+                    if let Some(entry) = &mut current {
+                        entry.overlays = Some(value.to_string());
+                    }
+                }
                 "initrd" => {
                     if let Some(entry) = &mut current {
-                        entry.initrds.extend(split_initrd_values(value));
+                        entry.initrds = split_initrd_values(value).collect();
                     }
                 }
                 "append" => {
                     if let Some(entry) = &mut current {
-                        if !value.is_empty() && value != "-" {
-                            entry.append.push(value.to_string());
-                        }
+                        entry.append =
+                            (!value.is_empty() && value != "-").then(|| value.to_string());
                     }
                 }
                 "menu" => {
@@ -1320,6 +1344,166 @@ impl ExtlinuxConfig {
         }
         config
     }
+}
+
+/// Like lk2nd, absolute paths are partition-relative and relative paths are
+/// config-directory-relative. Resolve symlinks and `..` before checking that the
+/// payload remains inside the boot filesystem; `../vmlinuz` is a valid path.
+fn resolve_extlinux_path(root: &Path, source: &Path, value: &str) -> io::Result<PathBuf> {
+    let value = value.trim();
+    if value.is_empty() {
+        return Err(invalid_data("empty extlinux path"));
+    }
+    let path = if value.starts_with('/') {
+        PathBuf::from(value)
+    } else {
+        let directory = source
+            .parent()
+            .and_then(|parent| parent.strip_prefix(root).ok())
+            .ok_or_else(|| invalid_data("extlinux config directory is outside boot filesystem"))?;
+        directory.join(value)
+    };
+    resolve_boot_fs_path(root, &path)
+}
+
+/// Walk the read-only boot filesystem, treating absolute symlink targets as
+/// filesystem-relative too. Host canonicalize() would follow them into /init's
+/// root instead. Limit link expansion and reject attempts to walk above root.
+fn resolve_boot_fs_path(root: &Path, path: &Path) -> io::Result<PathBuf> {
+    let root = root.canonicalize()?;
+    let mut pending: VecDeque<_> = path
+        .components()
+        .map(|part| part.as_os_str().to_os_string())
+        .collect();
+    let mut relative = PathBuf::new();
+    let mut links = 0;
+    while let Some(part) = pending.pop_front() {
+        match Path::new(&part).components().next().unwrap() {
+            Component::RootDir => relative.clear(),
+            Component::CurDir => {}
+            Component::ParentDir => {
+                if !relative.pop() {
+                    return Err(invalid_data(
+                        "extlinux path escapes outside boot filesystem",
+                    ));
+                }
+            }
+            Component::Prefix(_) => return Err(invalid_data("unsupported extlinux path prefix")),
+            Component::Normal(name) => {
+                let candidate = root.join(&relative).join(name);
+                let metadata = fs::symlink_metadata(&candidate).map_err(|err| {
+                    io::Error::new(
+                        err.kind(),
+                        format!("resolve extlinux path {}: {err}", candidate.display()),
+                    )
+                })?;
+                if metadata.file_type().is_symlink() {
+                    links += 1;
+                    if links > 40 {
+                        return Err(invalid_data("too many symlinks in extlinux path"));
+                    }
+                    let target = fs::read_link(&candidate)?;
+                    for part in target.components().rev() {
+                        pending.push_front(part.as_os_str().to_os_string());
+                    }
+                } else {
+                    if !pending.is_empty() && !metadata.is_dir() {
+                        return Err(io::Error::new(
+                            io::ErrorKind::NotADirectory,
+                            format!("extlinux path {} is not a directory", candidate.display()),
+                        ));
+                    }
+                    relative.push(name);
+                }
+            }
+        }
+    }
+    Ok(root.join(relative))
+}
+
+/// lk2nd boots the entry named by `default` and falls back to the first entry
+/// when the directive is absent or names a label that does not exist. pocketboot
+/// additionally lists every entry in its menu, so the default is only a
+/// preference among the discovered entries.
+fn extlinux_default_index(config: &ExtlinuxConfig) -> usize {
+    config
+        .default
+        .as_deref()
+        .and_then(|default| {
+            config
+                .entries
+                .iter()
+                .position(|entry| entry.label == default)
+        })
+        .unwrap_or(0)
+}
+
+/// lk2nd resolves `fdtdir` through per-device DTB filename hints. pocketboot has
+/// no such table, so it uses the same compatible-driven search as BLS `fdtdir`.
+/// An explicit DTB request must succeed; only *omitting* both directives permits
+/// the kexec loader to fall back to the live DTB.
+fn extlinux_dtb_path(
+    root: &Path,
+    source: &Path,
+    entry: &ExtlinuxEntry,
+    read_compatibles: impl FnOnce() -> io::Result<Vec<String>>,
+) -> io::Result<Option<PathBuf>> {
+    // Match lk2nd: fdtdir takes precedence when both directives are present.
+    let dtb = if let Some(fdtdir) = &entry.fdtdir {
+        let fdtdir = resolve_extlinux_path(root, source, fdtdir)?;
+        if !fdtdir.is_dir() {
+            return Err(invalid_data(format!(
+                "extlinux fdtdir {} is not a directory",
+                fdtdir.display()
+            )));
+        }
+        let compatibles = read_compatibles().map_err(|err| {
+            io::Error::new(
+                err.kind(),
+                format!("cannot resolve extlinux fdtdir without device identity: {err}"),
+            )
+        })?;
+        let canonical_root = root.canonicalize()?;
+        let relative_dir = fdtdir
+            .strip_prefix(&canonical_root)
+            .map_err(|_| invalid_data("extlinux fdtdir is outside boot filesystem"))?;
+        let mut selected = None;
+        for candidate in fdtdir_candidate_paths(&compatibles) {
+            match resolve_boot_fs_path(&canonical_root, &relative_dir.join(candidate)) {
+                Ok(path) if path.is_file() => {
+                    selected = Some(path);
+                    break;
+                }
+                Ok(_) => {}
+                Err(err)
+                    if matches!(
+                        err.kind(),
+                        io::ErrorKind::NotFound | io::ErrorKind::NotADirectory
+                    ) => {}
+                Err(err) => return Err(err),
+            }
+        }
+        let dtb = selected.ok_or_else(|| {
+            invalid_data(format!(
+                "no extlinux DTB in {} matches {}",
+                fdtdir.display(),
+                compatibles.join("|")
+            ))
+        })?;
+        tracing::info!(source = %source.display(), fdtdir = %fdtdir.display(), dtb = %dtb.display(), compatible = %compatibles.join("|"), "selected extlinux fdtdir DTB");
+        dtb
+    } else if let Some(fdt) = &entry.fdt {
+        resolve_extlinux_path(root, source, fdt)?
+    } else {
+        return Ok(None);
+    };
+    if !dtb.is_file() {
+        return Err(invalid_data(format!(
+            "extlinux DTB {} is not a file",
+            dtb.display()
+        )));
+    }
+    Ok(Some(dtb))
 }
 
 fn split_key_value(line: &str) -> (&str, &str) {
@@ -1386,7 +1570,7 @@ fn parse_bls_file(
         initrds.push(path);
     }
 
-    let dtb = bls_dtb_path(root, source, &bls, context)?;
+    let dtb = bls_dtb_path(root, source, &bls, context, read_fdt_compatibles)?;
     if dtb.is_none() && bls.requires_dtb() {
         return Ok(None);
     }
@@ -1428,6 +1612,7 @@ fn bls_dtb_path(
     source: &Path,
     bls: &BlsSnippet,
     context: &BlsContext,
+    read_compatibles: impl FnOnce() -> io::Result<Vec<String>>,
 ) -> io::Result<Option<PathBuf>> {
     if let Some(devicetree) = bls
         .devicetree
@@ -1449,7 +1634,7 @@ fn bls_dtb_path(
         return Ok(None);
     }
 
-    let compatibles = match read_fdt_compatibles() {
+    let compatibles = match read_compatibles() {
         Ok(compatibles) => compatibles,
         Err(err) => {
             tracing::warn!(source = %source.display(), identity_path = FDT_MAINLINE_COMPATIBLE_PATH, fallback_path = FDT_COMPATIBLE_PATH, error = ?err, "cannot resolve BLS fdtdir without packaged or live FDT compatibles");
@@ -1578,15 +1763,21 @@ fn fdtdir_candidate_paths(compatibles: &[String]) -> Vec<PathBuf> {
     for (board_index, board) in compatible_names.iter().enumerate() {
         push_dtb_candidate_paths(&mut paths, board);
         for soc in compatible_names.iter().skip(board_index + 1) {
-            push_unique_path(
-                &mut paths,
-                PathBuf::from(&soc.vendor)
-                    .join(format!("{}-{}-{}.dtb", soc.name, board.vendor, board.name)),
-            );
-            push_unique_path(
-                &mut paths,
-                PathBuf::from(&soc.vendor).join(format!("{}-{}.dtb", soc.name, board.name)),
-            );
+            for stem in [
+                format!("{}-{}-{}", soc.name, board.vendor, board.name),
+                format!("{}-{}", soc.name, board.name),
+            ] {
+                // Linux arm64, Linux arm32, and boot-deploy's flattened layout.
+                push_unique_path(
+                    &mut paths,
+                    PathBuf::from(&soc.vendor).join(format!("{stem}.dtb")),
+                );
+                push_unique_path(
+                    &mut paths,
+                    PathBuf::from(format!("{}-{stem}.dtb", soc.vendor)),
+                );
+                push_unique_path(&mut paths, PathBuf::from(format!("{stem}.dtb")));
+            }
         }
     }
 
@@ -2132,7 +2323,7 @@ mod tests {
         assert_eq!(entry.kernel.as_deref(), Some("/vmlinuz"));
         assert_eq!(entry.fdt.as_deref(), Some("/board.dtb"));
         assert_eq!(entry.initrds, ["/initramfs"]);
-        assert_eq!(entry.append, ["quiet splash"]);
+        assert_eq!(entry.append.as_deref(), Some("quiet splash"));
     }
 
     #[test]
@@ -2140,6 +2331,521 @@ mod tests {
         let config = ExtlinuxConfig::parse("label test\ninitrd /one.img,/two.img\n");
 
         assert_eq!(config.entries[0].initrds, ["/one.img", "/two.img"]);
+    }
+
+    #[test]
+    fn parses_extlinux_fdtdir_aliases() {
+        for key in ["fdtdir", "devicetreedir", "FDTDIR", "DEVICETREEDIR"] {
+            let config = ExtlinuxConfig::parse(&format!("label test\n{key} /dtbs\n"));
+
+            assert_eq!(config.entries[0].fdtdir.as_deref(), Some("/dtbs"));
+        }
+    }
+
+    #[test]
+    fn extlinux_default_prefers_named_label_then_falls_back_to_first() {
+        let named = ExtlinuxConfig::parse("default second\nlabel first\nlabel second\n");
+        assert_eq!(extlinux_default_index(&named), 1);
+
+        let missing = ExtlinuxConfig::parse("default nope\nlabel first\nlabel second\n");
+        assert_eq!(extlinux_default_index(&missing), 0);
+
+        let absent = ExtlinuxConfig::parse("label first\nlabel second\n");
+        assert_eq!(extlinux_default_index(&absent), 0);
+
+        let case_sensitive = ExtlinuxConfig::parse("default SECOND\nlabel first\nlabel second\n");
+        assert_eq!(extlinux_default_index(&case_sensitive), 0);
+    }
+
+    #[test]
+    fn extlinux_repeated_settings_overwrite_previous_values() {
+        let config = ExtlinuxConfig::parse(
+            "label test\nappend one\nappend two\ninitrd /one.img\ninitrd /two.img\n",
+        );
+        let entry = &config.entries[0];
+
+        assert_eq!(entry.append.as_deref(), Some("two"));
+        assert_eq!(entry.initrds, ["/two.img"]);
+    }
+
+    #[test]
+    fn extlinux_append_dash_clears_previous_options_without_leaking_between_labels() {
+        let config = ExtlinuxConfig::parse(
+            "label first\nappend stale\nappend -\nlabel second\nappend quiet\nlabel third\n",
+        );
+
+        assert_eq!(config.entries[0].append, None);
+        assert_eq!(config.entries[1].append.as_deref(), Some("quiet"));
+        assert_eq!(config.entries[2].append, None);
+    }
+
+    #[test]
+    fn extlinux_relative_paths_resolve_from_config_directory() {
+        let root = temp_root("extlinux-relative");
+        let config_dir = root.join("extlinux");
+        fs::create_dir_all(&config_dir).unwrap();
+        let config = config_dir.join("extlinux.conf");
+        File::create(&config).unwrap();
+        let relative = config_dir.join("vmlinuz");
+        let absolute = root.join("vmlinuz");
+        File::create(&relative).unwrap();
+        File::create(&absolute).unwrap();
+
+        assert_eq!(
+            resolve_extlinux_path(&root, &config, "vmlinuz").unwrap(),
+            relative
+        );
+        assert_eq!(
+            resolve_extlinux_path(&root, &config, "/vmlinuz").unwrap(),
+            absolute
+        );
+        assert_eq!(
+            resolve_extlinux_path(&root, &config, "../vmlinuz").unwrap(),
+            absolute
+        );
+        std::os::unix::fs::symlink("../vmlinuz", config_dir.join("link")).unwrap();
+        assert_eq!(
+            resolve_extlinux_path(&root, &config, "link").unwrap(),
+            absolute
+        );
+
+        fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[test]
+    fn extlinux_paths_cannot_escape_the_boot_filesystem() {
+        let base = temp_root("extlinux-escape");
+        let root = base.join("boot");
+        let config_dir = root.join("extlinux");
+        fs::create_dir_all(&config_dir).unwrap();
+        let config = config_dir.join("extlinux.conf");
+        File::create(&config).unwrap();
+        let outside = base.join("outside");
+        File::create(&outside).unwrap();
+
+        assert!(resolve_extlinux_path(&root, &config, "../../outside").is_err());
+
+        std::os::unix::fs::symlink(&outside, config_dir.join("link")).unwrap();
+        assert!(resolve_extlinux_path(&root, &config, "link").is_err());
+
+        fs::remove_dir_all(&base).unwrap();
+    }
+
+    #[test]
+    fn extlinux_absolute_symlinks_are_rooted_in_the_boot_filesystem() {
+        let root = temp_root("extlinux-absolute-links");
+        fs::create_dir_all(root.join("extlinux")).unwrap();
+        fs::create_dir(root.join("payloads")).unwrap();
+        fs::write(root.join("payloads/kernel"), b"kernel").unwrap();
+        std::os::unix::fs::symlink("/payloads/kernel", root.join("extlinux/kernel")).unwrap();
+        std::os::unix::fs::symlink("/payloads", root.join("extlinux/directory")).unwrap();
+        let source = root.join("extlinux/extlinux.conf");
+        for value in ["kernel", "directory/kernel", "/extlinux/kernel"] {
+            assert_eq!(
+                resolve_extlinux_path(&root, &source, value).unwrap(),
+                root.join("payloads/kernel"),
+                "{value}"
+            );
+        }
+        // Config files use the same filesystem namespace as their payloads.
+        fs::write(root.join("actual.conf"), "label pmos\nlinux kernel\n").unwrap();
+        std::os::unix::fs::symlink("/actual.conf", &source).unwrap();
+        let entries = scan_extlinux_entries(
+            &test_boot_partition(),
+            &MountedPartition {
+                root: root.clone(),
+                fstype: "ext4",
+            },
+        );
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].linux, root.join("payloads/kernel"));
+        fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[test]
+    fn extlinux_symlink_loops_and_non_directory_components_fail() {
+        let root = temp_root("extlinux-links-invalid");
+        let source = root.join("extlinux.conf");
+        fs::write(root.join("kernel"), b"kernel").unwrap();
+        std::os::unix::fs::symlink("second", root.join("first")).unwrap();
+        std::os::unix::fs::symlink("/first", root.join("second")).unwrap();
+        let error = resolve_extlinux_path(&root, &source, "first").unwrap_err();
+        assert!(error.to_string().contains("too many symlinks"));
+        let error = resolve_extlinux_path(&root, &source, "kernel/../kernel").unwrap_err();
+        assert_eq!(error.kind(), io::ErrorKind::NotADirectory);
+        fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[test]
+    fn extlinux_missing_payload_reports_the_resolved_path() {
+        let root = temp_root("extlinux-missing");
+        let config_dir = root.join("extlinux");
+        fs::create_dir_all(&config_dir).unwrap();
+        let config = config_dir.join("extlinux.conf");
+        File::create(&config).unwrap();
+
+        let error = resolve_extlinux_path(&root, &config, "vmlinuz").unwrap_err();
+
+        assert_eq!(error.kind(), io::ErrorKind::NotFound);
+        assert!(
+            error
+                .to_string()
+                .contains(config_dir.join("vmlinuz").to_str().unwrap())
+        );
+
+        fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[test]
+    fn scans_extlinux_configs_with_partition_and_config_relative_payloads() {
+        let root = temp_root("extlinux-scan");
+        let partition = test_boot_partition();
+        for config_path in EXTLINUX_CONFIG_PATHS {
+            let source = root.join(config_path);
+            let directory = source.parent().unwrap();
+            fs::create_dir_all(directory).unwrap();
+            fs::write(root.join("vmlinuz"), b"kernel").unwrap();
+            fs::write(directory.join("initramfs"), b"initrd").unwrap();
+            fs::write(directory.join("board.dtb"), b"dtb").unwrap();
+            fs::write(
+                &source,
+                "DEFAULT second\n\
+                 LABEL first\nLINUX /vmlinuz\n\
+                 LABEL second\nMENU LABEL postmarketOS\nKERNEL /vmlinuz\n\
+                 INITRD initramfs\nDEVICETREE board.dtb\nAPPEND root=LABEL=pmOS_root quiet\n",
+            )
+            .unwrap();
+        }
+        let mount = MountedPartition {
+            root: root.clone(),
+            fstype: "ext4",
+        };
+        let mut entries = scan_extlinux_entries(&partition, &mount);
+        entries.sort_by(compare_boot_entries);
+
+        assert_eq!(entries.len(), 4);
+        for entry in &entries[..2] {
+            assert_eq!(entry.id, "extlinux:second");
+            assert!(entry.preferred);
+            assert_eq!(entry.title.as_deref(), Some("postmarketOS"));
+            assert_eq!(entry.linux, root.join("vmlinuz"));
+            let directory = entry.source.parent().unwrap();
+            assert_eq!(entry.initrds, [directory.join("initramfs")]);
+            assert_eq!(entry.dtb, Some(directory.join("board.dtb")));
+            assert_eq!(entry.cmdline(), "root=LABEL=pmOS_root quiet");
+        }
+        assert!(entries[2..].iter().all(|entry| !entry.preferred));
+        assert_eq!(
+            entries
+                .iter()
+                .map(|entry| entry.source.strip_prefix(&root).unwrap())
+                .collect::<Vec<_>>(),
+            [
+                Path::new(EXTLINUX_CONFIG_PATHS[0]),
+                Path::new(EXTLINUX_CONFIG_PATHS[1]),
+                Path::new(EXTLINUX_CONFIG_PATHS[0]),
+                Path::new(EXTLINUX_CONFIG_PATHS[1]),
+            ]
+        );
+        fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[test]
+    fn extlinux_menu_order_preserves_config_priority_before_label_order() {
+        let root = temp_root("extlinux-config-order");
+        let partition = test_boot_partition();
+        let mount = MountedPartition {
+            root: root.clone(),
+            fstype: "ext4",
+        };
+        fs::write(root.join("vmlinuz"), b"kernel").unwrap();
+        for config_path in EXTLINUX_CONFIG_PATHS {
+            fs::create_dir_all(root.join(config_path).parent().unwrap()).unwrap();
+        }
+        fs::write(
+            root.join(EXTLINUX_CONFIG_PATHS[1]),
+            "label zulu\nlinux /vmlinuz\n\
+             label yankee\nlinux /vmlinuz\nlabel xray\nlinux /vmlinuz\n",
+        )
+        .unwrap();
+
+        for (default, expected, preferred_count) in [
+            ("", ["alpha", "zulu", "beta", "gamma", "yankee", "xray"], 2),
+            (
+                "default missing\n",
+                ["alpha", "zulu", "beta", "gamma", "yankee", "xray"],
+                2,
+            ),
+            (
+                "default gamma\n",
+                ["gamma", "zulu", "alpha", "beta", "yankee", "xray"],
+                2,
+            ),
+            (
+                "default broken\n",
+                ["zulu", "alpha", "beta", "gamma", "yankee", "xray"],
+                1,
+            ),
+        ] {
+            fs::write(
+                root.join(EXTLINUX_CONFIG_PATHS[0]),
+                format!(
+                    "{default}label alpha\nlinux /vmlinuz\n\
+                     label beta\nlinux /vmlinuz\nlabel broken\nlinux /missing\n\
+                     label gamma\nlinux /vmlinuz\n"
+                ),
+            )
+            .unwrap();
+            let mut entries = scan_extlinux_entries(&partition, &mount);
+            // Discovery re-sorts entries; scan insertion order alone is not enough.
+            entries.reverse();
+            entries.sort_by(compare_boot_entries);
+            assert_eq!(
+                entries
+                    .iter()
+                    .map(|entry| entry.id.as_str())
+                    .collect::<Vec<_>>(),
+                expected.map(|label| format!("extlinux:{label}")),
+                "{default:?}"
+            );
+            assert!(
+                entries[..preferred_count]
+                    .iter()
+                    .all(|entry| entry.preferred)
+            );
+            assert!(
+                entries[preferred_count..]
+                    .iter()
+                    .all(|entry| !entry.preferred)
+            );
+        }
+        fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[test]
+    fn extlinux_secondary_config_remains_available_without_a_usable_primary() {
+        for primary in [
+            None,
+            Some(""),
+            Some("default broken\nlabel broken\nlinux /missing\n"),
+        ] {
+            let root = temp_root("extlinux-secondary-config");
+            fs::write(root.join("vmlinuz"), b"kernel").unwrap();
+            for config_path in EXTLINUX_CONFIG_PATHS {
+                fs::create_dir_all(root.join(config_path).parent().unwrap()).unwrap();
+            }
+            if let Some(text) = primary {
+                fs::write(root.join(EXTLINUX_CONFIG_PATHS[0]), text).unwrap();
+            }
+            let source = root.join(EXTLINUX_CONFIG_PATHS[1]);
+            fs::write(
+                &source,
+                "default alpha\nlabel zulu\nlinux /vmlinuz\nlabel alpha\nlinux /vmlinuz\n",
+            )
+            .unwrap();
+            let mount = MountedPartition {
+                root: root.clone(),
+                fstype: "ext4",
+            };
+            let mut entries = scan_extlinux_entries(&test_boot_partition(), &mount);
+            entries.sort_by(compare_boot_entries);
+            assert_eq!(
+                entries
+                    .iter()
+                    .map(|entry| entry.id.as_str())
+                    .collect::<Vec<_>>(),
+                ["extlinux:alpha", "extlinux:zulu"],
+                "{primary:?}"
+            );
+            assert!(entries.iter().all(|entry| entry.source == source));
+            assert!(entries[0].preferred);
+            assert!(!entries[1].preferred);
+            fs::remove_dir_all(&root).unwrap();
+        }
+    }
+
+    #[test]
+    fn extlinux_menu_order_preserves_source_order_after_default() {
+        let root = temp_root("extlinux-order");
+        let source = root.join("extlinux.conf");
+        fs::write(root.join("vmlinuz"), b"kernel").unwrap();
+        for (default, expected) in [
+            ("", ["first", "second", "third"]),
+            ("default missing\n", ["first", "second", "third"]),
+            ("default second\n", ["second", "first", "third"]),
+        ] {
+            fs::write(
+                &source,
+                format!(
+                    "{default}label first\nlinux /vmlinuz\n\
+                     label second\nlinux /vmlinuz\nlabel third\nlinux /vmlinuz\n"
+                ),
+            )
+            .unwrap();
+            let mut entries = parse_extlinux_file(&test_boot_partition(), &root, &source).unwrap();
+            entries.sort_by(compare_boot_entries);
+            assert_eq!(
+                entries
+                    .iter()
+                    .map(|entry| entry.id.as_str())
+                    .collect::<Vec<_>>(),
+                expected.map(|label| format!("extlinux:{label}"))
+            );
+            assert!(entries[0].preferred);
+            assert!(entries[1..].iter().all(|entry| !entry.preferred));
+        }
+        fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[test]
+    fn extlinux_rejects_incomplete_entries_without_hiding_valid_neighbors() {
+        let root = temp_root("extlinux-incomplete");
+        let source = root.join("extlinux.conf");
+        fs::write(root.join("vmlinuz"), b"kernel").unwrap();
+        for invalid in [
+            "",
+            "linux /missing\n",
+            "linux /vmlinuz\ninitrd /missing\n",
+            "linux /vmlinuz\nfdt /missing\n",
+            "linux /vmlinuz\nfdt /\n",
+            "linux /vmlinuz\nfdtdir /missing\n",
+            "linux /vmlinuz\nfdtdir /vmlinuz\n",
+            "linux /vmlinuz\nfdtdir\n",
+            "linux /vmlinuz\nfdtoverlays /required.dtbo\n",
+            "linux /vmlinuz\nDEVICETREE-OVERLAY /required.dtbo\n",
+        ] {
+            fs::write(
+                &source,
+                format!("default bad\nlabel bad\n{invalid}label good\nlinux /vmlinuz\n"),
+            )
+            .unwrap();
+            let entries = parse_extlinux_file(&test_boot_partition(), &root, &source).unwrap();
+            assert_eq!(entries.len(), 1, "{invalid}");
+            assert_eq!(entries[0].id, "extlinux:good");
+            assert!(!entries[0].preferred, "invalid default is not reassigned");
+        }
+        fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[test]
+    fn extlinux_fdtdir_loads_ferrari_in_linux_and_boot_deploy_layouts() {
+        let root = temp_root("extlinux-ferrari-dtbs");
+        let source = root.join("extlinux/extlinux.conf");
+        fs::create_dir_all(source.parent().unwrap()).unwrap();
+        fs::write(root.join("vmlinuz"), b"kernel").unwrap();
+        for filename in [
+            "qcom/msm8939-xiaomi-ferrari.dtb",
+            "qcom-msm8939-xiaomi-ferrari.dtb",
+            "msm8939-xiaomi-ferrari.dtb",
+        ] {
+            let dtb = root.join("dtbs").join(filename);
+            fs::create_dir_all(dtb.parent().unwrap()).unwrap();
+            fs::write(&dtb, b"dtb").unwrap();
+            // A present fdtdir overrides fdt, as in lk2nd.
+            let entry = ExtlinuxConfig::parse(
+                "label pmos\nlinux /vmlinuz\nfdt /missing.dtb\nfdtdir ../dtbs\n",
+            )
+            .entries
+            .remove(0);
+            let entry = extlinux_boot_entry(&test_boot_partition(), &root, &source, entry, || {
+                Ok(vec!["xiaomi,ferrari".into(), "qcom,msm8939".into()])
+            })
+            .unwrap()
+            .unwrap();
+            assert_eq!(entry.dtb, Some(dtb.clone()), "{filename}");
+            fs::remove_file(dtb).unwrap();
+        }
+        fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[test]
+    fn extlinux_fdtdir_fails_closed_on_missing_identity_or_no_match() {
+        let root = temp_root("extlinux-fdtdir-failure");
+        let source = root.join("extlinux.conf");
+        fs::create_dir(root.join("dtbs")).unwrap();
+        fs::write(root.join("vmlinuz"), b"kernel").unwrap();
+        fs::write(root.join("fallback.dtb"), b"dtb").unwrap();
+        for identity in [
+            None,
+            Some(vec!["xiaomi,ferrari".into(), "qcom,msm8939".into()]),
+        ] {
+            let entry = ExtlinuxConfig::parse(
+                "label pmos\nlinux /vmlinuz\nfdt /fallback.dtb\nfdtdir /dtbs\n",
+            )
+            .entries
+            .remove(0);
+            let error = extlinux_boot_entry(&test_boot_partition(), &root, &source, entry, || {
+                identity.ok_or_else(|| invalid_data("unavailable identity"))
+            })
+            .unwrap_err();
+            assert!(
+                error.to_string().contains("identity")
+                    || error.to_string().contains("no extlinux DTB")
+            );
+        }
+        fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[test]
+    fn extlinux_fdtdir_follows_partition_absolute_dtb_symlinks() {
+        let root = temp_root("extlinux-fdtdir-absolute-links");
+        fs::create_dir_all(root.join("dtbs/qcom")).unwrap();
+        fs::write(root.join("board.dtb"), b"dtb").unwrap();
+        std::os::unix::fs::symlink(
+            "/board.dtb",
+            root.join("dtbs/qcom/msm8939-xiaomi-ferrari.dtb"),
+        )
+        .unwrap();
+        let entry = ExtlinuxConfig::parse("label pmos\nfdtdir /dtbs\n")
+            .entries
+            .remove(0);
+        let dtb = extlinux_dtb_path(&root, &root.join("extlinux.conf"), &entry, || {
+            Ok(vec!["xiaomi,ferrari".into(), "qcom,msm8939".into()])
+        })
+        .unwrap();
+        assert_eq!(dtb, Some(root.join("board.dtb")));
+        fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[test]
+    fn extlinux_fdtdir_rejects_a_matching_dtb_symlink_outside_boot_filesystem() {
+        let base = temp_root("extlinux-dtb-escape");
+        let root = base.join("boot");
+        fs::create_dir_all(root.join("dtbs/qcom")).unwrap();
+        fs::write(base.join("outside.dtb"), b"dtb").unwrap();
+        std::os::unix::fs::symlink(
+            "../../../outside.dtb",
+            root.join("dtbs/qcom/msm8939-xiaomi-ferrari.dtb"),
+        )
+        .unwrap();
+        let entry = ExtlinuxConfig::parse("label pmos\nfdtdir /dtbs\n")
+            .entries
+            .remove(0);
+        let error = extlinux_dtb_path(&root, &root.join("extlinux.conf"), &entry, || {
+            Ok(vec!["xiaomi,ferrari".into(), "qcom,msm8939".into()])
+        })
+        .unwrap_err();
+        assert!(error.to_string().contains("outside boot filesystem"));
+        fs::remove_dir_all(&base).unwrap();
+    }
+
+    #[test]
+    fn extlinux_explicit_or_live_dtb_does_not_require_identity_lookup() {
+        let root = temp_root("extlinux-no-identity");
+        let source = root.join("extlinux.conf");
+        fs::write(root.join("board.dtb"), b"dtb").unwrap();
+        for fdt in [None, Some("/board.dtb")] {
+            let entry = ExtlinuxEntry {
+                fdt: fdt.map(str::to_string),
+                ..Default::default()
+            };
+            let dtb = extlinux_dtb_path(&root, &source, &entry, || {
+                panic!("explicit fdt or live DTB fallback must not read compatibles")
+            })
+            .unwrap();
+            assert_eq!(dtb, fdt.map(|_| root.join("board.dtb")));
+        }
+        fs::remove_dir_all(&root).unwrap();
     }
 
     #[test]
@@ -2242,6 +2948,36 @@ mod tests {
         let generic_index = candidates.iter().position(|path| path == &generic).unwrap();
 
         assert!(board_index < generic_index);
+    }
+
+    #[test]
+    fn bls_fdtdir_preserves_board_layout_precedence_over_generic_soc() {
+        let root = temp_root("bls-fdtdir-layouts");
+        let dtbs = root.join("dtbs");
+        fs::create_dir_all(dtbs.join("qcom")).unwrap();
+        let layouts = [
+            "qcom/msm8939-xiaomi-ferrari.dtb",
+            "qcom-msm8939-xiaomi-ferrari.dtb",
+            "msm8939-xiaomi-ferrari.dtb",
+            "qcom/msm8939.dtb",
+        ];
+        for path in layouts {
+            fs::write(dtbs.join(path), b"dtb").unwrap();
+        }
+        let bls = BlsSnippet::parse("fdtdir /dtbs\n");
+        for expected in layouts {
+            let selected = bls_dtb_path(
+                &root,
+                &root.join("loader/entries/pmos.conf"),
+                &bls,
+                &BlsContext::default(),
+                || Ok(vec!["xiaomi,ferrari".into(), "qcom,msm8939".into()]),
+            )
+            .unwrap();
+            assert_eq!(selected, Some(dtbs.join(expected)));
+            fs::remove_file(dtbs.join(expected)).unwrap();
+        }
+        fs::remove_dir_all(root).unwrap();
     }
 
     #[test]
@@ -2376,6 +3112,25 @@ mod tests {
     #[test]
     fn crc32_matches_gpt_known_value() {
         assert_eq!(crc32_ieee(b"123456789"), 0xcbf4_3926);
+    }
+
+    fn temp_root(name: &str) -> PathBuf {
+        let root = std::env::temp_dir().join(format!("pocketboot-{name}-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&root);
+        fs::create_dir_all(&root).unwrap();
+        root.canonicalize().unwrap()
+    }
+
+    fn test_boot_partition() -> BootPartitionCandidate {
+        BootPartitionCandidate {
+            disk: "mmcblk0".into(),
+            partition: "mmcblk0p28p1".into(),
+            partno: 1,
+            role: BootPartitionRole::Nested,
+            dev_path: PathBuf::from("/dev/test-boot"),
+            removable: false,
+            _loop_device: None,
+        }
     }
 
     fn boot_entry_for_order(id: &str, boot_order: u32) -> BootEntry {
