@@ -79,7 +79,7 @@ Current main has no qhypstub-named loader and its inspected scm_elexec_call in
 platform/msm_shared/scm.c:1050-1085 lacks the HVC-first logic. Do not attribute
 the old README's runtime loader/EL2 path to whichever branch is named main.
 
-Ferrari is explicitly listed in legacy README.md:41-42 and current
+Ferrari is explicitly listed in legacy README.md:103 and current
 Documentation/devices.md:72. Its device entry is nested in:
 - legacy dts/msm8916/msm8939-mtp.dts:35-49;
 - current lk2nd/device/dts/msm8916/msm8939-mtp.dts:64-81, with unresolved
