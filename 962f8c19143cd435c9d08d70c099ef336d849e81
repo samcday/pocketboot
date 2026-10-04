@@ -1,0 +1,5 @@
+Volume-key Ferrari CI candidate, 2026-10-04
+
+Pocketboot962f8c19143cd435c9d08d70c099ef336d849e81, immutable tag ferrari/volume-20261004-v1, selects Linux08aa2e8d8cfae38a6e7617a4ce4d9c85872db95f. Relative to core candidate418aeda, it changes the source pin and adds regression assertions for GPIO/PMIC key drivers, CPU0/panic/ACM command line and zero external ramdisk. Source-backed GPIO107 volume-up and PMIC RESIN volume-down are documented in the Linux commit evidence note.
+
+Requested manual CI run37197785302, attempt1, https://github.com/samcday/pocketboot/actions/runs/37197785302 with device=qcom/msm8939-xiaomi-ferrari. Final CI result and artifact hashes will be recorded separately. Physical key presses, UI navigation and manual-reset recovery remain a morning hardware gate; no such test or successful device boot is claimed for this revision.
