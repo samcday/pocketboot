@@ -1,0 +1,31 @@
+name = "SHIFTphone 8 (otter)"
+
+[kernel-source]
+remote = "https://github.com/sc7280-mainline/linux.git"
+# v7.1.2-sc7280: same kernel release as Chris's successful serial-login trial.
+# Keep the bring-up source board-scoped, not a policy for every QCM6490 device.
+sha = "6f4b7109a64fcb63f2b367a6aa1a487e7ac5e15c"
+patches = ["patches/kernel/otter/0001-arm64-dts-qcom-otter-pocketboot.patch"]
+
+[cpio]
+slint_scale_factor = 3.0
+
+[kconfig]
+INPUT_PM8941_PWRKEY = true
+# Keep the first image independent of ADSP/PMIC GLINK and GPU firmware.
+# Chris's distro login needed qcom_q6v5_pas blacklisted; don't build it here.
+REMOTEPROC = false
+DRM_MSM = false
+
+[bootimg]
+# Chris's fastboop profile: gzip Image, separate DTB, Android v2 / 4096.
+header_version = 2
+page_size = 4096
+kernel_image = "Image.gz"
+base = 0x0
+kernel_offset = 0x00008000
+ramdisk_offset = 0x01000000
+second_offset = 0x00f00000
+tags_offset = 0x00000100
+dtb_offset = 0x01f00000
+cmdline = "earlycon console=ttyMSM0,115200n8 clk_ignore_unused pd_ignore_unused pocketboot.log=debug loglevel=8"

@@ -141,3 +141,27 @@ fn sanitize(value: &str) -> String {
         })
         .collect()
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn otter_is_discovered_as_a_boot_image_job() {
+        let root = workspace_root().unwrap();
+        let matrix = ci_matrix(&root).unwrap();
+        let entries: Vec<_> = matrix
+            .include
+            .iter()
+            .filter(|entry| entry.device == "qcom/qcm6490-shift-otter")
+            .collect();
+        assert_eq!(entries.len(), 1);
+        let entry = entries[0];
+        assert!(entry.bootimg);
+        assert_eq!(entry.artifact, "bootimg-qcom-qcm6490-shift-otter");
+        assert_eq!(entry.rust_targets, "aarch64-unknown-linux-musl");
+        let device = KernelDevice::parse(&entry.device).unwrap();
+        let config = config::load_device_config(&root, &device).unwrap();
+        assert_eq!(entry.sha, config.kernel_source.unwrap().sha);
+    }
+}
