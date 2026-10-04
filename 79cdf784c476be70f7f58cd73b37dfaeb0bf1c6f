@@ -1,0 +1,130 @@
+# Ferrari CPU/boot source provenance
+Evidence ID: ferrari-sources-2026-10-04-boot
+Subject: pocketboot 79cdf784c476be70f7f58cd73b37dfaeb0bf1c6f
+Repository: https://github.com/samcday/pocketboot.git
+Verified attached HEAD and public main, 2026-10-04 UTC.
+
+Source investigation only: no builds, hardware reads, firmware operations or HYP
+experiments. No Ferrari runtime success is claimed. This source snapshot, not
+whatever main later becomes, is the scope of the limitations below.
+
+The cross-repository source inventory and live-evidence boundaries are in
+https://github.com/samcday/linux refs/notes/evidence on
+4fecfe9561a33db1320482d5fffb03ce1d8dd7ec. Upstream Linux baseline:
+https://github.com/torvalds/linux
+6addb4f385570ebc11c4eb499a4f1c149f313e84. Vendor:
+https://github.com/MiCode/Xiaomi_Kernel_OpenSource
+da2c4ce514441515b5a9e3304aec67f08d699829.
+ROM candidate: https://github.com/shrukul/android_kernel_xiaomi_ferrari
+6bf677fd534bae9b720a65c18b6096d2a552e71c, not an attested running binary.
+
+## Verified boot-source inventory
+
+- Official https://github.com/msm8916-mainline/qhypstub.git
+  main = fca3c513b6fb5e5b8fabae21dac1f4a5c0b51bc6.
+  README.md, qhypstub.s, qhypstub.ld, COPYING; GPL-2.0-only.
+- Official https://github.com/msm8916-mainline/lk2nd.git
+  legacy and peeled tag0.16.0 = 64d3c6c57b4b8af350eedd99cd7ce872705314e5.
+  Annotated tag object eb21b3395abdfe14a46170b0eb418dfd9088da13 is NOT the
+  commit pin. This is the relevant qhypstub loader/HVC implementation.
+  LICENSE: mixed underlying code, final linked fork distributable GPLv2 only.
+- Same official lk2nd repository, current main comparison:
+  8b46487c4c76776c4f2f61468d44a74c69e6b9ea.
+  LICENSE and lk2nd/LICENSE describe mixed MIT/BSD foundations, BSD-3-Clause
+  lk2nd defaults and file-specific exceptions; do not reuse legacy's blanket
+  linked-binary licensing statement for this revision.
+- Pocketboot licensing: no root LICENSE or package license field found in the
+  inspected root/pocketpreboot Cargo manifests. The added kernel parking code
+  below is marked GPL-2.0-only. No project-wide license is inferred.
+
+Ref identities were verified by GitHub API and git ls-remote; exact source paths
+were read at those pins. Non-kernel boot repositories were only read publicly:
+they were not cloned into temporary directories, edited or imported into linux.
+Attach any such repository before editing or maintaining local refs in it.
+
+## qhypstub requirements, not a Ferrari security claim
+
+At the qhypstub pin, README.md:1-50 names MSM8916/APQ8016 and MSM8939 as
+known-working SoCs. It is a firmware stub, not a hypervisor.
+
+Firmware secure boot is explicitly distinct from Android bootloader unlocking.
+Replacing HYP requires firmware replacement to be permitted; unlocked Android
+boot images do not establish that. The README says to assume secure boot enabled
+if uncertain. A separate runtime loader relies on validation gaps in SOME
+Qualcomm TZ calls, not universal firmware behavior or permission to experiment.
+This investigation establishes no installed-phone fuse or TZ vulnerability state.
+
+README.md:27-34: a primary AArch64 bootloader can enter EL2; AArch32 LK enters
+EL1. Its AArch64 OS reaches EL2 only with the HVC boot patch. Otherwise it
+enters EL1 even if qhypstub is present.
+README-linked implementation commits, verified publicly in official lk2nd:
+- 8d840ad94c60f1f5ab0a95e886839454e03d8b86, "Try jumping to aarch64 kernel in
+  EL2 using hypervisor call", platform/msm_shared/scm.c and include/scm.h.
+- 4562184e245f0fdc429fd13600187090eed3e20d, runtime-loader introduction.
+
+At qhypstub.s:227-298 the stub invokes TZ state-switch SMC and traps back into
+EL2 to avoid the documented secondary-CPU execution-state problem.
+README and qhypstub.ld require protecting 4 KiB at 0x86400000. These are source
+requirements, not instructions to modify this phone's memory layout or firmware.
+
+## Why both lk2nd pins matter
+
+Legacy target/msm8916/qhypstub_loader.c:116-213 implements runtime loading;
+platform/msm_shared/scm.c:1052-1058 has HVC-first boot with SMC fallback.
+lk2nd/smp/cpu-boot.c:82-174 handles boot addresses and core/cluster-L2 startup.
+lk2nd/smp/spin-table.c:160-253 sets qhypstub's AArch64 state BEFORE starting
+secondaries so their exception level remains consistent.
+
+Current main has no qhypstub-named loader and its inspected scm_elexec_call in
+platform/msm_shared/scm.c:1050-1085 lacks the HVC-first logic. Do not attribute
+the old README's runtime loader/EL2 path to whichever branch is named main.
+
+Ferrari is explicitly listed in legacy README.md:41-42 and current
+Documentation/devices.md:72. Its device entry is nested in:
+- legacy dts/msm8916/msm8939-mtp.dts:35-49;
+- current lk2nd/device/dts/msm8916/msm8939-mtp.dts:64-81, with unresolved
+  lk2nd,dtb-files FIXME.
+Device recognition and implementation capability are not proof of a complete
+Ferrari mainline DTB, working eight-core handoff, display or USB on this phone.
+
+## Mainline CPU contract versus pinned Pocketboot
+
+Linux baseline arch/arm64/boot/dts/qcom/msm8939.dtsi defines eight CPUs,
+MPIDRs 0x100..0x103 and 0x0..0x3, boot CPU0x100, all using spin-table with
+placeholder release addresses requiring a second-stage shim.
+Documentation/arch/arm64/booting.rst requires consistent entry exception level,
+cache/MMU/register state, coherency, reserved spin-table memory and aligned
+initially-zero 64-bit release slots. Release addresses are little-endian.
+The earlier live downstream qcom,arm-cortex-acc configuration is a different
+boot interface; it does not prove this mainline contract has been supplied.
+
+Pinned Pocketboot is four-core MSM8916, not an eight-core MSM8939 implementation:
+- pocketpreboot/src/msm8916.rs:12-25: MAX_CPUS=4.
+- pocketpreboot/src/msm8916.rs:583-630: collect_cpus rejects MPIDRs >=4,
+  requires exactly four CPUs and fixed MSM8916 ACC geometry.
+- pocketpreboot/src/spin_table.S:35-46: resident secondaries accept affinities1-3.
+- src/kexec.rs:1431-1444: kexec contract requires MPIDRs0-3.
+- patches/kernel/msm8916/0001-arm64-pocketboot-spin-table-kexec.patch:298-319:
+  parking path rejects is_hyp_mode_available() and requires secondary EL1.
+- docs/msm8916-spin-table-abi.md:17-28 specifies four CPUs, CPU0 affinity and
+  ownership/preservation of the release slots.
+git grep found no msm8939/ferrari references in this source snapshot.
+Inference from these explicit checks: simply increasing NR_CPUS cannot make
+this topology/ABI implementation support the MSM8939 handoff. This is not a
+claim that every possible external boot path requires that same ABI.
+
+## Read/search recipes (no firmware commands)
+
+  git notes --ref=evidence show 79cdf784c476be70f7f58cd73b37dfaeb0bf1c6f
+  git grep -n -E 'MAX_CPUS|reg >=|MPIDRs 0 through 3|is_hyp_mode_available' 79cdf784c476be70f7f58cd73b37dfaeb0bf1c6f -- pocketpreboot/src/msm8916.rs src/kexec.rs patches/kernel/msm8916
+  git ls-remote https://github.com/msm8916-mainline/qhypstub.git refs/heads/main
+  git ls-remote https://github.com/msm8916-mainline/lk2nd.git refs/heads/main refs/heads/legacy 'refs/tags/0.16.0' 'refs/tags/0.16.0^{}'
+  Q=fca3c513b6fb5e5b8fabae21dac1f4a5c0b51bc6
+  L=64d3c6c57b4b8af350eedd99cd7ce872705314e5
+  curl -fsSL "https://raw.githubusercontent.com/msm8916-mainline/qhypstub/$Q/README.md"
+  curl -fsSL "https://raw.githubusercontent.com/msm8916-mainline/lk2nd/$L/lk2nd/smp/spin-table.c"
+
+This note was added after importing the existing public evidence-note history.
+The local-backlink's 19 note blobs were all present identically in the public
+32-note superset; none were overwritten. Publish only by normal fast-forward
+push after importing/reconciling any newer remote note tip, never force.
