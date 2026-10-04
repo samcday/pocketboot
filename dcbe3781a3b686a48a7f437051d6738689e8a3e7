@@ -1,0 +1,50 @@
+Mi 4i: framebuffer and USB milestone, 2026-10-04 UTC
+
+Source pins and scope
+- Linux: 4fecfe9561a33db1320482d5fffb03ce1d8dd7ec, two board patches on upstream 6addb4f385570ebc11c4eb499a4f1c149f313e84. No maXTouch driver/binding modifications, no HYP changes.
+- pocketboot source checkpoint: dcbe3781a3b686a48a7f437051d6738689e8a3e7, published on samcday/pocketboot branch ferrari-boot-diagnostics. The successful 2x image was built from the working-tree contents subsequently committed as this checkpoint. Earlier 1x image differs by omitting the cpio scale override.
+- lk2nd official release 23.1: source e9c8b21735c13dd7ace808b1e35451638f0a0c6d, lk2nd-msm8916.img 428048 bytes, SHA256 8f5f788b45b96447517ff121f20841e6bfc95a5d7c4b48fdedb855d90f593144. Both release manifest and GitHub asset digest matched; embedded QCDT/device/panel entries were checked against Sam-unit.
+- Device is Sam-unit, Xiaomi Mi 4i with driver-reported Sharp RSP61322 panel and maXTouch336T. Prior OS was unofficial Lineage15.0; no claim about factory provenance or repair history.
+
+Build/configuration correction
+The allnoconfig recipe omitted QCOM_A53PLL and QCOM_CLK_APCS_MSM8916. Both were observed disabled in the regenerated effective configuration. Parent source audit established the A53PLL -> APCS/syscon -> SMD RPM clock dependency and the separate APCS child-clock/CCI assignment. No DTS modification was needed to resolve this provider gap. The tested profile requests both drivers built-in, plus QCOM_SOC; omits hidden CRASH_DUMP when KEXEC=n; retains maxcpus=1. It enables PSTORE_CONSOLE and uses a pocketboot-only ramoops overlay, not an upstream-board change: 512KiB@0x9ff80000, 8KiB records, 256KiB console, ecc-size64. Cmdline: maxcpus=1 panic=-1 initcall_debug loglevel=8 pocketboot.acm.
+Command: cargo xtask build qcom/msm8939-xiaomi-ferrari <attached-linux-tree>. Rust1.96.0 and aarch64 GCC16.2.1/binutils2.47 were used on the desktop. Strict config merge/build passed; required effective symbols were checked. cargo fmt -p xtask --check, all54 xtask tests, and git diff --check passed. The matching Linux RS codec also passed an offline two-symbol encode/decode test. Packaged QCDT/FDT/ramoops geometry were checked.
+
+Successful transient boots
+1x artifact: 10616832 bytes, SHA256 a373fe2e204cce35f15bf77fbf611408c582228cadd5cd11305524ac666e27e4.
+2x artifact: 10747904 bytes, SHA256 2ba6a9f5d86fba137c563148dada61691e8a4414c48fc6271d03e97ee4dcecc6.
+The boot chain was stock ABOOT -> RAM-booted official lk2nd -> RAM-booted pocketboot. No flash/erase commands were used by this subthread. The primary bootloaders/HYP were untouched; boot remained erased from earlier authorized preparation. Corrected-profile direct stock-ABOOT boot has NOT been tested: earlier direct trials used the incomplete clock configuration, so those failures do not prove an inherent stock-loader handoff defect.
+
+lk2nd's first successful log at07:18 UTC identified Xiaomi Mi4i (xiaomi,ferrari), reported its entry at0x80008000 with r2=0x81e00000, and measured the live MDP splash: RGB_0, base0x83200000, stride3240, 1080x1920 source/image/output, format0x2243f (3bytes/pixel). This corroborates address/geometry/packed24-bit storage, not exact colour ordering by itself.
+
+At07:50:17 UTC, lk2nd accepted the 1x image; pocketboot USB VID:PID1d6b:0104 appeared about3.4s later. Fastboot getvar product returned pocketboot. Sam visually confirmed rendered pocketboot UI, with text too small at1x; touch was intentionally not enabled. Clean live dmesg over oem dmesg/get_staged contained811 records/56153 bytes, SHA256 05157d498b50f2a914eb4b971e93638b9da156bec3da6b422ac62b17f58ab3f6. Relevant uncorrupted lines:
+[1.117715] Initialized simpledrm1.0.0 for83200000.framebuffer on minor0
+[1.173302] qcom_usb_hs_phy probe returned0
+[1.175200] ci_hdrc probe returned0
+[1.219129] Run /init as init process
+Kernel identifies as7.3.0-rc5+. ADB/short fastboot shell confirmed CPU0 only, /dev/dri/card0, ci_hdrc.0 UDC, and1080x1920 DRM mode. After mounting debugfs, devices_deferred was empty at969s uptime. eMMC/GPT partitions enumerated; no storage-write or OS-boot validation is claimed. A4097-byte stage/get_staged roundtrip matched byte-for-byte: SHA256 8ac8bb5cc7553718c98baffd822ec2ada2804278d96ddf8a188d7a09a37db7a9. No clk_ignore_unused/regulator_ignore_unused masking parameters were used.
+
+Operator/protocol incident: a combined shell request exceeded pocketboot COMMAND_MAX=64 and stalled the fastboot session. This was an invalid test, not counted as hardware regression. Physical USB unplug/replug recovered it without reboot; subsequent short fastboot shell and ADB commands worked. Long scripts should use the staged-script API or ADB.
+
+At08:10:30 UTC, fastboot reboot bootloader from live pocketboot succeeded; stock fastboot returned without a Power-button reset. The verified lk2nd image was reloaded and its fixed raw ramoops window immediately retrieved. At08:14:00 UTC, the 2x image was booted through lk2nd and again answered product:pocketboot by08:14:04. Its live dmesg readback succeeded:819 records/56601 bytes, SHA256 3e7ae17f0d3a3b49878cd9edd500f7a1092180e4ceaaa9c588ad1857a4552e3f. Visual scale confirmation was still pending when this note was written.
+
+Retained-console limitation
+Before the first Linux run via lk2nd, the fixed raw512KiB window had no DBGC headers (SHA256 959bd6b8202c7f64546c7c67fd317120951ebf157dedb30f6f30104d429ac394). After the initial no-ECC run/reset/reload, the window hash was89daa55b524065eed78f8616d0aea408cc659ec89219635ee6a6f9c82824653e, identical on two consecutive reads. Console start=size50827; recognizable kernel/userspace text was heavily damaged and5/32 dump signatures lost bits. This established progress but was not used for exact error diagnosis.
+For the ECC64 run and SOFTWARE reboot path, raw hash57bf87ed3c588067b041a06cc46c9edfee379304a51e9509de78add1f75c2d7f. tools/ramoops_decode.py with the matching kernel and --ecc 64 reported console start=size61154, capacity174708, corrected_symbols30, but all478 occupied data blocks uncorrectable. It emitted damaged data, not a verified console.log. Five empty dump headers decoded;27 failed. Initial layout transition from non-ECC may affect unused-header parity; no cause is asserted. Neither corruption locus nor thermal cause is established. 30C ambient was operator-reported, not a chip measurement. Retention/ECC correctness needs separate investigation and does not invalidate clean live USB logs.
+
+Recovery boundaries
+Only documented oem log and fixed-size oem ramoops raw/get_staged were used in lk2nd. Header-trusting console/dump helpers and unmapped vendor-window debug reads were excluded. Published lk2nd source audit documents these limits. Raw captures and images remain local; permanent known-good image copies and a checksum manifest are stored outside Delta on the desktop. Public notes contain no private backup paths or device serial.
+
+Touch follow-up is queued but NOT run. The upstream driver and fixed-regulator provider have not been enabled. The current draft DT's voltage/cascade/analog-vs-digital claims remain unsupported; source-verified GPIO enable order is not electrical topology. A tap result must not be used to bless that description. No touch, SMP, kexec, native-panel, radio or full-device-support claim is made here.
+
+Touch-test safety hold, 2026-10-04 UTC
+
+No touchscreen probe was attempted. The known-good effective configuration explicitly has CONFIG_TOUCHSCREEN_ATMEL_MXT=n and CONFIG_REGULATOR_FIXED_VOLTAGE=n; source checkpoint remains dcbe3781a3b686a48a7f437051d6738689e8a3e7, with no pending source edits. No firmware/configuration upload or always-on touch workaround was added. L6/display votes were not changed.
+
+Static comparison, not a hardware damage claim:
+- Upstream Linux 4fecfe9561a33db1320482d5fffb03ce1d8dd7ec drivers/input/touchscreen/atmel_mxt_ts.c:3255-3314 documents VDDA=2.57..3.47V and VDD=1.71..3.47V, obtains named supplies, asserts RESET, enables regulators, waits, then releases RESET. It does not program regulator voltages in this probe path.
+- The draft board maps vdda to L6, whose inherited constraints are fixed at1.8V (msm8939-pm8916.dtsi:93-95), and maps vdd to the GPIO78 fixed regulator. Its GPIO9/GPIO78 voltage values and vin-supply cascade are not established electrical facts.
+- Exact public downstream source candidate 6bf677fd534bae9b720a65c18b6096d2a552e71c, drivers/input/touchscreen/atmel_mxt_ts_336t.c:5547-5575 enables power_ldo GPIO9 before power_ts GPIO78. Its error/remove paths:5698-5716 and5735-5739 disable GPIO9 before GPIO78.
+- The invented fixed-regulator cascade encodes the opposite child-before-parent shutdown. Upstream regulator core disables the current output at drivers/regulator/core.c:3280 and then its supply at3304-3305. That sequence and the analog/digital mapping have not been justified for this board.
+
+The parent explicitly directed holding the probe rather than adding an always-on workaround to bypass the unresolved shutdown path. This is an evidence/model/safety gate, not a failed upstream maXTouch-driver test. A future successful tap still would not establish the disputed rail topology.
