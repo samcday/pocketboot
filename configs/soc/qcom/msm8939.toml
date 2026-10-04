@@ -3,7 +3,7 @@ name = "Qualcomm MSM8939"
 [kernel-source]
 remote = "https://github.com/samcday/linux.git"
 # Initial Ferrari board series on torvalds/master, without maXTouch changes.
-sha = "8f889b55ffe4c151a9fecbed71634e68b745959b"
+sha = "08aa2e8d8cfae38a6e7617a4ce4d9c85872db95f"
 
 [kconfig]
 ARCH_QCOM = true

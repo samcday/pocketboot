@@ -776,19 +776,24 @@ mod tests {
         assert!(kconfig.contains("CONFIG_QCOM_A53PLL=y\n"));
         assert!(kconfig.contains("CONFIG_QCOM_CLK_APCS_MSM8916=y\n"));
         assert!(kconfig.contains("CONFIG_PSTORE_CONSOLE=y\n"));
+        assert!(kconfig.contains("CONFIG_KEYBOARD_GPIO=y\n"));
+        assert!(kconfig.contains("CONFIG_INPUT_PM8941_PWRKEY=y\n"));
         assert!(kconfig.contains("# CONFIG_KEXEC is not set\n"));
         assert!(!kconfig.contains("CONFIG_CRASH_DUMP"));
 
         let bootimg = config.bootimg.unwrap();
-        assert!(
-            bootimg
-                .cmdline
-                .split_whitespace()
-                .any(|arg| arg == "panic=-1")
-        );
+        for expected in ["maxcpus=1", "panic=-1", "pocketboot.acm"] {
+            assert!(
+                bootimg
+                    .cmdline
+                    .split_whitespace()
+                    .any(|arg| arg == expected)
+            );
+        }
         assert_eq!(bootimg.header_version, 0);
         assert_eq!(bootimg.page_size, 2048);
         assert_eq!(bootimg.kernel_image, "Image");
+        assert_eq!(bootimg.ramdisk_size, 0);
         assert_eq!(bootimg.base + bootimg.kernel_offset, 0x80008000);
         assert_eq!(bootimg.base + bootimg.ramdisk_offset, 0x82000000);
         assert_eq!(bootimg.base + bootimg.tags_offset, 0x80000100);
