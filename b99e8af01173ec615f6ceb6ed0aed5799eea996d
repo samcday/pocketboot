@@ -7,3 +7,156 @@ This later first-boot configuration commit is distinct from the initial source-i
 Sanitized full handoff, including toolchains, artifact hashes, transient-trial timings, interrupted-observer caveats, manual-reset clarification, and lack of recovered logs, is attached to https://github.com/samcday/linux refs/notes/evidence on4fecfe9561a33db1320482d5fffb03ce1d8dd7ec. Source of handoff: build/test thread unpublished Linux notes tip5e95bb95c9c70e929174eb6362bffe580d587950, relayed as only its two newly appended sections to avoid reimporting identifying old parent text.
 
 The source-indexing thread did not build, operate the phone or modify either source tree. Existing source limitations remain scoped to their exact pinned snapshots; later work and unsuccessful boot attempts do not retroactively establish successful runtime support.
+
+# Ferrari source-index addendum: official lk2nd 23.1 retained-log behavior
+Evidence ID: ferrari-sources-2026-10-04-lk2nd23
+Context: Linux 4fecfe9561a33db1320482d5fffb03ce1d8dd7ec and Pocketboot
+b99e8af01173ec615f6ceb6ed0aed5799eea996d plus the separately recorded test deltas.
+This addendum does not change either source tree or the two-patch Linux series.
+
+## Source pin, authority, license, method
+
+Official repository: https://github.com/msm8916-mainline/lk2nd.git
+Release: https://github.com/msm8916-mainline/lk2nd/releases/tag/23.1
+Annotated tag object: 24d3f25f91b866d0a31a0b6be9fd3a388e58378b
+Peeled COMMIT: e9c8b21735c13dd7ace808b1e35451638f0a0c6d
+Verified by release-page link, pinned public source reads and:
+  git ls-remote https://github.com/msm8916-mainline/lk2nd.git 'refs/tags/23.1' 'refs/tags/23.1^{}'
+GitHub marks the tag signature verified; this investigation did not independently
+verify its GPG signature. API rate limiting was not treated as absence evidence.
+The scout read a pinned public archive in scratch; the parent independently read
+ramoops.c and checked address arithmetic. No repository clone/edit, build,
+hardware access or firmware operation was performed in this source investigation.
+
+Root LICENSE describes mixed licensing. lk2nd/LICENSE defaults its code to
+BSD-3-Clause with exceptions. ramoops.c and lk2nd/fastboot/{misc.c,fetch.c,
+debug/register.c} are BSD-3-Clause; app/aboot/fastboot.c has two-clause BSD text;
+target/msm8916/meminfo.c, platform/msm8916/platform.c and
+platform/msm_shared/{dev_tree.c,debug.c} have three-clause BSD notices;
+lib/heap/heap.c has MIT text; lib/libfdt/fdt_rw.c is
+GPL-2.0-or-later OR BSD-2-Clause. Do not label the whole tree BSD-3-Clause.
+
+All paths/lines below are at this release COMMIT. Immutable read recipe:
+  L=e9c8b21735c13dd7ace808b1e35451638f0a0c6d
+  curl -fsSL "https://raw.githubusercontent.com/msm8916-mainline/lk2nd/$L/lk2nd/ramoops/ramoops.c"
+  curl -fsSL "https://raw.githubusercontent.com/msm8916-mainline/lk2nd/$L/target/msm8916/meminfo.c"
+These source reads require no phone. Attach lk2nd before maintaining/editing a
+separate checkout; no unrelated bootloader repository was imported into linux.
+
+## The reader does NOT discover Ferrari's vendor reservation
+
+lk2nd/ramoops/ramoops.c:35-53 get_ramoops_region hard-codes:
+- size0x80000 (512KiB), record0x2000 (8KiB), console0x40000 (256KiB);
+- ftrace/pmsg/ECC zero, leaving dump allocation0x40000 (32 records);
+- base = scratch + scratch_size - total_size.
+
+target/msm8916/rules.mk:8-12 gives SCRATCH_ADDR0x90000000;
+target/msm8916/meminfo.c:77-85 gives scratch size256MiB.
+Calculated defaults, NOT measured runtime placement:
+- raw backing [0x9ff80000,0xa0000000);
+- dump records [0x9ff80000,0x9ffc0000);
+- console allocation [0x9ffc0000,0xa0000000);
+- console payload starts0x9ffc000c, maximum0x3fff4 bytes, after the12-byte
+  sig/offt/size header (ramoops.c:14-21).
+This is SCRATCH-top, not physical RAM-top. It is not vendor0xffe00000/2MiB.
+
+Incoming DT handling (lk2nd/device/2nd/parse-tags.c:28-62 and
+lk2nd/device/device.c:107-158) does not set this geometry. The Ferrari entry at
+lk2nd/device/dts/msm8916/msm8939-mtp.dts:64-81 has Sharp RSP61322 matching but
+no ramoops override; its DTB filename hint remains commented out.
+
+## Outgoing DT hook is opt-in, not retention or byte migration
+
+lk2nd/ramoops/ramoops.c:56-123:
+- BOOT_DOWNSTREAM/BOOT_LK2ND returns immediately.
+- Otherwise requires lk2nd.pass-ramoops in the hook's command line.
+- =zap clears the DEFAULT512KiB before checking for /reserved-memory.
+- With an existing /reserved-memory parent, finds/adds compatible ramoops,
+  replaces reg and record/console/ftrace/pmsg/ECC sizes with the defaults.
+- Without the option, leaves any supplied outgoing node unchanged.
+The hook does NOT migrate old bytes from0xffe00000 and adds no FDT memreserve
+entry. BOOT_DOWNSTREAM classification includes the /soc/qcom,ion heuristic
+(platform/msm_shared/dev_tree.c:2199-2221), not a universal vendor-DT guarantee.
+The Android boot path selects a DT from the NEW boot image
+(app/aboot/aboot.c:2129-2205); unchanged outgoing DT is not automatic inheritance
+of the earlier bootloader's running DT.
+
+## Command inventory, NOT authorization or instructions to operate the phone
+
+Source-supported names:
+- `fastboot oem log` then `fastboot get_staged lk2nd.log`: CURRENT lk2nd log,
+  up to32KiB, not the previous Linux console. lk2nd/fastboot/misc.c:8-14;
+  platform/msm_shared/debug.c:65-110; lk2nd/project/base.mk:47-48.
+- `fastboot oem ramoops regions`: prints DEFAULT-window headers; stages nothing.
+- `fastboot oem ramoops raw` then `fastboot get_staged ramoops.bin`: snapshots
+  exactly the DEFAULT512KiB including headers. No address/size arguments.
+  ramoops.c:125-188. No intended source clearing.
+- There is no registered `oem ramdump` or `oem lk_log` alias at this pin.
+
+app/aboot/fastboot.c:431-445 stages by copying selected data to scratch START
+and setting length;516-540 uploads that staged copy via the upload protocol.
+`get_staged` does not resample/select arbitrary memory. Later staging replaces
+the snapshot; upload does not clear it. getvar returns registered strings
+(447-485), not arbitrary RAM.
+
+EXCLUDE two helpers from an unconditional "safe read-only" recipe:
+- ramoops.c:190-203 `oem ramoops console` trusts retained size, ignores signature,
+  ring offset and ECC, and does not bound size to the console allocation.
+  It can read outside the retained region; a wrapped ring is not reordered.
+- ramoops.c:205-246 `oem ramoops dump` handles only the first record, calls
+  unbounded memset(scratch,0,record->size) BEFORE checking magic, then may
+  copy/decompress, and does not return after failure responses. Malformed
+  metadata can corrupt scratch/backing or fault. This is not merely a read.
+
+`oem debug readb/readhw/readl/readq ADDRESS` exists but performs direct virtual
+dereferences with alignment checks, not physical mapping or bounded bulk reads
+(lk2nd/fastboot/debug/register.c:10-23,61-68).
+Default static mappings exclude0xffe00000; blanket identity mapping is disabled
+(platform/msm8916/platform.c:62-71,114-148). Do not use these as a supported
+vendor-window recovery mechanism. Dynamic runtime mappings were not observed.
+
+## Starting lk2nd is not a proof of preservation
+
+No ramoops startup initializer/persistent writer/header reset exists in this
+module. The explicit whole-window clear is the outgoing =zap option.
+Normal entry still relocates image/zeros BSS (arch/arm/crt0.S:110-129,175-204),
+initializes current boot logging and heap (kernel/main.c:75-101), and sets up
+display/boot selection (app/aboot/aboot.c:5539-5564). Automatic boot attempts
+can precede fastboot (5652-5687).
+
+The default backing is not excluded from ordinary scratch consumers:
+- Fastboot receives full256MiB: aboot.c:5735-5741; downloads write it,
+  fastboot.c:487-513.
+- Partition fetch writes storage data into the same RAM: lk2nd/fastboot/fetch.c:15-69.
+- Boot-image load/decompression: aboot.c:1853-1863,3360-3370.
+- Extlinux load/decompression: lk2nd/boot/extlinux.c:540-582.
+- Optional simplefb relocation copies framebuffer data near scratch end:
+  lk2nd/display/simplefb.c:37-55; not log migration.
+Heap is separately bounded by linked-image _end/_end_of_ram
+(lib/heap/heap.c:50-58; arch/arm/system-onesegment.ld:90-99), nominally within
+the1MiB target image region at0x8f600000.
+Preserving FDT reservation-map metadata (lib/libfdt/fdt_rw.c:454-535) does not
+make it an allocator exclusion; no such reservation consumer was found in
+lk2nd/aboot/target/platform code.
+
+No dedicated write to vendor0xffe00000 was found. That is NOT a retention
+guarantee: preceding stock firmware/reset/DDR behavior and hardware-selected
+framebuffer placement are unresolved. Continuous splash dynamically maps the
+runtime framebuffer (lk2nd/display/cont-splash/target_display.c:15-68).
+
+## Source versus binary versus measurement
+
+The source thread did not download/attest the release image. The separately
+relayed build/test note reports artifact428048 bytes and SHA256
+8f5f788b45b96447517ff121f20841e6bfc95a5d7c4b48fdedb855d90f593144, matched
+against API digest and release sha256sums, with Ferrari/Sharp DT content checked.
+That artifact observation is attributed to its owning thread, not silently
+upgraded into source-to-binary reproducibility or runtime memory evidence.
+
+Conclusion: ordinary23.1 has no supported ramoops bulk-reader for the supplied
+vendor0xffe00000 reservation. `oem log` is useful only for the current lk2nd
+execution. Fixed-window raw capture can describe the DEFAULT window if acquired
+elsewhere with permission, but cannot recover a differently addressed writer.
+No working retained-console recovery, kernel progress or mainline runtime is
+claimed. Future mapped-reader work or hardware acquisition belongs in the
+separately coordinated build/test workflow, not this source-indexing session.
