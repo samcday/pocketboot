@@ -151,3 +151,14 @@ was separately hash/config/ZIP verified but has not yet been booted in this
 pass. EV_KEY volume press/release, visible navigation, manual long-power reset
 and post-reset recovery remain untested at this checkpoint. No touch, radios,
 native-panel DRM, SMP, kexec, stress or direct-stock-loader qualification.
+
+Ferrari core smoke test: human visual confirmation
+
+Sam replied "Yep LGTM" to the explicit request to check that the running pocketboot UI was visible, upright, readable and sensibly scaled, with no blanking or graphical corruption. This is the human observation for the same core artifact left running by the automated qualification; no intervening boot or source change was performed by the test session.
+
+Pocketboot418aeda63bfd970c3f7930b2070ba051a180951f; Linux8f889b55ffe4c151a9fecbed71634e68b745959b.
+GHA run37197635740 attempt1, artifact11301539503.
+Image10813440bytes, SHA256a1a2cbb169360e0c8b514cf8217f21eea28e0969d2816c34a5b48e74be8fd8ac.
+Observed chain: stock ABOOT -> RAM-booted official lk2nd23.1 -> exact RAM-booted core image.
+
+Together with the preceding automated evidence, this completes the bounded core smoke test: rendered UI, USB diagnostics/transfer, eMMC/GPT enumeration and no deferred probes. It does not claim storage writes, reliable retained logs, touch, volume keys, radios, native-panel operation, SMP, kexec or direct-stock-loader boot. Volume keys and manual-reset recovery are the next separate frozen-artifact tests. No Tested-by or sign-off trailer is inferred from this confirmation.
