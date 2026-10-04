@@ -1,0 +1,21 @@
+Land workflow validation, 2026-10-04
+
+Subject: pocketboot db039fc3ccdbe386b9a8908a0aed55da0df9e8ac, immutable snapshot b4/land-workflow/v1-test.2, PR https://github.com/samcday/pocketboot/pull/56. Base79cdf784c476be70f7f58cd73b37dfaeb0bf1c6f. Scope is exactly one new documentation/skill file, .agents/skills/land/SKILL.md. No Ferrari profile, kernel, firmware, or device change is included.
+
+Validation: parsed YAML with system Python/PyYAML; verified name=land, disable-model-invocation=true, metadata.delta-action=land, nonempty bounded description and no trailing whitespace. Extracted all10 sh examples and ran /bin/sh -n on each; all pass. git diff --check passes. Skill file SHA25682364e148d6a54a9ffaa063a654601acf48ebb63b930c951d81f6bedfd0e61d3. These are metadata/syntax checks, not a claim that all future workflow actions have run.
+
+Commit construction used a temporary index in the current attached repository, based on main for the first candidate and the first candidate for the follow-up. The live checkout HEAD, original index bytes, and inherited modified Ferrari files were hashed/verified unchanged. The candidate diff contains only the skill. No other checkout or device was accessed.
+
+CodeRabbit review5405363177 identified artifact-attempt ambiguity at f2e96dd29f9749e6a8d8377a6d299c283cb75474; review comment4176994611. The new procedure resolves attempt-specific jobs, takes ARTIFACT_ID from the upload step of that job, verifies run/head/name/expiry, downloads by ID, verifies archive digest, and then separately hashes the extracted boot.img. It rejects name-only/newest-created inference. The generic scanner request to repeat merge authorization is not adopted: the workflow is explicitly user-invoked and blocks unsafe operations/ambiguous scope; this behavior was approved by the user.
+
+Read-only API validation used an existing successful public CI artifact, not a new hardware test:
+run36943859053, attempt1, head4b7685eac406948aed645f2f4377649af3b3b28e;
+attempt-specific job110641825824 (qcom/msm8916-samsung-a5u-eur), successful Upload boot image step;
+upload log explicitly reports artifact11201775301;
+artifact metadata matches the run/head/name and is not expired;
+archive SHA25608a53427399a64cd6fa6af821ba18414dfb67fcb9fed8d1b7189e4c08fc93ff6 matches its API digest;
+archive contains only boot.img,5277712bytes,SHA256cad8de9b3d83eb11cea8f15863885bcddc185621902683ad1c03c3c1de279145,with Android header magic.
+
+GitHub CLI2.97.0 rejects raw terminal escape sequences, including those in job logs. The verified commands use --allow-escape-sequences only into captured buffers/files, not raw terminal display; the skill documents that boundary. Both source snapshot tags are immutable and the PR update was fast-forward, not a history rewrite.
+
+Current-revision CI and CodeRabbit re-review were requested after this correction and remain pending at this note entry. Hardware tests and b4 series export are not applicable to this skill-only change. No landing, email, firmware operation or release has yet occurred.
