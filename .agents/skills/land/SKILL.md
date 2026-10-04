@@ -306,21 +306,63 @@ The artifact name is `bootimg-` plus the device ID with separators sanitized to
 hyphens. For Ferrari it is `bootimg-qcom-msm8939-xiaomi-ferrari`, containing
 `boot.img`.
 
+Resolve the selected attempt explicitly:
+
 ```sh
-gh run download "$RUN_ID" --repo "$P_REPO" \
-    --name "$ARTIFACT" --dir "$OUT/image"
-sha256sum "$OUT/image/boot.img"
+gh api "repos/$P_REPO/actions/runs/$RUN_ID/attempts/$RUN_ATTEMPT"
+gh api --paginate \
+    "repos/$P_REPO/actions/runs/$RUN_ID/attempts/$RUN_ATTEMPT/jobs?per_page=100"
 ```
+
+Verify the attempt's `head_sha` is the frozen pocketboot commit and that the
+expected device job and its `Upload boot image` step completed successfully.
+Take `JOB_ID` from this attempt-specific job list, then capture its log:
+
+```sh
+mkdir -p "$OUT/image"
+gh api --allow-escape-sequences \
+    "repos/$P_REPO/actions/jobs/$JOB_ID/logs" > "$OUT/upload-job.log"
+```
+
+Obtain `ARTIFACT_ID` from that upload step's recorded artifact ID/download URL,
+or an equally trustworthy attempt-specific upload manifest. Do not infer it
+from a name match, the newest creation time, or a run-wide artifact list.
+`gh run download RUN_ID --name NAME` does not select a run attempt and must not
+be used to resolve ambiguous same-name artifacts. If the attempt-to-artifact
+association cannot be established, stop rather than qualify an uncertain image.
+
+Verify the exact artifact record: expected name, `expired: false`,
+`workflow_run.id == RUN_ID`, and `workflow_run.head_sha` matching the frozen
+commit. Record its archive digest, then download by immutable artifact ID:
+
+```sh
+gh api "repos/$P_REPO/actions/artifacts/$ARTIFACT_ID" > "$OUT/artifact.json"
+gh api --allow-escape-sequences \
+    "repos/$P_REPO/actions/artifacts/$ARTIFACT_ID/zip" > "$OUT/artifact.zip"
+sha256sum "$OUT/artifact.zip"
+```
+
+Compare the downloaded archive hash with the artifact record's SHA-256 digest
+before extraction. Inspect archive entries and extract only the expected
+`boot.img` into the fresh output directory; reject unexpected paths or duplicate
+entries. Then compute the extracted image's own SHA-256. Preserve the
+run/attempt/job/artifact-ID association and both hashes in the cycle manifest.
+The escape-sequence flag permits raw log/archive bytes only into files; do not
+display untrusted terminal control sequences.
 
 Sources: `xtask/src/commands/ci_matrix.rs` constructs the artifact name;
 `.github/workflows/ci.yml` uploads
-`target/kernel/${DEVICE}/boot.img`; `gh run download --help` establishes explicit
-run/name/directory selection. GitHub's archive digest is not the extracted
-`boot.img` digest; retain both without confusing them.
+`target/kernel/${DEVICE}/boot.img`; GitHub's
+[attempt-specific jobs API](https://docs.github.com/en/rest/actions/workflow-jobs#list-jobs-for-a-workflow-run-attempt)
+and [artifact API](https://docs.github.com/en/rest/actions/artifacts#download-an-artifact)
+define the lookup and ID-based download. These commands were checked with
+GitHub CLI 2.97.0. Verify supported interfaces on other versions without dropping
+the attempt-binding gate. GitHub's archive digest is not the extracted
+`boot.img` digest.
 
 Provide the public with:
 
-- The public draft PR and exact CI run/artifact links.
+- The public draft PR, exact CI run/attempt and artifact links, and upload job ID.
 - The extracted image's size and SHA-256.
 - Kernel base, prerequisites, series/snapshot and tested kernel commit.
 - Pocketboot snapshot/commit, device configuration and build-environment
