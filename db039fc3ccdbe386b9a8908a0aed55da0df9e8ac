@@ -19,3 +19,11 @@ archive contains only boot.img,5277712bytes,SHA256cad8de9b3d83eb11cea8f15863885b
 GitHub CLI2.97.0 rejects raw terminal escape sequences, including those in job logs. The verified commands use --allow-escape-sequences only into captured buffers/files, not raw terminal display; the skill documents that boundary. Both source snapshot tags are immutable and the PR update was fast-forward, not a history rewrite.
 
 Current-revision CI and CodeRabbit re-review were requested after this correction and remain pending at this note entry. Hardware tests and b4 series export are not applicable to this skill-only change. No landing, email, firmware operation or release has yet occurred.
+
+Review qualification update, 2026-10-04
+
+CodeRabbit explicitly verified db039fc3ccdbe386b9a8908a0aed55da0df9e8ac in review5405416994 / inline reply4177028005, after inspecting that exact commit and its diff. It confirmed the run-attempt -> upload-job -> immutable-artifact-ID correction and resolved thread PRRT_kwDOS5KGfM6ow9gp. It also explicitly agreed that the already-explicit landing request supplies merge permission without repetitive confirmation. All actionable review threads are resolved; the five pre-merge checks shown by CodeRabbit pass (nonapplicable docstring/issue checks are reported as such).
+
+The separate @coderabbitai review command was rate-limited, but the above commit-specific inline re-review completed and is recorded on the current head; qualification is based on that substantive verification, not merely a green status. Initial full review at f2e96dd covered the unchanged remainder of the file.
+
+CI for the current db039fc head is run37193812902 and remains pending at this entry. CI-image run37193811808 and Claude Code Review37193812921 passed. Comment-triggered Claude jobs are skipped by their @claude-only conditional, as defined in .github/workflows/claude.yml:15-19; those are not required build checks.
