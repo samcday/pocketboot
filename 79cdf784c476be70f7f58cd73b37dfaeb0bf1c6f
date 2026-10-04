@@ -128,3 +128,5 @@ This note was added after importing the existing public evidence-note history.
 The local-backlink's 19 note blobs were all present identically in the public
 32-note superset; none were overwritten. Publish only by normal fast-forward
 push after importing/reconciling any newer remote note tip, never force.
+
+Later source-index update, 2026-10-04 UTC: official lk2nd23.1 source e9c8b21735c13dd7ace808b1e35451638f0a0c6d and retained-log limitations are now indexed in this repository evidence note on b99e8af01173ec615f6ceb6ed0aed5799eea996d, and in the Linux master note on4fecfe9561a33db1320482d5fffb03ce1d8dd7ec. In particular, its OEM ramoops helpers use scratch-top0x9ff80000/512KiB, not vendor0xffe00000/2MiB, and console/dump helpers cannot be treated as unconditional safe reads. This does not alter the earlier79cdf source snapshot or claim runtime success.
