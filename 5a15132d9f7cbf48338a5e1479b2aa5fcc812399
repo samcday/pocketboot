@@ -1,0 +1,41 @@
+Land workflow validation, 2026-10-04
+
+Subject: pocketboot db039fc3ccdbe386b9a8908a0aed55da0df9e8ac, immutable snapshot b4/land-workflow/v1-test.2, PR https://github.com/samcday/pocketboot/pull/56. Base79cdf784c476be70f7f58cd73b37dfaeb0bf1c6f. Scope is exactly one new documentation/skill file, .agents/skills/land/SKILL.md. No Ferrari profile, kernel, firmware, or device change is included.
+
+Validation: parsed YAML with system Python/PyYAML; verified name=land, disable-model-invocation=true, metadata.delta-action=land, nonempty bounded description and no trailing whitespace. Extracted all10 sh examples and ran /bin/sh -n on each; all pass. git diff --check passes. Skill file SHA25682364e148d6a54a9ffaa063a654601acf48ebb63b930c951d81f6bedfd0e61d3. These are metadata/syntax checks, not a claim that all future workflow actions have run.
+
+Commit construction used a temporary index in the current attached repository, based on main for the first candidate and the first candidate for the follow-up. The live checkout HEAD, original index bytes, and inherited modified Ferrari files were hashed/verified unchanged. The candidate diff contains only the skill. No other checkout or device was accessed.
+
+CodeRabbit review5405363177 identified artifact-attempt ambiguity at f2e96dd29f9749e6a8d8377a6d299c283cb75474; review comment4176994611. The new procedure resolves attempt-specific jobs, takes ARTIFACT_ID from the upload step of that job, verifies run/head/name/expiry, downloads by ID, verifies archive digest, and then separately hashes the extracted boot.img. It rejects name-only/newest-created inference. The generic scanner request to repeat merge authorization is not adopted: the workflow is explicitly user-invoked and blocks unsafe operations/ambiguous scope; this behavior was approved by the user.
+
+Read-only API validation used an existing successful public CI artifact, not a new hardware test:
+run36943859053, attempt1, head4b7685eac406948aed645f2f4377649af3b3b28e;
+attempt-specific job110641825824 (qcom/msm8916-samsung-a5u-eur), successful Upload boot image step;
+upload log explicitly reports artifact11201775301;
+artifact metadata matches the run/head/name and is not expired;
+archive SHA25608a53427399a64cd6fa6af821ba18414dfb67fcb9fed8d1b7189e4c08fc93ff6 matches its API digest;
+archive contains only boot.img,5277712bytes,SHA256cad8de9b3d83eb11cea8f15863885bcddc185621902683ad1c03c3c1de279145,with Android header magic.
+
+GitHub CLI2.97.0 rejects raw terminal escape sequences, including those in job logs. The verified commands use --allow-escape-sequences only into captured buffers/files, not raw terminal display; the skill documents that boundary. Both source snapshot tags are immutable and the PR update was fast-forward, not a history rewrite.
+
+Current-revision CI and CodeRabbit re-review were requested after this correction and remain pending at this note entry. Hardware tests and b4 series export are not applicable to this skill-only change. No landing, email, firmware operation or release has yet occurred.
+
+Review qualification update, 2026-10-04
+
+CodeRabbit explicitly verified db039fc3ccdbe386b9a8908a0aed55da0df9e8ac in review5405416994 / inline reply4177028005, after inspecting that exact commit and its diff. It confirmed the run-attempt -> upload-job -> immutable-artifact-ID correction and resolved thread PRRT_kwDOS5KGfM6ow9gp. It also explicitly agreed that the already-explicit landing request supplies merge permission without repetitive confirmation. All actionable review threads are resolved; the five pre-merge checks shown by CodeRabbit pass (nonapplicable docstring/issue checks are reported as such).
+
+The separate @coderabbitai review command was rate-limited, but the above commit-specific inline re-review completed and is recorded on the current head; qualification is based on that substantive verification, not merely a green status. Initial full review at f2e96dd covered the unchanged remainder of the file.
+
+CI for the current db039fc head is run37193812902 and remains pending at this entry. CI-image run37193811808 and Claude Code Review37193812921 passed. Comment-triggered Claude jobs are skipped by their @claude-only conditional, as defined in .github/workflows/claude.yml:15-19; those are not required build checks.
+
+Pre-merge qualification complete, 2026-10-04
+
+Current PR56 head is db039fc3ccdbe386b9a8908a0aed55da0df9e8ac, based on current main79cdf784c476be70f7f58cd73b37dfaeb0bf1c6f. The diff is exactly .agents/skills/land/SKILL.md. Both public snapshot tags were checked against their peeled commit IDs.
+
+CI run37193812902, attempt1, head db039fc3ccdbe386b9a8908a0aed55da0df9e8ac, completed success: https://github.com/samcday/pocketboot/actions/runs/37193812902 . All nine configured device build jobs, CI matrix and CI-image wait passed. Separate CI Image37193811808 and Claude Code Review37193812921 also passed. No failing or pending checks remain; comment-triggered Claude is inapplicable without an @claude mention.
+
+CodeRabbit verified the current correction and resolved its only finding as recorded above. The redundant incremental-review command was rate-limited; the substantive commit-specific re-review is the acceptance evidence, not the green rate-limit status alone. No additional review findings were posted.
+
+The user explicitly selected skill-only landing. No new hardware or b4-series qualification applies. Repository main is unprotected with no rulesets and squash merging enabled; these settings were inspected, not altered. The PR is mergeable and head-matched for the forthcoming merge.
+
+An earlier attempt to write this qualification entry on a full filesystem failed before any merge. Execution resumed on a host with free space; published PR/head/CI/notes were rechecked. No filesystem cleanup was performed. Landing has not yet occurred at this entry.
