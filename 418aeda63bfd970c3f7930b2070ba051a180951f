@@ -74,3 +74,80 @@ Actions API reports event=pull_request, head_sha418aeda63bfd970c3f7930b2070ba051
 The morning test images remain the separately verified immutable artifact IDs11301539503(core) and11301780924(volume), with full receipts in the earlier notes. PR CI does not replace those receipts, nor physical testing.
 
 GitHub Claude review reported no Linux PR26 issues. CodeRabbit initially skipped automatic review, despite a green status context, because these repos had fewer than10 stars. Explicit reviews were requested on both PRs; no completed CodeRabbit review was present at the last check. A green skipped-review status is NOT review approval. The independent Delta source review remains the source-only review evidence; no human hardware-test trailers are inferred.
+
+Ferrari core hardware qualification — automated portion, human observation pending
+
+Capture window: 2026-10-04 23:01:33–23:02:46 UTC. Physical Xiaomi Ferrari DUT,
+CPU0-only configuration; host identity verified before device access. Commands
+explicitly selected the privately identified DUT and had 8–20 s deadlines.
+No source/ref/build/install/partition edits. No stored-image flash/erase. No
+block-backed filesystem mounted. Read-only debugfs was temporarily mounted for
+observations and then unmounted. No retained-console investigation.
+
+Frozen artifact: samcday/pocketboot 418aeda63bfd970c3f7930b2070ba051a180951f,
+Linux 8f889b55ffe4c151a9fecbed71634e68b745959b,
+tag ferrari/core-20261004-v1, CI run 37197635740 attempt 1,
+artifact 11301539503 bootimg-qcom-msm8939-xiaomi-ferrari.
+Archive SHA256 d7ded40e04917d75a8a59b57c6d8b530d5710bb64ccd942b03553d8b2d60eef2.
+Image 10813440 bytes,
+SHA256 a1a2cbb169360e0c8b514cf8217f21eea28e0969d2816c34a5b48e74be8fd8ac.
+Config SHA256 10afe29161014f830dd9dd51dc7124e5d2c62d2ca9de671bd1ad94f7c52d2bc7.
+Archive digest, only boot.img/.config members, extracted byte equality, image
+size/digest, config digest, receipt JSON and packaged-DT digest verified locally.
+Packaged DT SHA256 98bdae447ae675e8f339163f20064f821b25fa1d90f2339f06db7cb558aafd2b.
+
+Recovery image was located and hash-verified before disrupting the initial
+Pocketboot session: checkpoint dcbe3781a3b686a48a7f437051d6738689e8a3e7,
+10747904 bytes, SHA256
+2ba6a9f5d86fba137c563148dada61691e8a4414c48fc6271d03e97ee4dcecc6.
+
+Observed boot path: initial Pocketboot fastboot+ADB -> supported fastboot
+reboot bootloader -> stock product MSM8916 -> fastboot boot official LK23.1
+-> observed product lk2nd-msm8916 -> fastboot boot exact core image -> observed
+product pocketboot and ADB state recovery. LK source pin
+e9c8b21735c13dd7ace808b1e35451638f0a0c6d; image 428048 bytes,
+SHA256 8f5f788b45b96447517ff121f20841e6bfc95a5d7c4b48fdedb855d90f593144.
+Loader OKAY was not the Linux criterion: live Linux logs, runtime sysfs/proc,
+ADB and Pocketboot fastboot were independently retrieved after re-enumeration.
+
+Runtime: Linux 7.3.0-rc5+ #1 SMP PREEMPT, built 2026-10-04 11:17:07 UTC,
+aarch64-linux-gnu-gcc Debian 14.2.0-19, GNU ld 2.44.
+Cmdline exactly maxcpus=1 panic=-1 initcall_debug loglevel=8 pocketboot.acm;
+no ignore-unused masking flags. Uptime 33.12 s at inventory, CPU online=0,
+possible=0-7; log says 1 CPU activated.
+
+Selected live dmesg evidence:
+[1.270269] [drm] Initialized simpledrm 1.0.0 for 83200000.framebuffer on minor 0
+[1.353342] mmc0: SDHCI controller on 7824900.mmc ... using ADMA
+[1.433162] mmc0: new HS200 MMC card at address 0001
+[1.434235] mmcblk0: ... R311MB 14.6 GiB
+[1.437453] Alternate GPT is invalid, using primary GPT.
+[1.437999] mmcblk0: p1 ... p36
+Live dmesg 55573 bytes, SHA256
+27c529a57684406151d8143588a44e5ebff006575774a636b10642a3631a54f7.
+
+Automated display: connector connected, 1080x1920; DRM state active=1,
+enable=1, mode 1080x1920@60, XR24 1080x1920 framebuffer allocated by
+pocketboot-ui, pitch 4320. This is NOT a human-visible UI pass.
+USB: ci_hdrc.0 configured/high-speed, gadget 1d6b:0104; ADB and short fastboot
+commands passed. Bounded 4097-byte stage/get_staged exact byte compare passed,
+payload SHA256 6dea11fd585c26a1d50de04c9fc6c9b3f6918df71bcd53eda777069cd5512243.
+Storage: eMMC/GPT p1–p36 enumerated, 30535680 sectors; no block mounts or writes.
+Deferred-probe list empty after read-only debugfs mount. Initial inventory
+reported missing debugfs before mounting; absence was not treated as emptiness.
+Core input inventory shows only pm8941_pwrkey/event0; volume keys are not a
+core artifact claim.
+
+Warnings: alternate GPT invalid (primary used), CDC-ACM DTR unavailable
+(fallback settle delay), no boot entries discovered. Offline hash-verified
+known-good dcbe 1x/2x logs contain all three, including alternate GPT warnings
+at 1.307952 s and 1.451502 s. They predate this candidate; no repair attempted.
+Live log also reports retained ramoops header errors; recorded only, with no
+retention experiments, reads or policy changes.
+
+Human observation: requested from Sam; pending. Do not convert DRM state to a
+visual pass. Core remains running while awaiting response. Volume artifact
+was separately hash/config/ZIP verified but has not yet been booted in this
+pass. EV_KEY volume press/release, visible navigation, manual long-power reset
+and post-reset recovery remain untested at this checkpoint. No touch, radios,
+native-panel DRM, SMP, kexec, stress or direct-stock-loader qualification.
