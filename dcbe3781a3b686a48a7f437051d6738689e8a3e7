@@ -48,3 +48,36 @@ Static comparison, not a hardware damage claim:
 - The invented fixed-regulator cascade encodes the opposite child-before-parent shutdown. Upstream regulator core disables the current output at drivers/regulator/core.c:3280 and then its supply at3304-3305. That sequence and the analog/digital mapping have not been justified for this board.
 
 The parent explicitly directed holding the probe rather than adding an always-on workaround to bypass the unresolved shutdown path. This is an evidence/model/safety gate, not a failed upstream maXTouch-driver test. A future successful tap still would not establish the disputed rail topology.
+
+Mi 4i retained-log ECC: source and real-capture audit, 2026-10-04 UTC
+
+Scope and pins
+Offline only; no device access, reboot, flash or new firmware execution. Source pins are pocketboot dcbe3781a3b686a48a7f437051d6738689e8a3e7, Linux 4fecfe9561a33db1320482d5fffb03ce1d8dd7ec, and official lk2nd 23.1 e9c8b21735c13dd7ace808b1e35451638f0a0c6d. Relevant decoder/RS/pstore files are unchanged in the current feature branches. The original raw captures were located in the completed boot session's ignored output, verified against recorded hashes, then copied into private ignored output in the current worktree. Raw captures/logs were not uploaded.
+
+Runtime, not just packaged DT
+Both archived clean live logs match the earlier published hashes. Each reports exactly one successful ramoops registration at 0x80000@0x9ff80000 with ecc:64. Neither has a duplicate-probe rejection or lk2nd.pass-ramoops argument. Both image QCDT v2 tables point all three entries to one byte-identical saved FDT containing one ramoops node. The 2x live kernel also logs header-codeword correction counts 23,26,27,21,18,30 at initial probe; those messages have no zone labels.
+
+Static layout check
+Linux DT parsing sets only ECC size. ram_core defaults to 128-byte data blocks, 8-bit symbols, polynomial 0x11d, fcr=0, prim=1, matching pocketboot tools/ramoops_rs.c. The separately protected header is 12 bytes. Console size 0x40000 yields capacity174708, 1365 parity slots, data parity at console+0x2aa80, header parity at console+0x3ffc0 (raw+0x7ffc0). An 8192-byte dump record yields capacity5364, data parity+0x1500, header parity+0x1fc0. Decoder allocation, full-block decoding and ring endpoint rules match the kernel. No geometry/codec mismatch was found.
+
+At the lk2nd source pin, lk2nd/ramoops/ramoops.c:56-123 does nothing to the outgoing DT without lk2nd.pass-ramoops. If that option is enabled, it sets ecc-size=0 rather than preserving ECC64. The fixed-size raw staging command at lines125-132 neither invokes that fixup nor interprets ECC. Do not add pass-ramoops to the present ECC64 profile casually.
+
+Actual retained bytes and reproduction
+Input: the 524288-byte ECC64 software-reboot capture, SHA256
+57bf87ed3c588067b041a06cc46c9edfee379304a51e9509de78add1f75c2d7f.
+Preserved original decoded.json SHA256
+bcf24a45e48f2d7599862ccbd2a4591e04627a16e67679cfe713386351aa35e1.
+
+Compiled the existing host RS adapter against the pinned-equivalent kernel lib/reed_solomon sources in scratch. Read console=raw[0x40000:0x80000]. Applied Codec.apply(console[:12], console[0x3ffc0:0x40000]), independently re-encoded the corrected header with zero-initialized 64-byte parity, compared parity byte-for-byte, and decoded the corrected codeword again (zero corrections). Re-ran decode_zone(console,64,codec) and compared the full statistics to the preserved decoded.json; they match exactly. Also decoded/re-encoded each of the 32 record headers. No synthetic roundtrip is being used as proof of the capture layout.
+
+Raw console header hex: 44424743e2ee0000e26e0000.
+Raw fields: signature0x43474244, start61154, size28386.
+Accepted corrected fields: signature0x43474244, start61154, size61154.
+The 30 corrected symbols comprise ONE header-data symbol and TWENTY-NINE parity symbols. Data correction sets one captured-zero bit to one; parity correction sets36 bits to one. No one-to-zero correction occurs in this codeword. Corrected parity exactly matches re-encoding; the corrected codeword has zero syndromes under the same codec. A valid nearby codeword is not, by itself, independent proof of the original header contents when capture errors may exceed the correction bound.
+
+The accepted header selects478 occupied 128-byte blocks. ALL478 remain uncorrectable, including the first. No recovered console.log is claimed. The selected data-parity bytes have per-bit one fractions0.38415,0.38942,0.39527,0.39229,0.39278,0.39438,0.39177,0.38298. There is no corresponding pre-reset parity snapshot, so these fractions alone do not measure bit-loss rate.
+
+Dump header zones3,8,15,26,30 decode as empty DBGC records with correction counts23,26,27,21,18 respectively. Each changes one data symbol plus parity; all observed corrections set captured-zero bits to one. Other27 headers fail. Their sequence, followed by console30, agrees with the later live kernel's logged correction counts. That independently corroborates the on-device interpretation of the retained region; it does not locate when damage happened.
+
+Conclusion and remaining gate
+The earlier statement "30 corrected symbols" is a codeword-wide count, NOT30 header bytes or a recovered console. The actual capture reproduces the prior uncorrectable-data result and supports a directional clear-bit damage pattern relative to accepted nearby header codewords. It does not prove PMIC power collapse, DRAM retention failure, temperature effects, LK overwrite or extraction as the cause. Full power-loss recovery is not established. A matched pre-reset capture from the SAME ECC-configured run plus controlled reset/readback is still needed to identify the corruption boundary. That is future human-owned hardware work, not an overnight action.
