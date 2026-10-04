@@ -1,0 +1,9 @@
+Targeted CI validation, 2026-10-04
+
+Commit6b7455c is the reusable CI selector/config-artifact change. The core test tree is418aeda63bfd970c3f7930b2070ba051a180951f; the volume-key test tree is962f8c19143cd435c9d08d70c099ef336d849e81. Both derive from the hardware-tested diagnostic checkpointdcbe3781.
+
+Local verification on the desktop: cargo fmt -p xtask --check, cargo test --offline -p xtask (56 tests), cargo test --offline -p pocketboot --features busybox (178 tests), git diff --check all passed. The UI test volume_buttons_emit_navigation_on_press_and_repeat confirms existing userspace handling of keycodes115/114; this is not a physical button test.
+
+The exact CI matrix shell step was run with DEVICE_FILTER empty, Ferrari, and an unknown device. Empty emitted10 entries; Ferrari emitted exactly1 unchanged full entry; unknown returned nonzero before writing any success matrix to GITHUB_OUTPUT. YAML and shell syntax were checked. Input gating is explicitly workflow_dispatch only, so push/PR events retain the full matrix. Artifact upload paths are exactly boot.img and .config; both are checked nonempty, and hidden-file inclusion is scoped to those paths rather than a broad directory.
+
+No phone commands, services, flashing or radio/touch changes were involved in this validation. Full CI build and artifact inspection are separate evidence records.
