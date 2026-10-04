@@ -732,6 +732,7 @@ mod tests {
             "qcom/msm8930-samsung-expressltexx",
             "qcom/msm8916-samsung-a5u-eur",
             "qcom/msm8916-samsung-gt510",
+            "qcom/msm8939-xiaomi-ferrari",
             "qcom/msm8953-xiaomi-daisy",
             "qcom/sdm670-google-sargo",
             "qcom/sdm845-google-crosshatch",
@@ -757,6 +758,42 @@ mod tests {
                 assert!(kconfig.contains("CONFIG_KEYBOARD_GPIO=y\n"));
             }
         }
+    }
+
+    #[test]
+    fn ferrari_uses_raw_image_and_legacy_qcdt_without_preboot() {
+        let workspace_root = super::super::workspace_root().unwrap();
+        let device = KernelDevice::parse("qcom/msm8939-xiaomi-ferrari").unwrap();
+        let config = load_device_config(&workspace_root, &device).unwrap();
+        let kconfig = config.kconfig_contents().unwrap();
+
+        assert_eq!(config.kernel.image.as_deref(), Some("Image"));
+        assert!(config.kernel_source.as_ref().unwrap().patches.is_empty());
+        assert!(kconfig.contains("CONFIG_DRM_SIMPLEDRM=y\n"));
+        assert!(kconfig.contains("CONFIG_USB_CHIPIDEA_UDC=y\n"));
+        assert!(kconfig.contains("# CONFIG_KEXEC is not set\n"));
+
+        let bootimg = config.bootimg.unwrap();
+        assert_eq!(bootimg.header_version, 0);
+        assert_eq!(bootimg.page_size, 2048);
+        assert_eq!(bootimg.kernel_image, "Image");
+        assert_eq!(bootimg.base + bootimg.kernel_offset, 0x80008000);
+        assert_eq!(bootimg.base + bootimg.ramdisk_offset, 0x82000000);
+        assert_eq!(bootimg.base + bootimg.tags_offset, 0x80000100);
+        assert!(bootimg.preboot.is_none());
+        assert!(bootimg.dtbh.is_none());
+        assert!(!bootimg.append_dtb);
+        assert!(!bootimg.append_seandroid_enforce);
+        assert_eq!(
+            bootimg
+                .qcdt
+                .unwrap()
+                .entries
+                .iter()
+                .map(|entry| (entry.msm_id, entry.board_id))
+                .collect::<Vec<_>>(),
+            vec![([239, 0], [8, 0]), ([241, 0], [8, 0]), ([263, 0], [8, 0])]
+        );
     }
 
     #[test]

@@ -1,0 +1,33 @@
+name = "Xiaomi Mi 4i"
+
+[kernel]
+image = "Image"
+
+[kconfig]
+# This profile tests framebuffer handoff and USB, not kexec or native display.
+KEXEC = false
+EXTCON = true
+EXTCON_USB_GPIO = true
+INPUT_PM8941_PWRKEY = true
+
+[bootimg]
+# Legacy Android/QCDT envelope measured from the working LineageOS boot image.
+header_version = 0
+page_size = 2048
+kernel_image = "Image"
+base = 0x80000000
+kernel_offset = 0x00008000
+ramdisk_offset = 0x02000000
+second_offset = 0x00f00000
+tags_offset = 0x00000100
+# Userspace is embedded in the kernel, not an external Android ramdisk.
+ramdisk_size = 0
+# First test only CPU0; the secondary spin-table handoff is not yet validated.
+cmdline = "maxcpus=1 pocketboot.acm"
+
+[bootimg.qcdt]
+entries = [
+    { msm_id = [239, 0], board_id = [8, 0] },
+    { msm_id = [241, 0], board_id = [8, 0] },
+    { msm_id = [263, 0], board_id = [8, 0] },
+]

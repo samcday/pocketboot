@@ -1,0 +1,56 @@
+name = "Qualcomm MSM8939"
+
+[kernel-source]
+remote = "https://github.com/samcday/linux.git"
+# Initial Ferrari board series on torvalds/master, without maXTouch changes.
+sha = "4fecfe9561a33db1320482d5fffb03ce1d8dd7ec"
+
+[kconfig]
+ARCH_QCOM = true
+NR_CPUS = 8
+
+# Qualcomm firmware and RPM resources
+QCOM_SCM = true
+QCOM_SMEM = true
+QCOM_SOCINFO = true
+HWSPINLOCK = true
+HWSPINLOCK_QCOM = true
+MAILBOX = true
+QCOM_APCS_IPC = true
+RPMSG_QCOM_SMD = true
+QCOM_SMD_RPM = true
+QCOM_CLK_SMD_RPM = true
+QCOM_RPMPD = true
+
+# Clocks, pinctrl, PMIC and regulators
+COMMON_CLK_QCOM = true
+MSM_GCC_8939 = true
+PINCTRL_MSM = true
+PINCTRL_MSM8916 = true
+GPIO_SHARED_PROXY = true
+SPMI = true
+SPMI_MSM_PMIC_ARB = true
+MFD_SPMI_PMIC = true
+PINCTRL_QCOM_SPMI_PMIC = true
+REGULATOR = true
+REGULATOR_QCOM_SMD_RPM = true
+POWER_RESET_MSM = true
+POWER_RESET_QCOM_PON = true
+PM_DEVFREQ = true
+
+# BLSP buses and eMMC
+SERIAL_MSM = true
+SERIAL_MSM_CONSOLE = true
+I2C_QUP = true
+DMADEVICES = true
+QCOM_BAM_DMA = true
+MMC_SDHCI = true
+MMC_SDHCI_PLTFM = true
+MMC_SDHCI_MSM = true
+
+# USB peripheral mode; gadget functions come from the common configuration.
+USB_CHIPIDEA = true
+USB_CHIPIDEA_UDC = true
+USB_CHIPIDEA_MSM = true
+GENERIC_PHY = true
+PHY_QCOM_USB_HS = true
