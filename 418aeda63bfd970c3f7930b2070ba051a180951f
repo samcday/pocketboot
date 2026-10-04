@@ -63,3 +63,14 @@ Receipt:
 Retrieval: gh api repos/samcday/pocketboot/actions/artifacts/11301539503/zip > artifact.zip ; verify the recorded ZIP SHA256, then extract only boot.img and .config and verify their recorded hashes. The convenient gh run download route must still be checked against this run/attempt/artifact identity rather than a floating latest build.
 
 Morning test scope: exclusive DUT ownership, RAM-only stock-fastboot -> pinned official lk2nd23.1 -> candidate image, confirm USB identity/live logs/DRM and eMMC enumeration, and compare new warnings/deferred probes. For the volume candidate additionally obtain physical press/release events115/114, visible navigation, and manual long-power-reset recovery. No flashing, HYP, touch power changes, radio activation or kexec/OS-boot qualification. Keep the known-good dcbe3781 image available; stop and ask for physical recovery if a candidate does not return USB.
+
+Full PR integration CI, 2026-10-04 UTC
+
+Pocketboot PR57 core candidate418aeda63bfd970c3f7930b2070ba051a180951f passed the full ten-device CI matrix in run37198908565, attempt1:
+https://github.com/samcday/pocketboot/actions/runs/37198908565
+
+Actions API reports event=pull_request, head_sha418aeda63bfd970c3f7930b2070ba051a180951f and PR base5a15132d9f7cbf48338a5e1479b2aa5fcc812399. This is PR integration-CI context, not a claim that its checkout equals the immutable manual-tag artifact build. All ten device jobs succeeded: exynos7870-j7xelte, apq8016-sbc, msm8916-samsung-a5u-eur, msm8916-samsung-gt510, msm8926-sony-xperia-yukon-eagle, msm8939-xiaomi-ferrari, sdm670-google-sargo, sdm845-google-crosshatch, sdm845-oneplus-enchilada and sdm845-oneplus-fajita. Wait-for-image, matrix and CI-image jobs also succeeded.
+
+The morning test images remain the separately verified immutable artifact IDs11301539503(core) and11301780924(volume), with full receipts in the earlier notes. PR CI does not replace those receipts, nor physical testing.
+
+GitHub Claude review reported no Linux PR26 issues. CodeRabbit initially skipped automatic review, despite a green status context, because these repos had fewer than10 stars. Explicit reviews were requested on both PRs; no completed CodeRabbit review was present at the last check. A green skipped-review status is NOT review approval. The independent Delta source review remains the source-only review evidence; no human hardware-test trailers are inferred.
