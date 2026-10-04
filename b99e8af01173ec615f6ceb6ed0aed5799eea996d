@@ -1,0 +1,9 @@
+Ferrari first-boot source and measurement cross-reference, 2026-10-04 UTC
+Subject: b99e8af01173ec615f6ceb6ed0aed5799eea996d
+Public source: https://github.com/samcday/pocketboot.git ; exact-SHA fetch verified. Pinned locally at refs/sources/ferrari/build-base/b99e8af01173ec615f6ceb6ed0aed5799eea996d without changing this worktree HEAD.
+
+This later first-boot configuration commit is distinct from the initial source-index snapshot79cdf784c476be70f7f58cd73b37dfaeb0bf1c6f. The phone-owning build/test thread reports trials based on this commit PLUS explicitly uncommitted QCOM_SOC=true, CRASH_DUMP="omit" and later pstore-overlay/config/test deltas. Therefore these trials must NOT be attributed to the bare source commit alone. Reported configuration disables KEXEC, uses NR_CPUS=8 but maxcpus=1; no SMP/kexec success is claimed.
+
+Sanitized full handoff, including toolchains, artifact hashes, transient-trial timings, interrupted-observer caveats, manual-reset clarification, and lack of recovered logs, is attached to https://github.com/samcday/linux refs/notes/evidence on4fecfe9561a33db1320482d5fffb03ce1d8dd7ec. Source of handoff: build/test thread unpublished Linux notes tip5e95bb95c9c70e929174eb6362bffe580d587950, relayed as only its two newly appended sections to avoid reimporting identifying old parent text.
+
+The source-indexing thread did not build, operate the phone or modify either source tree. Existing source limitations remain scoped to their exact pinned snapshots; later work and unsuccessful boot attempts do not retroactively establish successful runtime support.
