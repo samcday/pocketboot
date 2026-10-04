@@ -10,6 +10,12 @@ on:
   push:
     branches: [main]
   workflow_dispatch:
+    inputs:
+      device:
+        description: "Build one VENDOR/DEVICE (empty builds all configured devices)"
+        type: string
+        required: false
+        default: ""
 
 permissions:
   contents: read
@@ -108,8 +114,14 @@ jobs:
 
       - name: Generate CI matrix
         id: matrix
+        env:
+          DEVICE_FILTER: ${{ github.event_name == 'workflow_dispatch' && inputs.device || '' }}
         run: |
-          matrix="$(cargo xtask ci-matrix)"
+          set --
+          if [ -n "$DEVICE_FILTER" ]; then
+            set -- --device "$DEVICE_FILTER"
+          fi
+          matrix="$(cargo xtask ci-matrix "$@")"
           has_builds="$(python3 -c 'import json, sys; print("true" if json.loads(sys.argv[1])["include"] else "false")' "$matrix")"
           echo "$matrix"
           {
@@ -184,6 +196,8 @@ jobs:
           cargo xtask kernel "$DEVICE"
           if [ "$BOOTIMG" = "true" ]; then
             cargo xtask bootimg "$DEVICE"
+            test -s "target/kernel/$DEVICE/boot.img"
+            test -s "target/kernel/$DEVICE/.config"
           fi
 
       - name: Show ccache stats
@@ -202,5 +216,8 @@ jobs:
         uses: actions/upload-artifact@v7
         with:
           name: ${{ matrix.artifact }}
-          path: target/kernel/${{ matrix.device }}/boot.img
+          path: |
+            target/kernel/${{ matrix.device }}/boot.img
+            target/kernel/${{ matrix.device }}/.config
+          include-hidden-files: true
           if-no-files-found: error

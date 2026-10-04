@@ -10,7 +10,10 @@ use super::{
 };
 
 #[derive(clap::Args, Debug)]
-pub(crate) struct CiMatrixArgs {}
+pub(crate) struct CiMatrixArgs {
+    #[arg(long, value_name = "VENDOR/DEVICE")]
+    device: Option<KernelDevice>,
+}
 
 #[derive(Serialize)]
 struct CiMatrix {
@@ -29,15 +32,15 @@ struct CiMatrixEntry {
     bootimg: bool,
 }
 
-pub(crate) fn run(_args: CiMatrixArgs) -> Result<()> {
+pub(crate) fn run(args: CiMatrixArgs) -> Result<()> {
     let workspace_root = workspace_root()?;
-    let matrix = ci_matrix(&workspace_root)?;
+    let matrix = ci_matrix(&workspace_root, args.device.as_ref())?;
     let json = serde_json::to_string(&matrix).map_err(|err| format!("encode CI matrix: {err}"))?;
     println!("{json}");
     Ok(())
 }
 
-fn ci_matrix(workspace_root: &Path) -> Result<CiMatrix> {
+fn ci_matrix(workspace_root: &Path, device: Option<&KernelDevice>) -> Result<CiMatrix> {
     let mut include = Vec::new();
 
     for device in configured_devices(workspace_root)? {
@@ -68,6 +71,14 @@ fn ci_matrix(workspace_root: &Path) -> Result<CiMatrix> {
             rust_cache,
             bootimg: device_config.bootimg.is_some(),
         });
+    }
+
+    if let Some(device) = device {
+        let id = device.id();
+        include.retain(|entry| entry.device == id);
+        if include.is_empty() {
+            return Err(format!("no CI-enabled device matches {id}"));
+        }
     }
 
     Ok(CiMatrix { include })
@@ -140,4 +151,38 @@ fn sanitize(value: &str) -> String {
             }
         })
         .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn device_filter_preserves_the_full_matrix_entry() {
+        let root = workspace_root().unwrap();
+        let full = ci_matrix(&root, None).unwrap();
+        let device = KernelDevice::parse(&full.include[0].device).unwrap();
+        let selected = ci_matrix(&root, Some(&device)).unwrap();
+
+        assert_eq!(selected.include.len(), 1);
+        assert!(full.include.len() > selected.include.len());
+        let expected = full
+            .include
+            .iter()
+            .find(|entry| entry.device == device.id())
+            .unwrap();
+        assert_eq!(
+            serde_json::to_value(&selected.include[0]).unwrap(),
+            serde_json::to_value(expected).unwrap()
+        );
+    }
+
+    #[test]
+    fn device_filter_rejects_unavailable_devices() {
+        let root = workspace_root().unwrap();
+        let device = KernelDevice::parse("qcom/msm8939-not-a-device").unwrap();
+        let error = ci_matrix(&root, Some(&device)).err().unwrap();
+
+        assert!(error.contains("no CI-enabled device matches"));
+    }
 }
