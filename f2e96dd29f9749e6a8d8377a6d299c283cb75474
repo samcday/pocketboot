@@ -1,5 +1,5 @@
 Land skill candidate v1-test.1, 2026-10-04
 
-Documentation-only candidate f2e96dd29f9749e6a8d837a6d299c283cb75474 (use the note target as authoritative; abbreviated identifiers in prose are not source pins) was published as PR56 and immutable tag b4/land-workflow/v1-test.1. Only .agents/skills/land/SKILL.md changed relative to79cdf784c476be70f7f58cd73b37dfaeb0bf1c6f. YAML metadata, whitespace, and all eight shell-example syntax checks passed. Existing Ferrari working files, index and checkout HEAD were preserved.
+Documentation-only candidate f2e96dd29f9749e6a8d8377a6d299c283cb75474 was published as PR56 and immutable tag b4/land-workflow/v1-test.1. Only .agents/skills/land/SKILL.md changed relative to79cdf784c476be70f7f58cd73b37dfaeb0bf1c6f. YAML metadata, whitespace, and all eight shell-example syntax checks passed. Existing Ferrari working files, index and checkout HEAD were preserved.
 
 CodeRabbit completed an actual review, not a skipped green status, and found one valid issue: selecting an artifact by run ID/name did not bind it to the requested run attempt. This candidate is superseded, not accepted for landing. The correction and verification are recorded on db039fc3ccdbe386b9a8908a0aed55da0df9e8ac. No kernel series or hardware work was included.
