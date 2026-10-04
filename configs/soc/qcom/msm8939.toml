@@ -10,6 +10,7 @@ ARCH_QCOM = true
 NR_CPUS = 8
 
 # Qualcomm firmware and RPM resources
+QCOM_SOC = true
 QCOM_SCM = true
 QCOM_SMEM = true
 QCOM_SOCINFO = true
@@ -24,6 +25,8 @@ QCOM_RPMPD = true
 
 # Clocks, pinctrl, PMIC and regulators
 COMMON_CLK_QCOM = true
+QCOM_A53PLL = true
+QCOM_CLK_APCS_MSM8916 = true
 MSM_GCC_8939 = true
 PINCTRL_MSM = true
 PINCTRL_MSM8916 = true

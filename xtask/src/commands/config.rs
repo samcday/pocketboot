@@ -768,12 +768,24 @@ mod tests {
         let kconfig = config.kconfig_contents().unwrap();
 
         assert_eq!(config.kernel.image.as_deref(), Some("Image"));
+        assert_eq!(config.cpio.slint_scale_factor, Some(2.0));
         assert!(config.kernel_source.as_ref().unwrap().patches.is_empty());
         assert!(kconfig.contains("CONFIG_DRM_SIMPLEDRM=y\n"));
         assert!(kconfig.contains("CONFIG_USB_CHIPIDEA_UDC=y\n"));
+        assert!(kconfig.contains("CONFIG_QCOM_SOC=y\n"));
+        assert!(kconfig.contains("CONFIG_QCOM_A53PLL=y\n"));
+        assert!(kconfig.contains("CONFIG_QCOM_CLK_APCS_MSM8916=y\n"));
+        assert!(kconfig.contains("CONFIG_PSTORE_CONSOLE=y\n"));
         assert!(kconfig.contains("# CONFIG_KEXEC is not set\n"));
+        assert!(!kconfig.contains("CONFIG_CRASH_DUMP"));
 
         let bootimg = config.bootimg.unwrap();
+        assert!(
+            bootimg
+                .cmdline
+                .split_whitespace()
+                .any(|arg| arg == "panic=-1")
+        );
         assert_eq!(bootimg.header_version, 0);
         assert_eq!(bootimg.page_size, 2048);
         assert_eq!(bootimg.kernel_image, "Image");
