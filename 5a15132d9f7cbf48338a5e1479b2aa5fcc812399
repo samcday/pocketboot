@@ -47,3 +47,9 @@ PR56 was squash-merged into samcday/pocketboot:main at5a15132d9f7cbf48338a5e1479
 Fetched main and verified the merge commit is an ancestor of the remote-tracking destination. Its full tree is identical to the reviewed candidate tree. The actual landed diff contains exactly .agents/skills/land/SKILL.md (447 added lines). Landed file SHA25682364e148d6a54a9ffaa063a654601acf48ebb63b930c951d81f6bedfd0e61d3; YAML metadata and human-only invocation restriction revalidated from the committed blob.
 
 No inherited Ferrari work, Linux branch, device, firmware, release or email was changed. The working checkout remains on its pre-existing b99e8af lineage with inherited modifications preserved. The source snapshot tags remain intact. This note copies the candidate validation/review record onto the squash commit as required; it does not relabel a different test image or claim any new hardware qualification.
+
+Post-merge verification complete, 2026-10-04
+
+Main-branch CI run37195175913, attempt1, head5a15132d9f7cbf48338a5e1479b2aa5fcc812399 completed successfully at10:31:33UTC: https://github.com/samcday/pocketboot/actions/runs/37195175913 . Its matrix and all nine device build jobs succeeded. Main-branch CI Image37195175911 also succeeded. The bounded CLI watch timed out while displaying annotations; the subsequent authoritative run/job API responses establish the completed success result, not a failed CI run.
+
+Final result: skill-only PR56 landed and destination tree verified. Existing user-owned source branches and immutable snapshot tags are retained. No Ferrari enablement change, additional hardware result, Linux merge, release, or email is part of this landing. Canonical pocketboot evidence-note publication is handed back to the coordinating parent after this update.
