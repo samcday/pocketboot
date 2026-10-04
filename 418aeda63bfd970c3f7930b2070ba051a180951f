@@ -1,0 +1,5 @@
+Core-only Ferrari CI candidate, 2026-10-04
+
+Pocketboot418aeda63bfd970c3f7930b2070ba051a180951f, immutable tag ferrari/core-20261004-v1, selects Linux8f889b55ffe4c151a9fecbed71634e68b745959b. This is the pruned board candidate, preserving framebuffer/eMMC/peripheral USB plus the known-good L6 vote and memory reservations. Touch, radio, GPU and UART board enablement are excluded. Diagnostic profile/runtime provenance remains linked to checkpointdcbe3781; its successful runtime result does not automatically qualify the pruned DT.
+
+Requested manual CI run37197635740, attempt1, https://github.com/samcday/pocketboot/actions/runs/37197635740 with device=qcom/msm8939-xiaomi-ferrari. Final CI result and artifact hashes will be recorded separately. This candidate has not been booted on a device.
