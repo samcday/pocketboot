@@ -27,3 +27,15 @@ CodeRabbit explicitly verified db039fc3ccdbe386b9a8908a0aed55da0df9e8ac in revie
 The separate @coderabbitai review command was rate-limited, but the above commit-specific inline re-review completed and is recorded on the current head; qualification is based on that substantive verification, not merely a green status. Initial full review at f2e96dd covered the unchanged remainder of the file.
 
 CI for the current db039fc head is run37193812902 and remains pending at this entry. CI-image run37193811808 and Claude Code Review37193812921 passed. Comment-triggered Claude jobs are skipped by their @claude-only conditional, as defined in .github/workflows/claude.yml:15-19; those are not required build checks.
+
+Pre-merge qualification complete, 2026-10-04
+
+Current PR56 head is db039fc3ccdbe386b9a8908a0aed55da0df9e8ac, based on current main79cdf784c476be70f7f58cd73b37dfaeb0bf1c6f. The diff is exactly .agents/skills/land/SKILL.md. Both public snapshot tags were checked against their peeled commit IDs.
+
+CI run37193812902, attempt1, head db039fc3ccdbe386b9a8908a0aed55da0df9e8ac, completed success: https://github.com/samcday/pocketboot/actions/runs/37193812902 . All nine configured device build jobs, CI matrix and CI-image wait passed. Separate CI Image37193811808 and Claude Code Review37193812921 also passed. No failing or pending checks remain; comment-triggered Claude is inapplicable without an @claude mention.
+
+CodeRabbit verified the current correction and resolved its only finding as recorded above. The redundant incremental-review command was rate-limited; the substantive commit-specific re-review is the acceptance evidence, not the green rate-limit status alone. No additional review findings were posted.
+
+The user explicitly selected skill-only landing. No new hardware or b4-series qualification applies. Repository main is unprotected with no rulesets and squash merging enabled; these settings were inspected, not altered. The PR is mergeable and head-matched for the forthcoming merge.
+
+An earlier attempt to write this qualification entry on a full filesystem failed before any merge. Execution resumed on a host with free space; published PR/head/CI/notes were rechecked. No filesystem cleanup was performed. Landing has not yet occurred at this entry.
