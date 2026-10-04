@@ -160,3 +160,13 @@ elsewhere with permission, but cannot recover a differently addressed writer.
 No working retained-console recovery, kernel progress or mainline runtime is
 claimed. Future mapped-reader work or hardware acquisition belongs in the
 separately coordinated build/test workflow, not this source-indexing session.
+
+MSM8939 missing-provider finding, 2026-10-04
+
+This profile and its subsequent QCOM_SOC/CRASH_DUMP-corrected form omit QCOM_A53PLL and QCOM_CLK_APCS_MSM8916. The build/test thread confirmed both disabled in its regenerated effective .config while QCOM_APCS_IPC and QCOM_SOC were enabled. The parent audited source only; no duplicate build or device test was run.
+
+Against samcday/linux4fecfe9561a33db1320482d5fffb03ce1d8dd7ec: the SMD RPM edge uses legacy qcom,ipc through apcs1. syscon_node_to_regmap checks resources and requests clock index0, which is a53pll_c1. Without QCOM_A53PLL, RPM IPC can defer, preventing downstream RPM clock/regulator providers; GCC itself depends on RPM XO. Separately apcs1 assigns a CCI/apcs2 clock, and the APCS clock child driver requires its PLL before registering a provider. This is not merely optional CPU-frequency scaling and remains relevant with maxcpus=1.
+
+Both clock options default to ARCH_QCOM but are not selected by the existing options; allnoconfig suppresses those defaults. Proposed fix: explicitly enable QCOM_A53PLL and QCOM_CLK_APCS_MSM8916 in the MSM8939 SoC profile and assert them in config regression coverage. Runtime validation is pending in the dedicated build/test thread. No new DTS or downstream driver patch is justified by this finding.
+
+Full source paths/line ranges and observation boundaries: Linux refs/notes/evidence note on4fecfe9561a33db1320482d5fffb03ce1d8dd7ec, published note-ref tip0b902eb63e3697cd10f5003e8862443ad8567a07. The corrupted recovered console was not used to assert an exact errno or root cause.
