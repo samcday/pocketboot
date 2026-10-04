@@ -39,3 +39,11 @@ CodeRabbit verified the current correction and resolved its only finding as reco
 The user explicitly selected skill-only landing. No new hardware or b4-series qualification applies. Repository main is unprotected with no rulesets and squash merging enabled; these settings were inspected, not altered. The PR is mergeable and head-matched for the forthcoming merge.
 
 An earlier attempt to write this qualification entry on a full filesystem failed before any merge. Execution resumed on a host with free space; published PR/head/CI/notes were rechecked. No filesystem cleanup was performed. Landing has not yet occurred at this entry.
+
+Landing verification, 2026-10-04
+
+PR56 was squash-merged into samcday/pocketboot:main at5a15132d9f7cbf48338a5e1479b2aa5fcc812399 (2026-10-04 10:22:46UTC). The merge used --match-head-commit=db039fc3ccdbe386b9a8908a0aed55da0df9e8ac after all applicable pre-merge checks passed. The readiness-triggered Claude review37194966101 also passed. CodeRabbit substantive current-revision verification was used; later automatic skipped/rate-limit status messages were not mistaken for review evidence.
+
+Fetched main and verified the merge commit is an ancestor of the remote-tracking destination. Its full tree is identical to the reviewed candidate tree. The actual landed diff contains exactly .agents/skills/land/SKILL.md (447 added lines). Landed file SHA25682364e148d6a54a9ffaa063a654601acf48ebb63b930c951d81f6bedfd0e61d3; YAML metadata and human-only invocation restriction revalidated from the committed blob.
+
+No inherited Ferrari work, Linux branch, device, firmware, release or email was changed. The working checkout remains on its pre-existing b99e8af lineage with inherited modifications preserved. The source snapshot tags remain intact. This note copies the candidate validation/review record onto the squash commit as required; it does not relabel a different test image or claim any new hardware qualification.
