@@ -1,0 +1,17 @@
+Ferrari default-profile cleanup: local validation
+
+Pocketboot4434b0e60da6f9f8d5ce219dcd0321befe8dc81b on ferrari-v1-cleanup, based on the hardware-tested volume source962f8c19143cd435c9d08d70c099ef336d849e81. Linux source pin remains08aa2e8d8cfae38a6e7617a4ce4d9c85872db95f; no Linux source changes or candidate/tag rewrites.
+
+Per Sam's review: remove initcall_debug,loglevel=8,panic=-1; exact packaged command-line request is now maxcpus=1 pocketboot.acm. Remove the experimental Ferrari ramoops overlay and Ferrari-specific PSTORE_CONSOLE=y override because reliable retained-console recovery has not been qualified. Generic common PSTORE/PSTORE_RAM support is deliberately unchanged. Drop the session-specific /device-backups/ ignore entry. No private backup files were present in this execution host's checkout, touched, staged or uploaded; permanent backup copies were not modified.
+
+The Ferrari configuration regression now asserts the exact reduced command line, no PSTORE_CONSOLE=y request, and direct selection of arch/arm64/boot/dts/qcom/msm8939-xiaomi-ferrari.dtb through the real kernel_dtb_path helper. That guards against continuing to select a cached processed pocketboot.dtb after removing the overlay. The existing raw Image/legacyQCDT/CPU0/input/clock-driver tests remain.
+
+Commands run on sam-laptop against this change:
+- cargo fmt -p xtask --check: passed.
+- cargo test --offline -p xtask: all56 tests passed, including Ferrari configuration and DTB-selection coverage.
+- git diff --check: passed.
+Only the four named source paths were staged; working-tree backups/artifacts were not staged. No hardware access or boots were performed in this cleanup turn.
+
+Targeted fresh CI build dispatched at exact source4434b0e60da6f9f8d5ce219dcd0321befe8dc81b:
+https://github.com/samcday/pocketboot/actions/runs/37258526341
+Expected attempt1, onlyqcom/msm8939-xiaomi-ferrari. CI/artifact results are not claimed by this local-validation note; a separate inspection will record them. The prior core/volume hardware evidence belongs to their old immutable images, not automatically to this changed configuration. New default-profile hardware boot remains untested.
