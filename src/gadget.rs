@@ -296,7 +296,11 @@ impl Gadget {
             return Ok(());
         };
         reg.bind(None)?;
-        drop(reg);
+        // Dropping RegGadget only reports removal failures through the log
+        // crate, which pocketboot does not forward.
+        if let Err(err) = reg.remove() {
+            tracing::warn!(error = ?err, "USB gadget removal failed");
+        }
         Ok(())
     }
 }

@@ -29,6 +29,11 @@ export component MainWindow inherits Window {
     in-out property <int> power-menu-selection: 0;
     in-out property <int> hold-action: 0;
     in-out property <int> damage-test-pattern: 0;
+    in-out property <string> notice-title: "";
+    in-out property <string> notice-detail: "";
+    in-out property <bool> notice-error: false;
+    property <bool> notice-visible: root.notice-title != "" && root.booting-index < 0;
+    property <length> notice-offset: root.notice-visible ? 84px + 8px : 0px;
     property <duration> hold-start-tick: 0ms;
     out property <float> hold-progress: root.hold-action == 0
         ? 0
@@ -401,12 +406,52 @@ export component MainWindow inherits Window {
             vertical-alignment: center;
         }
 
+        notice := Rectangle {
+            visible: root.notice-visible;
+            width: parent.width - 48px;
+            height: 84px;
+            x: 24px;
+            y: 116px;
+            background: root.notice-error ? #3f1f24 : #0f172a;
+            border-color: root.notice-error ? #f97373 : #1e3a5f;
+            border-width: 2px;
+            border-radius: 18px;
+
+            Text {
+                width: parent.width - 32px;
+                height: 28px;
+                x: 16px;
+                y: 8px;
+                text: root.notice-title;
+                color: root.notice-error ? #f97373 : #7dd3fc;
+                font-size: 22px;
+                font-weight: 700;
+                overflow: elide;
+                horizontal-alignment: left;
+                vertical-alignment: center;
+            }
+
+            Text {
+                width: parent.width - 32px;
+                height: 44px;
+                x: 16px;
+                y: 36px;
+                text: root.notice-detail;
+                color: #cbd5e1;
+                font-size: 18px;
+                wrap: word-wrap;
+                overflow: elide;
+                horizontal-alignment: left;
+                vertical-alignment: top;
+            }
+        }
+
         Text {
             visible: !root.boot-scan-complete && root.boot-entry-count == 0;
             width: parent.width - 48px;
             height: 80px;
             x: 24px;
-            y: 138px;
+            y: 138px + root.notice-offset;
             text: "Scanning local boot media...";
             color: #cbd5e1;
             font-size: 26px;
@@ -417,12 +462,26 @@ export component MainWindow inherits Window {
         Text {
             visible: root.boot-scan-complete && root.boot-entry-count == 0;
             width: parent.width - 48px;
-            height: 112px;
+            height: 56px;
             x: 24px;
-            y: 128px;
-            text: "No directly bootable entries found";
+            y: 128px + root.notice-offset;
+            text: "No bootable OS found";
             color: #cbd5e1;
             font-size: 26px;
+            font-weight: 700;
+            horizontal-alignment: center;
+            vertical-alignment: center;
+        }
+
+        Text {
+            visible: root.boot-scan-complete && root.boot-entry-count == 0;
+            width: parent.width - 48px;
+            height: 40px;
+            x: 24px;
+            y: 184px + root.notice-offset;
+            text: "Connect USB to use fastboot";
+            color: #94a3b8;
+            font-size: 20px;
             horizontal-alignment: center;
             vertical-alignment: center;
         }
@@ -432,7 +491,7 @@ export component MainWindow inherits Window {
             width: parent.width - 48px;
             height: parent.height - self.y - 24px;
             x: 24px;
-            y: 116px;
+            y: 116px + root.notice-offset;
             viewport-width: self.width;
             viewport-height: root.boot-entry-count * 126px;
 

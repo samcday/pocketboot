@@ -78,7 +78,8 @@ changes. Rebuild/repackage if subsequent kernel or userspace changes are needed.
 
 ## Capture and snapshots
 
-Start with Pocketboot running on the DB410c, not U-Boot fastboot. Check:
+Start with Pocketboot running on the DB410c, not U-Boot fastboot. Pocketboot autoboots
+unless volume-down is held or `pocketboot.menu` is on its cmdline (`db410c_kexec.py` adds it). Check:
 
 ```sh
 fastboot -s bc72e60 getvar product

@@ -8,6 +8,7 @@ pub(crate) mod kernel;
 pub(crate) mod kernel_src;
 pub(crate) mod preboot;
 pub(crate) mod qemu;
+pub(crate) mod qemu_boot_policy;
 
 use std::{
     env,
