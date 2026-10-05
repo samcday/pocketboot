@@ -7,6 +7,7 @@ mod flash;
 mod getvar;
 mod partitions;
 mod reboot;
+mod sha256;
 mod shell;
 mod slots;
 mod ums;
@@ -23,6 +24,7 @@ pub(crate) fn diagnostic_commands() -> CommandMap {
     vec![
         Command::prefix("oem cat:", cat::handle),
         Command::exact("oem dmesg", dmesg::handle),
+        Command::prefix("oem sha256:", sha256::handle),
         Command::prefix("oem shell:", shell::handle),
         Command::exact("oem shell-staged", shell::handle_staged),
     ]
@@ -66,5 +68,15 @@ mod tests {
             .collect::<Vec<_>>();
 
         assert_eq!(names, ["reboot", "reboot-bootloader"]);
+    }
+
+    #[test]
+    fn registers_sha256_with_the_staged_output_producers() {
+        let names = diagnostic_commands()
+            .iter()
+            .map(|command| command.name)
+            .collect::<Vec<_>>();
+
+        assert!(names.contains(&"oem sha256:"), "{names:?}");
     }
 }
