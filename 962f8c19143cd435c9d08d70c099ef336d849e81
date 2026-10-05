@@ -63,3 +63,38 @@ Receipt:
 Retrieval: gh api repos/samcday/pocketboot/actions/artifacts/11301780924/zip > artifact.zip ; verify the recorded ZIP SHA256, then extract only boot.img and .config and verify their recorded hashes. The convenient gh run download route must still be checked against this run/attempt/artifact identity rather than a floating latest build.
 
 Morning test scope: exclusive DUT ownership, RAM-only stock-fastboot -> pinned official lk2nd23.1 -> candidate image, confirm USB identity/live logs/DRM and eMMC enumeration, and compare new warnings/deferred probes. For the volume candidate additionally obtain physical press/release events115/114, visible navigation, and manual long-power-reset recovery. No flashing, HYP, touch power changes, radio activation or kexec/OS-boot qualification. Keep the known-good dcbe3781 image available; stop and ask for physical recovery if a candidate does not return USB.
+
+Ferrari volume candidate: automated boot and human functional key pass
+
+Frozen inputs
+Pocketboot962f8c19143cd435c9d08d70c099ef336d849e81; Linux08aa2e8d8cfae38a6e7617a4ce4d9c85872db95f.
+Tagferrari/volume-20261004-v1; GHA run37197785302 attempt1; artifact11301780924.
+ZIP SHA256cda77b3671e9c37ea815d5b08ed4e7deca58ffc0deccf2a8dd85e912a224d7ad.
+boot.img10813440bytes, SHA2560aba6ca874dc0155a0730690e914478c267001a41022e272b3c3976d2bb7ed6c.
+Config SHA25610afe29161014f830dd9dd51dc7124e5d2c62d2ca9de671bd1ad94f7c52d2bc7.
+All archive/image/config hashes and the exact ZIP member allowlist were rechecked. No rebuild or substitute artifact.
+
+Boot and automated observations, 2026-10-04 23:22:04-23:25:12 UTC
+Host verified before explicit private-DUT selection. Known-good dcbe3781 2x recovery image rehashed before disruption. The previously qualified CORE image was rebooted using supported fastboot reboot bootloader; observed stock productMSM8916, RAM-booted official lk2nd23.1/productlk2nd-msm8916, then RAM-booted exact VOLUME to actual pocketboot fastboot plus ADB recovery. Official LK sourcee9c8b21735c13dd7ace808b1e35451638f0a0c6d, imageSHA2568f5f788b45b96447517ff121f20841e6bfc95a5d7c4b48fdedb855d90f593144. Loader BootingOKAY was not used as the Linux-success criterion.
+
+Runtime Linux7.3.0-rc5+ #1 SMP PREEMPT, build2026-10-04 11:20:23UTC. Cmdline maxcpus=1 panic=-1 initcall_debug loglevel=8 pocketboot.acm, CPU0 only. Live dmesg56411bytes SHA256e7d4c66233ca85d844a1e67ecb695ebe02aa43935740162559397c55d92f8d16.
+[1.245239] input: pm8941_resin
+[1.245853] probe of 200f000.spmi:pmic@0:pon@800:resin with driver pm8941-pwrkey returned 0
+[1.337467] [drm] Initialized simpledrm 1.0.0 for 83200000.framebuffer
+[1.367180] input: gpio-keys
+[1.374894] probe of gpio-keys with driver gpio-keys returned 0
+
+Dynamically enumerated pm8941_pwrkey/event0, pm8941_resin/event1 and gpio-keys/event2. Advertised capabilities correspond to Power, KEY_VOLUMEDOWN114 and KEY_VOLUMEUP115; these are enumeration/capability observations, not captured physical events. The existing pocketboot input mapping was not changed.
+
+Active simpledrm1080x1920@60, XR24 framebuffer allocated by pocketboot-ui. UDC configured/high-speed; real ADB and short fastboot diagnostics worked. Read-only debugfs was mounted temporarily then unmounted; deferred-probe list empty. Compared with CORE, the only new probe identities were gpio-keys/RESIN, both successful; no newly unresolved probe. Alternate-GPT-invalid/primary-used, ACM-DTR fallback and no-boot-entries warnings predate the candidate in the hash-verified known-good logs. No storage repair or block-backed mounts/writes. Retained-log errors were observed but not investigated.
+
+Human functional result
+Sam subsequently stated: "Nope, window was too narrow and I wasn't paying attention. We don't need to be so weird about our tests though - I just confirmed the vol-up+down+pwrkey are working great: they navigate the power menu in pocketboot as expected."
+
+This directly validates functional Volume Up, Volume Down and Power interaction with pocketboot's visible power menu on the VOLUME image left running. It is a human-observed functional pass, not an evdev trace, a measurement of debounce/latency or exhaustive input qualification. No Tested-by/sign-off trailer is inferred.
+
+Discarded timed-capture attempt
+The parent announced a30s dual-evdev window at2026-10-04T23:35:55.964UTC. Both commands actually ran30.436/30.440s and produced no events. Sam confirms he did not press during that window. Therefore the empty captures are INCONCLUSIVE, not a hardware failure. The helper's immediate post-capture assertion also noticed BusyBox timeout watchdogs within their kill-grace period; subsequent checks found no remaining capture/watchdog processes. The initial parent description of this as a failed reader was corrected after checking the command timing. The valid human functional result does not require repeating this missed capture window.
+
+Limits and final state
+The same VOLUME RAM image remains running, no background readers/jobs. Manual long-Power reset, observed return to stock fastboot and post-reset restoration are still pending. No source/ref/build edits, flash/erase/partition writes, HYP/bootloader/reset-policy changes, GPIO requests, I2C scans, touch/radio/SMP/kexec/native-panel qualification or direct-stock-loader experiment. Source-based electrical provenance is recorded separately on the volume-key Linux commit. This note does not extend the verified scope beyond the observations above.
