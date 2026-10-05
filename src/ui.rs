@@ -2417,7 +2417,7 @@ impl CachedRenderBuffer {
     fn new(format: DrmFourcc, pitch: u32, height: u32) -> Result<Self, String> {
         let bytes_per_pixel = bytes_per_pixel(format);
         let pitch = pitch as usize;
-        if pitch % bytes_per_pixel != 0 {
+        if !pitch.is_multiple_of(bytes_per_pixel) {
             return Err(format!(
                 "DRM pitch is not aligned for {format:?}: {pitch} bytes"
             ));
@@ -2745,17 +2745,16 @@ fn supported_formats(
             let compatible = plane.crtc() == Some(crtc)
                 || resources
                     .filter_crtcs(plane.possible_crtcs())
-                    .iter()
-                    .any(|candidate| *candidate == crtc);
+                    .contains(&crtc);
             if !compatible {
                 continue;
             }
 
             for format in plane.formats() {
-                if let Ok(format) = DrmFourcc::try_from(*format) {
-                    if !formats.contains(&format) {
-                        formats.push(format);
-                    }
+                if let Ok(format) = DrmFourcc::try_from(*format)
+                    && !formats.contains(&format)
+                {
+                    formats.push(format);
                 }
             }
         }
@@ -2906,13 +2905,13 @@ fn copy_pixels_to_drm<T: DrmPixel>(
 
 fn cast_buffer_mut<T: DrmPixel>(buffer: &mut [u8], format: DrmFourcc) -> Result<&mut [T], String> {
     let pixel_size = mem::size_of::<T>();
-    if buffer.len() % pixel_size != 0 {
+    if !buffer.len().is_multiple_of(pixel_size) {
         return Err(format!(
             "DRM buffer length is not aligned for {format:?}: {} bytes",
             buffer.len()
         ));
     }
-    if buffer.as_ptr() as usize % mem::align_of::<T>() != 0 {
+    if !(buffer.as_ptr() as usize).is_multiple_of(mem::align_of::<T>()) {
         return Err(format!("DRM buffer mapping is not aligned for {format:?}"));
     }
 
@@ -3050,7 +3049,7 @@ impl TouchInput {
             if self.devices.iter().any(|device| device.path == path) {
                 continue;
             }
-            if self.ignored_devices.iter().any(|ignored| *ignored == path) {
+            if self.ignored_devices.contains(&path) {
                 continue;
             }
             match TouchDevice::open(&path) {
@@ -3126,7 +3125,7 @@ impl ButtonInput {
             if self.devices.iter().any(|device| device.path == path) {
                 continue;
             }
-            if self.ignored_devices.iter().any(|ignored| *ignored == path) {
+            if self.ignored_devices.contains(&path) {
                 continue;
             }
             match ButtonDevice::open(&path) {
@@ -3468,18 +3467,18 @@ impl TouchState {
     fn active_point(&self, x_axis: Axis, y_axis: Axis) -> Option<(i32, i32)> {
         if x_axis.code == ABS_MT_POSITION_X || y_axis.code == ABS_MT_POSITION_Y {
             for slot in self.slots {
-                if slot.active {
-                    if let (Some(x), Some(y)) = (slot.x, slot.y) {
-                        return Some((x, y));
-                    }
+                if slot.active
+                    && let (Some(x), Some(y)) = (slot.x, slot.y)
+                {
+                    return Some((x, y));
                 }
             }
         }
 
-        if self.legacy_down {
-            if let (Some(x), Some(y)) = (self.legacy_x, self.legacy_y) {
-                return Some((x, y));
-            }
+        if self.legacy_down
+            && let (Some(x), Some(y)) = (self.legacy_x, self.legacy_y)
+        {
+            return Some((x, y));
         }
 
         None

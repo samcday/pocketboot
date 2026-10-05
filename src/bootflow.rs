@@ -428,7 +428,7 @@ fn gpt_boot_partitions(disk: &DiskCandidate) -> io::Result<Vec<BootPartitionCand
         .sectors_512
         .checked_mul(512)
         .ok_or_else(|| invalid_data(format!("disk {} byte size overflows", disk.name)))?;
-    if total_bytes < disk.logical_block_size.checked_mul(2).unwrap_or(u64::MAX) {
+    if total_bytes < disk.logical_block_size.saturating_mul(2) {
         return Err(invalid_data(format!(
             "disk {} is too small for GPT",
             disk.name
@@ -466,7 +466,7 @@ fn gpt_boot_partitions(disk: &DiskCandidate) -> io::Result<Vec<BootPartitionCand
         .entries_lba
         .checked_mul(disk.logical_block_size)
         .ok_or_else(|| invalid_data("GPT partition table offset overflows"))?;
-    if table_offset.checked_add(table_bytes).unwrap_or(u64::MAX) > total_bytes {
+    if table_offset.saturating_add(table_bytes) > total_bytes {
         return Err(invalid_data("GPT partition table exceeds disk size"));
     }
 
@@ -687,7 +687,7 @@ fn userdata_partitions(disk: &DiskCandidate) -> io::Result<Vec<OuterPartitionCan
             removable: disk.removable,
         });
     }
-    partitions.sort_by(|left, right| left.partno.cmp(&right.partno));
+    partitions.sort_by_key(|left| left.partno);
     Ok(partitions)
 }
 
@@ -1211,11 +1211,11 @@ fn extlinux_boot_entry(
         .as_deref()
         .map(|fdt| resolve_boot_path(root, fdt))
         .transpose()?;
-    if let Some(dtb) = &dtb {
-        if !dtb.is_file() {
-            tracing::warn!(source = %source.display(), label = %entry.label, dtb = %dtb.display(), "extlinux DTB payload is missing");
-            return Ok(None);
-        }
+    if let Some(dtb) = &dtb
+        && !dtb.is_file()
+    {
+        tracing::warn!(source = %source.display(), label = %entry.label, dtb = %dtb.display(), "extlinux DTB payload is missing");
+        return Ok(None);
     }
 
     let is_default = default.as_deref() == Some(entry.label.as_str());
@@ -1297,10 +1297,11 @@ impl ExtlinuxConfig {
                     }
                 }
                 "append" => {
-                    if let Some(entry) = &mut current {
-                        if !value.is_empty() && value != "-" {
-                            entry.append.push(value.to_string());
-                        }
+                    if let Some(entry) = &mut current
+                        && !value.is_empty()
+                        && value != "-"
+                    {
+                        entry.append.push(value.to_string());
                     }
                 }
                 "menu" => {

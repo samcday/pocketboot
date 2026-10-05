@@ -47,7 +47,7 @@ fn start_workers(executor: &'static Executor<'static>) {
 }
 
 fn executor() -> &'static Executor<'static> {
-    *EXECUTOR.get_or_init(|| Box::leak(Box::new(Executor::new())))
+    EXECUTOR.get_or_init(|| Box::leak(Box::new(Executor::new())))
 }
 
 fn worker_count() -> usize {

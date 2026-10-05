@@ -681,12 +681,11 @@ fn run_busybox_oldconfig(source: &Path, build: &Path, target: &str) -> Result<()
     let mut child = command
         .spawn()
         .map_err(|err| format!("spawn make busybox oldconfig: {err}"))?;
-    if let Some(mut stdin) = child.stdin.take() {
-        if let Err(err) = stdin.write_all(&[b'\n'; 4096]) {
-            if err.kind() != std::io::ErrorKind::BrokenPipe {
-                return Err(format!("write busybox oldconfig defaults: {err}"));
-            }
-        }
+    if let Some(mut stdin) = child.stdin.take()
+        && let Err(err) = stdin.write_all(&[b'\n'; 4096])
+        && err.kind() != std::io::ErrorKind::BrokenPipe
+    {
+        return Err(format!("write busybox oldconfig defaults: {err}"));
     }
     let output = child
         .wait_with_output()

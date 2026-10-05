@@ -8,8 +8,8 @@ pub mod uart {
         for byte in message.bytes() {
             write_byte(byte);
         }
-        write_byte('\r' as _);
-        write_byte('\n' as _);
+        write_byte(b'\r');
+        write_byte(b'\n');
     }
 
     fn write_byte(byte: u8) {

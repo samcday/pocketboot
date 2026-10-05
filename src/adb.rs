@@ -386,10 +386,10 @@ impl AdbServer {
     fn handle_okay(&mut self, packet: Packet) -> io::Result<()> {
         let remote_id = packet.message.arg0;
         let local_id = packet.message.arg1;
-        if let Some(session) = self.sessions.get(&local_id) {
-            if session.remote_id() == remote_id {
-                session.acknowledge_output();
-            }
+        if let Some(session) = self.sessions.get(&local_id)
+            && session.remote_id() == remote_id
+        {
+            session.acknowledge_output();
         }
         Ok(())
     }
@@ -629,10 +629,10 @@ impl Drop for ShellSession {
     fn drop(&mut self) {
         self.output.close();
         terminate_process_group(self.child_pid);
-        if let Some(thread) = self.output_thread.take() {
-            if thread.join().is_err() {
-                tracing::warn!(pid = self.child_pid, "adb shell output thread panicked");
-            }
+        if let Some(thread) = self.output_thread.take()
+            && thread.join().is_err()
+        {
+            tracing::warn!(pid = self.child_pid, "adb shell output thread panicked");
         }
     }
 }
@@ -731,10 +731,10 @@ impl RawCommandSession {
 impl Drop for RawCommandSession {
     fn drop(&mut self) {
         self.close();
-        if let Some(thread) = self.output_thread.take() {
-            if thread.join().is_err() {
-                tracing::warn!(pid = self.child_pid, "adb exec output thread panicked");
-            }
+        if let Some(thread) = self.output_thread.take()
+            && thread.join().is_err()
+        {
+            tracing::warn!(pid = self.child_pid, "adb exec output thread panicked");
         }
     }
 }
@@ -1024,22 +1024,22 @@ impl SyncSession {
             return self.queue_fail("DONE without SEND");
         };
 
-        if let Some(file) = send.file.as_mut() {
-            if let Err(err) = file.flush() {
-                send.failure = Some(format!("flush {}: {err}", send.path.display()));
-            }
+        if let Some(file) = send.file.as_mut()
+            && let Err(err) = file.flush()
+        {
+            send.failure = Some(format!("flush {}: {err}", send.path.display()));
         }
         drop(send.file.take());
 
-        if send.failure.is_none() {
-            if let Err(err) = set_sync_mode(&send.path, send.mode) {
-                send.failure = Some(format!("chmod {}: {err}", send.path.display()));
-            }
+        if send.failure.is_none()
+            && let Err(err) = set_sync_mode(&send.path, send.mode)
+        {
+            send.failure = Some(format!("chmod {}: {err}", send.path.display()));
         }
-        if send.failure.is_none() {
-            if let Err(err) = set_sync_mtime(&send.path, mtime) {
-                send.failure = Some(format!("utime {}: {err}", send.path.display()));
-            }
+        if send.failure.is_none()
+            && let Err(err) = set_sync_mtime(&send.path, mtime)
+        {
+            send.failure = Some(format!("utime {}: {err}", send.path.display()));
         }
 
         match send.failure {
@@ -1075,10 +1075,10 @@ impl SyncSession {
 impl Drop for SyncSession {
     fn drop(&mut self) {
         self.close();
-        if let Some(thread) = self.output_thread.take() {
-            if thread.join().is_err() {
-                tracing::warn!("adb sync output thread panicked");
-            }
+        if let Some(thread) = self.output_thread.take()
+            && thread.join().is_err()
+        {
+            tracing::warn!("adb sync output thread panicked");
         }
     }
 }
@@ -1176,10 +1176,10 @@ fn run_shell_output(
         }
     }
 
-    if output.close() {
-        if let Err(err) = writer.send(A_CLSE, local_id, remote_id, &[]) {
-            tracing::debug!(local_id, remote_id, error = ?err, "adb shell close send failed");
-        }
+    if output.close()
+        && let Err(err) = writer.send(A_CLSE, local_id, remote_id, &[])
+    {
+        tracing::debug!(local_id, remote_id, error = ?err, "adb shell close send failed");
     }
 }
 
@@ -1221,10 +1221,10 @@ fn run_raw_command_output(
     }
     child_running.store(false, Ordering::Release);
 
-    if output.close() {
-        if let Err(err) = writer.send(A_CLSE, local_id, remote_id, &[]) {
-            tracing::debug!(local_id, remote_id, error = ?err, "adb exec close send failed");
-        }
+    if output.close()
+        && let Err(err) = writer.send(A_CLSE, local_id, remote_id, &[])
+    {
+        tracing::debug!(local_id, remote_id, error = ?err, "adb exec close send failed");
     }
 }
 

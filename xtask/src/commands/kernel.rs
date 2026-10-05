@@ -209,7 +209,7 @@ fn build_device_kernel(
         .as_ref()
         .map(|dtb| {
             process_device_dtb(
-                &workspace_root,
+                workspace_root,
                 kernel_tree,
                 &out_dir,
                 &arch,

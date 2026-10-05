@@ -634,7 +634,7 @@ fn validate_entry_array_crc(entries: &[u8], header: &GptHeader) -> io::Result<()
 fn read_entry_array(file: &File, disk: &Disk, header: &GptHeader) -> io::Result<Vec<u8>> {
     let table_bytes = table_bytes(header)?;
     let offset = checked_lba_offset(header.entries_lba, disk.logical_block_size)?;
-    if offset.checked_add(table_bytes).unwrap_or(u64::MAX) > disk.total_bytes {
+    if offset.saturating_add(table_bytes) > disk.total_bytes {
         return Err(invalid_data("GPT partition table exceeds disk size"));
     }
 

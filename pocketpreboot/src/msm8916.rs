@@ -126,14 +126,14 @@ pub mod uart {
 }
 
 pub fn early_init(fdt: usize) {
-    if let Ok(reader) = unsafe { Reader::from_ptr(fdt) } {
-        if let Ok(base) = find_uart_base(&reader) {
-            #[cfg(all(target_os = "none", feature = "debug-ram-trace"))]
-            crate::ram_trace::stage(4);
-            uart::set_base(base as usize);
-            #[cfg(all(target_os = "none", feature = "debug-ram-trace"))]
-            crate::ram_trace::stage(5);
-        }
+    if let Ok(reader) = unsafe { Reader::from_ptr(fdt) }
+        && let Ok(base) = find_uart_base(&reader)
+    {
+        #[cfg(all(target_os = "none", feature = "debug-ram-trace"))]
+        crate::ram_trace::stage(4);
+        uart::set_base(base as usize);
+        #[cfg(all(target_os = "none", feature = "debug-ram-trace"))]
+        crate::ram_trace::stage(5);
     }
 
     uart::writeln("msm8916 preboot");
@@ -1918,7 +1918,7 @@ mod tests {
         assert!(!has_coherency_diagnostics(&prefix));
         prefix[0xb0..0xb8].copy_from_slice(SPIN_TABLE_DIAG_TAG);
         assert!(has_coherency_diagnostics(&prefix));
-        for value in [0, 1, 0x3f, u64::MAX & !CPUECTLR_SMPEN] {
+        for value in [0, 1, 0x3f, !CPUECTLR_SMPEN] {
             assert!(require_coherency(value).is_err());
         }
         for value in [0x40, 0x47, u64::MAX] {

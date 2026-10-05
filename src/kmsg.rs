@@ -165,12 +165,14 @@ fn decode_kmsg_text(input: &[u8]) -> String {
     let mut output = Vec::with_capacity(input.len());
     let mut index = 0;
     while index < input.len() {
-        if input[index] == b'\\' && index + 3 < input.len() && input[index + 1] == b'x' {
-            if let (Some(hi), Some(lo)) = (hex(input[index + 2]), hex(input[index + 3])) {
-                output.push((hi << 4) | lo);
-                index += 4;
-                continue;
-            }
+        if input[index] == b'\\'
+            && index + 3 < input.len()
+            && input[index + 1] == b'x'
+            && let (Some(hi), Some(lo)) = (hex(input[index + 2]), hex(input[index + 3]))
+        {
+            output.push((hi << 4) | lo);
+            index += 4;
+            continue;
         }
 
         output.push(input[index]);

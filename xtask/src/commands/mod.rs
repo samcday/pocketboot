@@ -183,10 +183,10 @@ fn set_default_kernel_toolchain(
             }
             "arm" => {
                 command.env("LLVM", "1");
-                if !path_command_exists("ld.lld") {
-                    if let Some(tool_dir) = arm_llvm_tool_dir(out_dir)? {
-                        prepend_command_path(command, &tool_dir)?;
-                    }
+                if !path_command_exists("ld.lld")
+                    && let Some(tool_dir) = arm_llvm_tool_dir(out_dir)?
+                {
+                    prepend_command_path(command, &tool_dir)?;
                 }
                 if env::var_os("LLVM_IAS").is_none() {
                     command.env("LLVM_IAS", "1");

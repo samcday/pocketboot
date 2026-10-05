@@ -469,14 +469,14 @@ fn merge_cpio(merged: &mut CpioConfig, layer: &CpioConfig) {
 fn parse_kconfig_layer(layer: &ConfigLayer) -> Result<LayerKconfig> {
     let mut parsed = LayerKconfig::default();
     for (key, value) in &layer.kconfig {
-        if let Value::Table(table) = value {
-            if !is_structured_kconfig_value(table) {
-                validate_feature(key)?;
-                parsed
-                    .features
-                    .insert(key.clone(), parse_kconfig_symbols(key, table)?);
-                continue;
-            }
+        if let Value::Table(table) = value
+            && !is_structured_kconfig_value(table)
+        {
+            validate_feature(key)?;
+            parsed
+                .features
+                .insert(key.clone(), parse_kconfig_symbols(key, table)?);
+            continue;
         }
 
         validate_kconfig_symbol(key)?;

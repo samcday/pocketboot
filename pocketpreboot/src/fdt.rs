@@ -300,10 +300,10 @@ impl Header {
         if header.version < 17
             || header.last_comp_version > 17
             || header.off_dt_struct < HEADER_SIZE
-            || header.off_dt_struct % 4 != 0
+            || !header.off_dt_struct.is_multiple_of(4)
             || header.off_dt_strings < HEADER_SIZE
             || header.off_mem_rsvmap < HEADER_SIZE
-            || header.off_mem_rsvmap % 8 != 0
+            || !header.off_mem_rsvmap.is_multiple_of(8)
             || header.off_mem_rsvmap >= header.totalsize
         {
             return Err(Error::BadOffset);
@@ -768,7 +768,7 @@ pub(crate) mod tests {
         write_be32_vec(output, FDT_BEGIN_NODE);
         output.extend_from_slice(name);
         output.push(0);
-        while output.len() % 4 != 0 {
+        while !output.len().is_multiple_of(4) {
             output.push(0);
         }
     }
@@ -778,7 +778,7 @@ pub(crate) mod tests {
         write_be32_vec(output, value.len() as u32);
         write_be32_vec(output, nameoff);
         output.extend_from_slice(value);
-        while output.len() % 4 != 0 {
+        while !output.len().is_multiple_of(4) {
             output.push(0);
         }
     }
@@ -794,7 +794,7 @@ pub(crate) mod tests {
     fn build_dtb_vec(structure: &[u8], strings: &[u8]) -> Vec<u8> {
         let mut output = vec![0; HEADER_SIZE];
         output.extend_from_slice(&[0; 16]);
-        while output.len() % 4 != 0 {
+        while !output.len().is_multiple_of(4) {
             output.push(0);
         }
         let off_dt_struct = output.len();

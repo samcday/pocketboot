@@ -813,11 +813,11 @@ __pb_tramp_end:
 
         let mut merged: Vec<PhysRange> = Vec::new();
         for range in ranges.drain(..) {
-            if let Some(last) = merged.last_mut() {
-                if range.start <= last.end {
-                    last.end = last.end.max(range.end);
-                    continue;
-                }
+            if let Some(last) = merged.last_mut()
+                && range.start <= last.end
+            {
+                last.end = last.end.max(range.end);
+                continue;
             }
             merged.push(range);
         }
@@ -831,15 +831,15 @@ __pb_tramp_end:
                 updated.push(range);
                 continue;
             }
-            if range.start < remove.start {
-                if let Some(left) = PhysRange::new(range.start, remove.start.min(range.end)) {
-                    updated.push(left);
-                }
+            if range.start < remove.start
+                && let Some(left) = PhysRange::new(range.start, remove.start.min(range.end))
+            {
+                updated.push(left);
             }
-            if remove.end < range.end {
-                if let Some(right) = PhysRange::new(remove.end.max(range.start), range.end) {
-                    updated.push(right);
-                }
+            if remove.end < range.end
+                && let Some(right) = PhysRange::new(remove.end.max(range.start), range.end)
+            {
+                updated.push(right);
             }
         }
         *ranges = updated;
@@ -1975,13 +1975,13 @@ mod fdt {
                         let child = child.take().ok_or_else(|| {
                             invalid_data_error("missing reserved-memory child state")
                         })?;
-                        if child.enabled {
-                            if let Some(reg) = child.reg {
-                                let address_cells =
-                                    reserved_address_cells.unwrap_or(root_address_cells);
-                                let size_cells = reserved_size_cells.unwrap_or(root_size_cells);
-                                ranges.extend(decode_reg_ranges(&reg, address_cells, size_cells)?);
-                            }
+                        if child.enabled
+                            && let Some(reg) = child.reg
+                        {
+                            let address_cells =
+                                reserved_address_cells.unwrap_or(root_address_cells);
+                            let size_cells = reserved_size_cells.unwrap_or(root_size_cells);
+                            ranges.extend(decode_reg_ranges(&reg, address_cells, size_cells)?);
                         }
                     }
                     if stack.pop().is_none() {
@@ -2050,7 +2050,7 @@ mod fdt {
         let tuple_bytes = (tuple_cells as usize)
             .checked_mul(4)
             .ok_or_else(|| invalid_data_error("reserved-memory reg tuple size overflow"))?;
-        if reg.len() % tuple_bytes != 0 {
+        if !reg.len().is_multiple_of(tuple_bytes) {
             return invalid_data("reserved-memory reg property has a partial tuple");
         }
 

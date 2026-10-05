@@ -119,7 +119,7 @@ fn ensure_device_kernel_source(
         .join("kernel")
         .join("src")
         .join(&source.identity.tree_path);
-    let mut status = ensure_kernel_source(&workspace_root, &source_tree, &source.identity, source)?;
+    let mut status = ensure_kernel_source(workspace_root, &source_tree, &source.identity, source)?;
     if ensure_kernel_patches(workspace_root, &source_tree, &source.patches)? {
         status = KernelSourceStatus::Updated;
     }
@@ -230,10 +230,10 @@ fn ensure_kernel_source(
     identity: &KernelSourceIdentity,
     source: &KernelSource,
 ) -> Result<KernelSourceStatus> {
-    if let Some(head) = existing_source_head(source_tree)? {
-        if head.eq_ignore_ascii_case(&source.sha) {
-            return Ok(KernelSourceStatus::Current);
-        }
+    if let Some(head) = existing_source_head(source_tree)?
+        && head.eq_ignore_ascii_case(&source.sha)
+    {
+        return Ok(KernelSourceStatus::Current);
     }
 
     match kernel_repo(workspace_root)? {
