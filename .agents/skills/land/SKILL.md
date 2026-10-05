@@ -12,7 +12,9 @@ metadata:
 # Land pocketboot
 
 The landing request authorizes execution; do not ask again whether to merge.
-Review bots are advisory and handled separately, not another landing ceremony.
+A standalone `🚀` from the user in a Land thread means land as soon as the
+required checks pass, without waiting for advisory reviews. It waives no checks.
+Review bots are advisory unless repository rules require them.
 
 1. **Prepare.** Read project instructions and inspect status, remotes, and live
    repository rules. Commit the intended changes on a topic branch, preserving
@@ -25,6 +27,10 @@ Review bots are advisory and handled separately, not another landing ceremony.
 3. **Open a PR.** Push the topic branch normally and create or reuse an open PR
    against `main` using `gh`. Supply explicit repository, branch, title, body,
    and IDs rather than prompting. Do not require another review round.
+   Explicitly request CodeRabbit with a PR comment: `@coderabbitai full review`
+   for a new/unreviewed PR, or `@coderabbitai review` after subsequent pushes.
+   Use `gh pr comment <number> --repo samcday/pocketboot --body "<command>"`;
+   do not duplicate a request for the same head or assume auto-review ran.
 4. **Get green CI.** Require a completed, successful GitHub Actions `CI` run for
    the exact PR head, with every expected matrix job passing. Inspect the latest
    run attempt and jobs, not just `gh pr checks --required` (which may list none).
@@ -92,3 +98,4 @@ when the Land subthread started; the user may have continued editing.
   `xtask/src/main.rs`, and `xtask/src/commands/ci_matrix.rs`.
 - Use checked-in hygiene/test definitions and applicable project instructions;
   do not invent blanket workspace/all-feature checks or waive existing failures.
+- [CodeRabbit review commands](https://docs.coderabbit.ai/reference/review-commands).
