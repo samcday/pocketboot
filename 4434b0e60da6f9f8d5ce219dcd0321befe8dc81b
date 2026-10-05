@@ -15,3 +15,61 @@ Only the four named source paths were staged; working-tree backups/artifacts wer
 Targeted fresh CI build dispatched at exact source4434b0e60da6f9f8d5ce219dcd0321befe8dc81b:
 https://github.com/samcday/pocketboot/actions/runs/37258526341
 Expected attempt1, onlyqcom/msm8939-xiaomi-ferrari. CI/artifact results are not claimed by this local-validation note; a separate inspection will record them. The prior core/volume hardware evidence belongs to their old immutable images, not automatically to this changed configuration. New default-profile hardware boot remains untested.
+
+Ferrari cleanup CI artifact — static verification PASS, NOT BOOTED
+
+Pocketboot4434b0e60da6f9f8d5ce219dcd0321befe8dc81b, parent962f8c19143cd435c9d08d70c099ef336d849e81; branchferrari-v1-cleanup. Linux08aa2e8d8cfae38a6e7617a4ce4d9c85872db95f. Cross-reference the same source tuple in samcday/pocketboot and samcday/linux refs/notes/evidence.
+
+Run37258526341 attempt1, workflow_dispatch, matching source SHA, completed successfully2026-10-05T03:24:11Z. Only Ferrari was selected. Jobs Wait-for-CI-image111600593146, CI-matrix111600663585, Ferrari111600902030 all succeeded. Artifact11323024738, bootimg-qcom-msm8939-xiaomi-ferrari; expires2027-01-03T03:12:56Z (not expired when verified).
+
+Independent scout verified run/attempt/job metadata and attempt1 logs, downloaded by exact artifactID, checked ZIP SHA256 against API/upload log, and decoded actual Android/Image/QCDT/FDT structures and effective .config. Parent independently repeated API/head/attempt checks, exact archive/member/image/config hashes and selected header/config checks on the desktop. Only boot.img and .config were extracted. Logs, credentials and signed download URLs are not published.
+
+Actual artifact findings
+- Android legacy-v0/page2048, raw ARM64 Image (not gzip), external ramdisk and second-stage sizes0; legacy header SHA1 verified by scout.
+- Header command line EXACTLY maxcpus=1 pocketboot.acm. Retired initcall_debug,loglevel=8,panic=-1 absent. Effective CONFIG_CMDLINE is empty; CONFIG_PANIC_TIMEOUT=0. Thus no automatic panic reboot is configured by this artifact.
+- QCDTv2: MSM[239,0],[241,0],[263,0], each board[8,0], all reference one FDT at offset2048/padded49152.
+- Raw Image10758152bytes SHA256ec8777dea71aa1ede55e6901509eb16d25fbcf9dc281728d18093028415ff3c2; ARM64 runtime-size header11075584bytes. These are different measures, not an actual-placement/boot proof.
+- QCDT51200bytes SHA2567e46369d5f800144ee6be8ec6015717e6986a923950a9dd0f3d7bca6ac7a7c45.
+- Packaged FDT47891bytes SHA256f265bb38102aecca5fa291aac89cbb0a41164ee8980637fa89de6e9091a0d5af. CI logs show direct kernel-board-DTB selection.
+- No ramoops-compatible node anywhere; empty FDT memreserve map; no reserved-memory fixed region or dynamic allocation range includes0x9ff80000. Common PSTORE/PSTORE_RAM remain built in, but PSTORE_CONSOLE=n.
+- ModelXiaomiMi4i, compatiblexiaomi,ferrari+qcom,msm8939; simplefb1080x1920,stride3240,r8g8b8,address0x83200000,size6220800,stdout points to it. GPIO107 active-low/KEY_VOLUMEUP115 and enabled PMIC RESIN/KEY_VOLUMEDOWN114 remain.
+- No touch-controller node or enabled TOUCHSCREEN_* driver; INPUT_TOUCHSCREEN=y is only generic core support. MDSS, both DSI controllers/PHYs, modemMSS and Pronto disabled. Wi-Fi/BT children stay under disabled Pronto. WCN6MiB aligned1MiB allocation range0x86800000..0x8e800000 remains a firmware memory reservation, NOT radio enablement.
+- Required QCOM_SOC,QCOM_A53PLL,QCOM_CLK_APCS_MSM8916,DRM_SIMPLEDRM,USB_CHIPIDEA/UDC/MSM,PHY_QCOM_USB_HS,USB_GADGET,USB_F_FS,USB_CONFIGFS_F_FS,KEYBOARD_GPIO,INPUT_PM8941_PWRKEY are built in. KEXEC/KEXEC_FILE/KEXEC_HANDOVER=n. Standalone USB_FUNCTIONFS=n is not missing FunctionFS: configfs FunctionFS is built in through the two F_FS options.
+
+Toolchain identity from config/Image/container logs
+Linux7.3.0-rc5+; GCC Debian14.2.0-19; GNU ld/binutils2.44; rustc1.99.0(b940084d7 2026-09-28). Containerghcr.io/samcday/pocketboot-ci:df-308fa9a36a632a0c6407cd5e8b241765ff35490924769332169de1459bbf82e8, pull manifestSHA256f39ae5f5a93cc9e6f607bdcb14ae0827fc5f66da53a82a87f54e850f7f058e89. Tag hash matches the source Dockerfile SHA256. No bit-reproducibility claim.
+
+Desktop immutable-artifact receipt
+{
+  "repository": "samcday/pocketboot",
+  "source_commit": "4434b0e60da6f9f8d5ce219dcd0321befe8dc81b",
+  "linux_commit": "08aa2e8d8cfae38a6e7617a4ce4d9c85872db95f",
+  "run_id": 37258526341,
+  "run_attempt": 1,
+  "artifact_id": 11323024738,
+  "artifact_name": "bootimg-qcom-msm8939-xiaomi-ferrari",
+  "artifact_url": "https://github.com/samcday/pocketboot/actions/runs/37258526341/artifacts/11323024738",
+  "retrieved_at_utc": "2026-10-05T03:39:30.128412+00:00",
+  "files": {
+    "artifact.zip": {
+      "bytes": 5150254,
+      "sha256": "2af76976fccab3f3f6991c98075d0c40f8c1159db62c4e97f3e75011de541c11"
+    },
+    "boot.img": {
+      "bytes": 10813440,
+      "sha256": "2250ca5d405e6e5fc49780acee36822610341bb6eb20c9d72f9c749d500d0148"
+    },
+    ".config": {
+      "bytes": 93654,
+      "sha256": "27cc3a8131f1130785c671067cf3bfdd64076a22a64ee35486ac50753d348424"
+    }
+  },
+  "cmdline": "maxcpus=1 pocketboot.acm",
+  "panic_timeout": 0,
+  "hardware_tested": false
+}
+
+Limits and workspace hygiene
+This cleanup image HAS NOT BEEN BOOTED. Prior core/volume hardware results belong to their older immutable images and do not automatically qualify the removed overlay/configuration. No device commands or flashes during this artifact verification. Source refs/tags unchanged.
+
+After the requested tracked backup-ignore removal reached desktop, seven old workspace-local backup files appeared untracked. They were relocated beneath the already-ignored output directory without overwrite; all before/after file hashes match. Existing local backup directories and permanent external backup copies were untouched. No backups were staged or uploaded. This housekeeping changed no tracked source.
