@@ -1,5 +1,6 @@
 /linux
 /kernel
 /target
+/.localkernel
 __pycache__/
 *.py[cod]

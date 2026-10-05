@@ -15,8 +15,10 @@ use super::{
     DEFAULT_KERNEL_ARCH, FeatureSet, KernelDevice, canonical_file,
     config::{self, CpioConfig, KernelConfig},
     cpio::{DEFAULT_INITRD, DEFAULT_TARGET, build_initrd},
-    ensure_file, kconfig_string, kernel_tree, make_command_for_arch, parallel_jobs, run_command,
-    set_default_kernel_toolchain, target_dir, workspace_root,
+    ensure_file, kconfig_string,
+    kernel_src::resolve_kernel_tree,
+    make_command_for_arch, parallel_jobs, run_command, set_default_kernel_toolchain, target_dir,
+    workspace_root,
 };
 
 #[derive(clap::Args, Debug)]
@@ -96,14 +98,7 @@ fn kernel(args: KernelArgs) -> Result<()> {
         initrd,
     } = args;
     let workspace_root = workspace_root()?;
-    let kernel_tree = match kernel_tree_arg {
-        Some(kernel_tree_arg) => kernel_tree(&kernel_tree_arg)?,
-        None => {
-            let tree = super::kernel_src::ensure_device_kernel_source(&workspace_root, &device)?;
-            println!("kernel source {}", tree.path.display());
-            kernel_tree(&tree.path)?
-        }
-    };
+    let kernel_tree = resolve_kernel_tree(&workspace_root, &device, kernel_tree_arg.as_deref())?;
     let built_initrd = initrd.is_none();
     let build = build_device_kernel(&workspace_root, &kernel_tree, &device, initrd)?;
 

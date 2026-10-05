@@ -10,8 +10,10 @@ use crate::Result;
 use super::{
     KernelDevice,
     config::{self, KernelSource, KernelSourceIdentity},
-    run_command, target_dir, workspace_root,
+    kernel_tree, run_command, target_dir, workspace_root,
 };
+
+const LOCAL_KERNEL_FILE: &str = ".localkernel";
 
 #[derive(clap::Args, Debug)]
 pub(crate) struct KernelSrcArgs {
@@ -19,13 +21,13 @@ pub(crate) struct KernelSrcArgs {
     device: KernelDevice,
 }
 
-pub(super) struct KernelSourceTree {
-    pub(super) path: PathBuf,
-    pub(super) sha: String,
-    pub(super) status: KernelSourceStatus,
+struct KernelSourceTree {
+    path: PathBuf,
+    sha: String,
+    status: KernelSourceStatus,
 }
 
-pub(super) enum KernelSourceStatus {
+enum KernelSourceStatus {
     Current,
     Updated,
 }
@@ -46,7 +48,63 @@ fn kernel_src(args: KernelSrcArgs) -> Result<()> {
     Ok(())
 }
 
-pub(super) fn ensure_device_kernel_source(
+pub(super) fn resolve_kernel_tree(
+    workspace_root: &Path,
+    device: &KernelDevice,
+    explicit: Option<&Path>,
+) -> Result<PathBuf> {
+    if let Some(path) = explicit {
+        return kernel_tree(path);
+    }
+    if let Some(path) = local_kernel_tree(workspace_root)? {
+        println!(
+            "kernel source {} (.localkernel; configured patches bypassed)",
+            path.display()
+        );
+        return Ok(path);
+    }
+
+    let tree = ensure_device_kernel_source(workspace_root, device)?;
+    println!("kernel source {}", tree.path.display());
+    kernel_tree(&tree.path)
+}
+
+fn local_kernel_tree(workspace_root: &Path) -> Result<Option<PathBuf>> {
+    let marker = workspace_root.join(LOCAL_KERNEL_FILE);
+    // A dangling marker symlink is an error, not an absent override.
+    match fs::symlink_metadata(&marker) {
+        Ok(_) => {}
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(err) => return Err(format!("stat {}: {err}", marker.display())),
+    }
+    let metadata =
+        fs::metadata(&marker).map_err(|err| format!("stat {}: {err}", marker.display()))?;
+    if !metadata.is_file() {
+        return Err(format!("{} must be a regular file", marker.display()));
+    }
+    let contents =
+        fs::read_to_string(&marker).map_err(|err| format!("read {}: {err}", marker.display()))?;
+    let value = contents
+        .strip_suffix("\r\n")
+        .or_else(|| contents.strip_suffix('\n'))
+        .unwrap_or(&contents);
+    let path = Path::new(value);
+    if !path.is_absolute() || value.contains(['\r', '\n', '\0']) {
+        return Err(format!(
+            "{} must contain one absolute kernel checkout path",
+            marker.display()
+        ));
+    }
+    let path = kernel_tree(path).map_err(|err| {
+        format!(
+            "{} selects an unusable kernel: {err}; update or remove it",
+            marker.display()
+        )
+    })?;
+    Ok(Some(path))
+}
+
+fn ensure_device_kernel_source(
     workspace_root: &Path,
     device: &KernelDevice,
 ) -> Result<KernelSourceTree> {
@@ -487,12 +545,116 @@ mod tests {
         fn read(&self, file: &str) -> String {
             fs::read_to_string(self.source.join(file)).unwrap()
         }
+
+        fn kernel(&self, name: &str) -> PathBuf {
+            let path = self.root.join(name);
+            fs::create_dir_all(path.join("scripts/kconfig")).unwrap();
+            fs::write(path.join("Makefile"), "").unwrap();
+            fs::write(path.join("scripts/kconfig/merge_config.sh"), "").unwrap();
+            fs::canonicalize(path).unwrap()
+        }
     }
 
     impl Drop for PatchFixture {
         fn drop(&mut self) {
             fs::remove_dir_all(&self.root).unwrap();
         }
+    }
+
+    #[test]
+    fn absent_local_kernel_uses_configured_source() {
+        let f = PatchFixture::new();
+        assert!(local_kernel_tree(&f.root).unwrap().is_none());
+    }
+
+    #[test]
+    fn local_kernel_resolves_without_fetching_or_modifying_source() {
+        let f = PatchFixture::new();
+        let tree = f.kernel("source");
+        let index = fs::read(tree.join(".git/index")).unwrap();
+        let device = KernelDevice::parse("qcom/msm8939-xiaomi-ferrari").unwrap();
+        for ending in ["", "\n", "\r\n"] {
+            fs::write(
+                f.root.join(LOCAL_KERNEL_FILE),
+                format!("{}{ending}", tree.display()),
+            )
+            .unwrap();
+            // No device configs exist here: this must not consult or fetch pins.
+            assert_eq!(resolve_kernel_tree(&f.root, &device, None).unwrap(), tree);
+        }
+        assert_eq!(f.read("unrelated"), "local work\n");
+        assert_eq!(fs::read(tree.join(".git/index")).unwrap(), index);
+    }
+
+    #[test]
+    fn local_kernel_preserves_spaces_in_paths() {
+        let f = PatchFixture::new();
+        let tree = f.kernel("kernel with spaces");
+        fs::write(
+            f.root.join(LOCAL_KERNEL_FILE),
+            format!("{}\n", tree.display()),
+        )
+        .unwrap();
+        assert_eq!(local_kernel_tree(&f.root).unwrap(), Some(tree));
+    }
+
+    #[test]
+    fn invalid_local_kernel_never_falls_back() {
+        let f = PatchFixture::new();
+        let tree = f.kernel("kernel");
+        for value in [
+            String::new(),
+            "\n".into(),
+            "relative/kernel\n".into(),
+            format!("{}\n{}\n", tree.display(), tree.display()),
+            format!("{}\n\n", tree.display()),
+            format!("{}\r", tree.display()),
+            format!("{}\0", tree.display()),
+            f.root.join("missing").display().to_string(),
+            f.source.display().to_string(), // Not a kernel tree.
+        ] {
+            fs::write(f.root.join(LOCAL_KERNEL_FILE), value).unwrap();
+            let err = local_kernel_tree(&f.root).unwrap_err();
+            assert!(err.contains(LOCAL_KERNEL_FILE), "{err}");
+        }
+        fs::write(f.root.join(LOCAL_KERNEL_FILE), [0xff]).unwrap();
+        assert!(local_kernel_tree(&f.root).is_err());
+    }
+
+    #[test]
+    fn explicit_source_bypasses_local_marker() {
+        let f = PatchFixture::new();
+        fs::write(f.root.join(LOCAL_KERNEL_FILE), "stale\n").unwrap();
+        let tree = f.kernel("explicit");
+        let device = KernelDevice::parse("qcom/msm8939-xiaomi-ferrari").unwrap();
+        assert_eq!(
+            resolve_kernel_tree(&f.root, &device, Some(&tree)).unwrap(),
+            tree
+        );
+    }
+
+    #[test]
+    fn invalid_explicit_source_does_not_fall_back_to_local_marker() {
+        let f = PatchFixture::new();
+        let tree = f.kernel("kernel");
+        fs::write(f.root.join(LOCAL_KERNEL_FILE), tree.display().to_string()).unwrap();
+        let device = KernelDevice::parse("qcom/msm8939-xiaomi-ferrari").unwrap();
+        assert!(resolve_kernel_tree(&f.root, &device, Some(&f.root.join("missing"))).is_err());
+    }
+
+    #[test]
+    fn local_kernel_marker_directory_is_an_error() {
+        let f = PatchFixture::new();
+        fs::create_dir(f.root.join(LOCAL_KERNEL_FILE)).unwrap();
+        assert!(local_kernel_tree(&f.root).is_err());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn dangling_local_kernel_marker_is_not_absent() {
+        let f = PatchFixture::new();
+        std::os::unix::fs::symlink(f.root.join("missing"), f.root.join(LOCAL_KERNEL_FILE)).unwrap();
+        assert!(local_kernel_tree(&f.root).is_err());
     }
 
     #[test]
