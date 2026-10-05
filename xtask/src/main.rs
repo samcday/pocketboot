@@ -39,7 +39,7 @@ enum XtaskCommand {
     Kernel(commands::kernel::KernelArgs),
     #[command(
         name = "kernel-src",
-        about = "fetch or update a configured kernel source tree"
+        about = "resolve the kernel source tree, fetching configured sources if needed"
     )]
     KernelSrc(commands::kernel_src::KernelSrcArgs),
     #[command(about = "build a pocketpreboot shim for one device")]

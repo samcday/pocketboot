@@ -7,7 +7,10 @@ use std::{
 
 use crate::Result;
 
-use super::{ensure_file, kernel, kernel_tree, run_command, target_dir, workspace_root};
+use super::{
+    KernelDevice, ensure_file, kernel, kernel_src::resolve_kernel_tree, run_command, target_dir,
+    workspace_root,
+};
 
 const QEMU_DEVICE: &str = "qemu/aarch64-virt";
 const QEMU_TARGET: &str = "aarch64-virt";
@@ -16,7 +19,7 @@ const QEMU_DISK_SIZE: u64 = 64 * 1024 * 1024;
 #[derive(clap::Args, Debug)]
 pub(crate) struct QemuArgs {
     #[arg(value_name = "KERNEL_TREE")]
-    kernel_tree: PathBuf,
+    kernel_tree: Option<PathBuf>,
     #[arg(long)]
     build_only: bool,
     #[arg(last = true, value_name = "QEMU_ARG")]
@@ -29,7 +32,8 @@ pub(crate) fn run(args: QemuArgs) -> Result<()> {
 
 fn qemu(args: QemuArgs) -> Result<()> {
     let workspace_root = workspace_root()?;
-    let kernel_tree = kernel_tree(&args.kernel_tree)?;
+    let device = KernelDevice::parse(QEMU_DEVICE)?;
+    let kernel_tree = resolve_kernel_tree(&workspace_root, &device, args.kernel_tree.as_deref())?;
     let target_dir = target_dir(&workspace_root);
     let build = kernel::build_device_kernel_id(&workspace_root, &kernel_tree, QEMU_DEVICE, None)?;
     let disk = qemu_disk(&target_dir)?;

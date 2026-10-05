@@ -57,7 +57,8 @@ the recorded tests used temporary boot/kexec.
 With the usual cross-build prerequisites and downloaded Cargo dependencies:
 
 ```sh
-cargo xtask kernel-src qcom/msm8916-samsung-a5u-eur
+# The ramoops tests need the configured pin, not an attached Delta kernel.
+env -u DELTA_DATABASE_DIR cargo xtask kernel-src qcom/msm8916-samsung-a5u-eur
 cargo test --offline --workspace --features pocketpreboot/soc-msm8916
 CARGO_TARGET_AARCH64_UNKNOWN_LINUX_MUSL_RUNNER=qemu-aarch64 \
   cargo test --offline -p pocketboot --target aarch64-unknown-linux-musl kexec::

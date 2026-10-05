@@ -139,9 +139,20 @@ fn validate_device_component(kind: &str, value: &str) -> Result<()> {
     }
 }
 
+fn has_linux_readme(path: &Path) -> bool {
+    fs::read_to_string(path.join("README"))
+        .is_ok_and(|readme| readme.trim_start().starts_with("Linux kernel"))
+}
+
 fn kernel_tree(path: &Path) -> Result<PathBuf> {
     let path =
         fs::canonicalize(path).map_err(|err| format!("canonicalize {}: {err}", path.display()))?;
+    if !has_linux_readme(&path) {
+        return Err(format!(
+            "{} does not identify a Linux kernel source tree",
+            path.join("README").display()
+        ));
+    }
     ensure_file(&path.join("Makefile"), "kernel Makefile")?;
     ensure_file(
         &path.join("scripts/kconfig/merge_config.sh"),

@@ -1,4 +1,7 @@
 use std::{
+    collections::BTreeSet,
+    env,
+    ffi::OsStr,
     fs,
     io::Write,
     path::{Path, PathBuf},
@@ -10,15 +13,15 @@ use crate::Result;
 use super::{
     KernelDevice,
     config::{self, KernelSource, KernelSourceIdentity},
-    kernel_tree, run_command, target_dir, workspace_root,
+    has_linux_readme, kernel_tree, run_command, target_dir, workspace_root,
 };
-
-const LOCAL_KERNEL_FILE: &str = ".localkernel";
 
 #[derive(clap::Args, Debug)]
 pub(crate) struct KernelSrcArgs {
     #[arg(value_name = "VENDOR/DEVICE")]
     device: KernelDevice,
+    #[arg(value_name = "KERNEL_TREE")]
+    kernel_tree: Option<PathBuf>,
 }
 
 struct KernelSourceTree {
@@ -33,18 +36,8 @@ enum KernelSourceStatus {
 }
 
 pub(crate) fn run(args: KernelSrcArgs) -> Result<()> {
-    kernel_src(args)
-}
-
-fn kernel_src(args: KernelSrcArgs) -> Result<()> {
     let workspace_root = workspace_root()?;
-    let tree = ensure_device_kernel_source(&workspace_root, &args.device)?;
-
-    match tree.status {
-        KernelSourceStatus::Current => println!("kernel source current {}", tree.path.display()),
-        KernelSourceStatus::Updated => println!("kernel source updated {}", tree.path.display()),
-    }
-    println!("sha {}", tree.sha);
+    resolve_kernel_tree(&workspace_root, &args.device, args.kernel_tree.as_deref())?;
     Ok(())
 }
 
@@ -53,55 +46,72 @@ pub(super) fn resolve_kernel_tree(
     device: &KernelDevice,
     explicit: Option<&Path>,
 ) -> Result<PathBuf> {
-    if let Some(path) = explicit {
-        return kernel_tree(path);
-    }
-    if let Some(path) = local_kernel_tree(workspace_root)? {
+    let cdpath = env::var_os("DELTA_DATABASE_DIR").and_then(|_| env::var_os("CDPATH"));
+    if let Some((origin, path)) = override_kernel_tree(explicit, cdpath.as_deref())? {
         println!(
-            "kernel source {} (.localkernel; configured patches bypassed)",
+            "kernel source {} ({origin}; configured patches bypassed)",
             path.display()
         );
         return Ok(path);
     }
 
     let tree = ensure_device_kernel_source(workspace_root, device)?;
-    println!("kernel source {}", tree.path.display());
+    let status = match tree.status {
+        KernelSourceStatus::Current => "current",
+        KernelSourceStatus::Updated => "updated",
+    };
+    println!(
+        "kernel source {status} {} (configured)",
+        tree.path.display()
+    );
+    println!("sha {}", tree.sha);
     kernel_tree(&tree.path)
 }
 
-fn local_kernel_tree(workspace_root: &Path) -> Result<Option<PathBuf>> {
-    let marker = workspace_root.join(LOCAL_KERNEL_FILE);
-    // A dangling marker symlink is an error, not an absent override.
-    match fs::symlink_metadata(&marker) {
-        Ok(_) => {}
-        Err(err) if err.kind() == std::io::ErrorKind::NotFound => return Ok(None),
-        Err(err) => return Err(format!("stat {}: {err}", marker.display())),
+fn override_kernel_tree(
+    explicit: Option<&Path>,
+    delta_cdpath: Option<&OsStr>,
+) -> Result<Option<(&'static str, PathBuf)>> {
+    if let Some(path) = explicit {
+        return Ok(Some(("explicit", kernel_tree(path)?)));
     }
-    let metadata =
-        fs::metadata(&marker).map_err(|err| format!("stat {}: {err}", marker.display()))?;
-    if !metadata.is_file() {
-        return Err(format!("{} must be a regular file", marker.display()));
+    let Some(cdpath) = delta_cdpath else {
+        return Ok(None);
+    };
+
+    // Delta exports attached checkout parents in CDPATH. Ignore the shell's
+    // empty/relative entries; inspect only direct children, regardless of name.
+    let mut candidates = BTreeSet::new();
+    for parent in env::split_paths(cdpath).filter(|path| path.is_absolute()) {
+        let entries = match fs::read_dir(&parent) {
+            Ok(entries) => entries,
+            Err(err) if err.kind() == std::io::ErrorKind::NotFound => continue,
+            Err(err) => return Err(format!("read Delta CDPATH {}: {err}", parent.display())),
+        };
+        for entry in entries {
+            let path = entry
+                .map_err(|err| format!("read Delta CDPATH {} entry: {err}", parent.display()))?
+                .path();
+            if has_linux_readme(&path) {
+                candidates.insert(kernel_tree(&path)?);
+            }
+        }
     }
-    let contents =
-        fs::read_to_string(&marker).map_err(|err| format!("read {}: {err}", marker.display()))?;
-    let value = contents
-        .strip_suffix("\r\n")
-        .or_else(|| contents.strip_suffix('\n'))
-        .unwrap_or(&contents);
-    let path = Path::new(value);
-    if !path.is_absolute() || value.contains(['\r', '\n', '\0']) {
+
+    if candidates.len() > 1 {
         return Err(format!(
-            "{} must contain one absolute kernel checkout path",
-            marker.display()
+            "multiple kernel trees in Delta CDPATH: {}; pass KERNEL_TREE explicitly",
+            candidates
+                .iter()
+                .map(|path| path.display().to_string())
+                .collect::<Vec<_>>()
+                .join(", ")
         ));
     }
-    let path = kernel_tree(path).map_err(|err| {
-        format!(
-            "{} selects an unusable kernel: {err}; update or remove it",
-            marker.display()
-        )
-    })?;
-    Ok(Some(path))
+    Ok(candidates
+        .into_iter()
+        .next()
+        .map(|path| ("Delta CDPATH", path)))
 }
 
 fn ensure_device_kernel_source(
@@ -549,6 +559,7 @@ mod tests {
         fn kernel(&self, name: &str) -> PathBuf {
             let path = self.root.join(name);
             fs::create_dir_all(path.join("scripts/kconfig")).unwrap();
+            fs::write(path.join("README"), "Linux kernel\n============\n").unwrap();
             fs::write(path.join("Makefile"), "").unwrap();
             fs::write(path.join("scripts/kconfig/merge_config.sh"), "").unwrap();
             fs::canonicalize(path).unwrap()
@@ -562,99 +573,164 @@ mod tests {
     }
 
     #[test]
-    fn absent_local_kernel_uses_configured_source() {
-        let f = PatchFixture::new();
-        assert!(local_kernel_tree(&f.root).unwrap().is_none());
+    fn absent_delta_cdpath_has_no_override() {
+        assert!(override_kernel_tree(None, None).unwrap().is_none());
     }
 
     #[test]
-    fn local_kernel_resolves_without_fetching_or_modifying_source() {
+    fn delta_discovers_kernel_without_modifying_source_or_writing_marker() {
         let f = PatchFixture::new();
         let tree = f.kernel("source");
         let index = fs::read(tree.join(".git/index")).unwrap();
-        let device = KernelDevice::parse("qcom/msm8939-xiaomi-ferrari").unwrap();
-        for ending in ["", "\n", "\r\n"] {
-            fs::write(
-                f.root.join(LOCAL_KERNEL_FILE),
-                format!("{}{ending}", tree.display()),
-            )
-            .unwrap();
-            // No device configs exist here: this must not consult or fetch pins.
-            assert_eq!(resolve_kernel_tree(&f.root, &device, None).unwrap(), tree);
-        }
+        assert_eq!(
+            override_kernel_tree(None, Some(f.root.as_os_str())).unwrap(),
+            Some(("Delta CDPATH", tree.clone()))
+        );
         assert_eq!(f.read("unrelated"), "local work\n");
         assert_eq!(fs::read(tree.join(".git/index")).unwrap(), index);
+        assert!(!f.root.join(".localkernel").exists());
     }
 
     #[test]
-    fn local_kernel_preserves_spaces_in_paths() {
+    fn delta_deduplicates_search_roots_and_preserves_spaces() {
         let f = PatchFixture::new();
-        let tree = f.kernel("kernel with spaces");
-        fs::write(
-            f.root.join(LOCAL_KERNEL_FILE),
-            format!("{}\n", tree.display()),
-        )
-        .unwrap();
-        assert_eq!(local_kernel_tree(&f.root).unwrap(), Some(tree));
-    }
-
-    #[test]
-    fn invalid_local_kernel_never_falls_back() {
-        let f = PatchFixture::new();
-        let tree = f.kernel("kernel");
-        for value in [
-            String::new(),
-            "\n".into(),
-            "relative/kernel\n".into(),
-            format!("{}\n{}\n", tree.display(), tree.display()),
-            format!("{}\n\n", tree.display()),
-            format!("{}\r", tree.display()),
-            format!("{}\0", tree.display()),
-            f.root.join("missing").display().to_string(),
-            f.source.display().to_string(), // Not a kernel tree.
-        ] {
-            fs::write(f.root.join(LOCAL_KERNEL_FILE), value).unwrap();
-            let err = local_kernel_tree(&f.root).unwrap_err();
-            assert!(err.contains(LOCAL_KERNEL_FILE), "{err}");
-        }
-        fs::write(f.root.join(LOCAL_KERNEL_FILE), [0xff]).unwrap();
-        assert!(local_kernel_tree(&f.root).is_err());
-    }
-
-    #[test]
-    fn explicit_source_bypasses_local_marker() {
-        let f = PatchFixture::new();
-        fs::write(f.root.join(LOCAL_KERNEL_FILE), "stale\n").unwrap();
-        let tree = f.kernel("explicit");
-        let device = KernelDevice::parse("qcom/msm8939-xiaomi-ferrari").unwrap();
+        let tree = f.kernel("parent with spaces/kernel with spaces");
+        let parent = tree.parent().unwrap();
+        let cdpath = env::join_paths([parent, parent]).unwrap();
         assert_eq!(
-            resolve_kernel_tree(&f.root, &device, Some(&tree)).unwrap(),
-            tree
+            override_kernel_tree(None, Some(&cdpath)).unwrap(),
+            Some(("Delta CDPATH", tree))
         );
     }
 
     #[test]
-    fn invalid_explicit_source_does_not_fall_back_to_local_marker() {
+    fn delta_ignores_empty_relative_missing_and_non_kernel_entries() {
         let f = PatchFixture::new();
-        let tree = f.kernel("kernel");
-        fs::write(f.root.join(LOCAL_KERNEL_FILE), tree.display().to_string()).unwrap();
-        let device = KernelDevice::parse("qcom/msm8939-xiaomi-ferrari").unwrap();
-        assert!(resolve_kernel_tree(&f.root, &device, Some(&f.root.join("missing"))).is_err());
+        // A generic Makefile and nested build caches are not kernel attachments.
+        fs::write(f.source.join("Makefile"), "").unwrap();
+        f.kernel("target/cache/kernel");
+        let cdpath = env::join_paths([
+            Path::new(""),
+            Path::new("."),
+            Path::new("relative"),
+            &f.root.join("missing"),
+            &f.root,
+        ])
+        .unwrap();
+        assert!(override_kernel_tree(None, Some(&cdpath)).unwrap().is_none());
     }
 
     #[test]
-    fn local_kernel_marker_directory_is_an_error() {
+    fn uboot_is_not_a_linux_kernel() {
         let f = PatchFixture::new();
-        fs::create_dir(f.root.join(LOCAL_KERNEL_FILE)).unwrap();
-        assert!(local_kernel_tree(&f.root).is_err());
+        let uboot = f.kernel("u-boot");
+        fs::write(
+            uboot.join("README"),
+            "U-Boot\nUses interfaces from the Linux kernel.\n",
+        )
+        .unwrap();
+        let cdpath = Some(f.root.as_os_str());
+        assert!(override_kernel_tree(None, cdpath).unwrap().is_none());
+        assert!(override_kernel_tree(Some(&uboot), cdpath).is_err());
+        let linux = f.kernel("linux");
+        assert_eq!(
+            override_kernel_tree(None, cdpath).unwrap(),
+            Some(("Delta CDPATH", linux))
+        );
+    }
+
+    #[test]
+    fn modern_and_legacy_linux_readme_headers_are_recognized() {
+        let f = PatchFixture::new();
+        let tree = f.kernel("linux");
+        for readme in [
+            "Linux kernel\n============\n",
+            "\tLinux kernel release 4.x <http://kernel.org/>\r\n",
+        ] {
+            fs::write(tree.join("README"), readme).unwrap();
+            assert_eq!(
+                override_kernel_tree(None, Some(f.root.as_os_str())).unwrap(),
+                Some(("Delta CDPATH", tree.clone()))
+            );
+            assert_eq!(kernel_tree(&tree).unwrap(), tree);
+        }
+    }
+
+    #[test]
+    fn missing_or_invalid_readme_is_not_a_kernel() {
+        let f = PatchFixture::new();
+        let tree = f.kernel("linux");
+        // The old file-layout heuristic must not rescue an unidentified tree.
+        fs::create_dir(tree.join("init")).unwrap();
+        fs::write(tree.join("init/main.c"), "").unwrap();
+        for contents in [b"".as_slice(), b"\xff".as_slice()] {
+            fs::write(tree.join("README"), contents).unwrap();
+            assert!(
+                override_kernel_tree(None, Some(f.root.as_os_str()))
+                    .unwrap()
+                    .is_none()
+            );
+            assert!(kernel_tree(&tree).unwrap_err().contains("README"));
+        }
+        fs::remove_file(tree.join("README")).unwrap();
+        assert!(
+            override_kernel_tree(None, Some(f.root.as_os_str()))
+                .unwrap()
+                .is_none()
+        );
+        assert!(kernel_tree(&tree).unwrap_err().contains("README"));
+    }
+
+    #[test]
+    fn incomplete_linux_tree_is_an_error() {
+        let f = PatchFixture::new();
+        let tree = f.kernel("linux");
+        fs::remove_file(tree.join("scripts/kconfig/merge_config.sh")).unwrap();
+        assert!(override_kernel_tree(None, Some(f.root.as_os_str())).is_err());
+    }
+
+    #[test]
+    fn ambiguous_delta_kernels_require_an_explicit_choice() {
+        let f = PatchFixture::new();
+        let first = f.kernel("first");
+        let second = f.kernel("second");
+        let cdpath = Some(f.root.as_os_str());
+        let err = override_kernel_tree(None, cdpath).unwrap_err();
+        assert!(err.contains(first.to_str().unwrap()), "{err}");
+        assert!(err.contains(second.to_str().unwrap()), "{err}");
+        assert!(err.contains("pass KERNEL_TREE explicitly"), "{err}");
+        assert_eq!(
+            override_kernel_tree(Some(&second), cdpath).unwrap(),
+            Some(("explicit", second))
+        );
+    }
+
+    #[test]
+    fn invalid_explicit_source_does_not_fall_back_to_delta() {
+        let f = PatchFixture::new();
+        f.kernel("kernel");
+        assert!(
+            override_kernel_tree(Some(&f.root.join("missing")), Some(f.root.as_os_str())).is_err()
+        );
+    }
+
+    #[test]
+    fn unreadable_delta_search_root_is_an_error() {
+        let f = PatchFixture::new();
+        let file = f.source.join("core");
+        assert!(override_kernel_tree(None, Some(file.as_os_str())).is_err());
     }
 
     #[cfg(unix)]
     #[test]
-    fn dangling_local_kernel_marker_is_not_absent() {
+    fn delta_deduplicates_symlinked_kernels() {
         let f = PatchFixture::new();
-        std::os::unix::fs::symlink(f.root.join("missing"), f.root.join(LOCAL_KERNEL_FILE)).unwrap();
-        assert!(local_kernel_tree(&f.root).is_err());
+        let tree = f.kernel("kernel");
+        std::os::unix::fs::symlink(&tree, f.root.join("alias")).unwrap();
+        assert_eq!(
+            override_kernel_tree(None, Some(f.root.as_os_str())).unwrap(),
+            Some(("Delta CDPATH", tree))
+        );
     }
 
     #[test]
@@ -662,7 +738,7 @@ mod tests {
         let f = PatchFixture::new();
         let patch = f.patch("one.patch", "core", "one", "two");
         let index = fs::read(f.source.join(".git/index")).unwrap();
-        assert!(ensure_kernel_patches(&f.root, &f.source, &[patch.clone()]).unwrap());
+        assert!(ensure_kernel_patches(&f.root, &f.source, std::slice::from_ref(&patch)).unwrap());
         assert_eq!(f.read("core"), "two\n");
         assert!(!ensure_kernel_patches(&f.root, &f.source, &[patch]).unwrap());
         assert_eq!(f.read("unrelated"), "local work\n");
