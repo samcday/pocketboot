@@ -73,3 +73,41 @@ Limits and workspace hygiene
 This cleanup image HAS NOT BEEN BOOTED. Prior core/volume hardware results belong to their older immutable images and do not automatically qualify the removed overlay/configuration. No device commands or flashes during this artifact verification. Source refs/tags unchanged.
 
 After the requested tracked backup-ignore removal reached desktop, seven old workspace-local backup files appeared untracked. They were relocated beneath the already-ignored output directory without overwrite; all before/after file hashes match. Existing local backup directories and permanent external backup copies were untouched. No backups were staged or uploaded. This housekeeping changed no tracked source.
+
+Ferrari cleanup image: successful transient boot, visual confirmation pending
+
+Source/artifact tuple:
+{
+  "pocketboot_commit": "4434b0e60da6f9f8d5ce219dcd0321befe8dc81b",
+  "linux_commit": "08aa2e8d8cfae38a6e7617a4ce4d9c85872db95f",
+  "run_id": 37258526341,
+  "run_attempt": 1,
+  "artifact_id": 11323024738,
+  "image_sha256": "2250ca5d405e6e5fc49780acee36822610341bb6eb20c9d72f9c749d500d0148",
+  "dmesg_bytes": 10767,
+  "dmesg_sha256": "419be4c4c089862b41040312d44261bff8590539a5ac7b2c1bc2720be154694d",
+  "cmdline": "maxcpus=1 pocketboot.acm",
+  "configured_panic_timeout": 0,
+  "runtime_panic_sysctl": "unavailable: CONFIG_SYSCTL=n",
+  "automated_quick_checks": "passed",
+  "visual_confirmation": "pending",
+  "recorded_utc": "2026-10-05T04:00:17.678650+00:00"
+}
+
+Sam authorized the cleanup-image RAM boot. Before disruption the host was verified as sam-desktop and the new image, previous tested volume recovery image and officialLK23.1 were rehashed. Observed initial productpocketboot, supported software reboot to stockMSM8916, RAMboot officialLK23.1/productlk2nd-msm8916, then RAMboot exact cleanup image to actual pocketboot fastboot and working ADB. No flashing, partition writes or source changes.
+
+OfficialLK sourcee9c8b21735c13dd7ace808b1e35451638f0a0c6d; image428048bytes SHA2568f5f788b45b96447517ff121f20841e6bfc95a5d7c4b48fdedb855d90f593144. Previous tested volume recovery image10813440bytes SHA2560aba6ca874dc0155a0730690e914478c267001a41022e272b3c3976d2bb7ed6c remained available but was not needed. Bounded expected-product waits rejected stale responses and expired queries during re-enumeration; final products were verified before proceeding.
+
+Live checks: Linux7.3.0-rc5+ #1 SMP PREEMPT, buildMonOct5 03:23:56UTC2026. Command line exactly maxcpus=1 pocketboot.acm, CPU0 only; uptime1.21s at inventory. Power/RESIN/gpio-keys input devices enumerate. DRM connector reports connected with1080x1920 mode. The old reserved-memory/ramoops@9ff80000 node is absent from live DT; no ramoops registration/header messages appear in the captured live kernel log. Actual ADB execution/log retrieval and pocketboot fastboot replies establish userspace/USB activity, not merely loader acceptance.
+
+Selected log lines:
+<6>[    0.096895] input: pm8941_resin as /devices/platform/soc@0/200f000.spmi/spmi-0/0-00/200f000.spmi:pmic@0:pon@800/200f000.spmi:pmic@0:pon@800:resin/input/input1
+<6>[    0.207321] [drm] Initialized simpledrm 1.0.0 for 83200000.framebuffer on minor 0
+<6>[    0.226235] input: gpio-keys as /devices/platform/gpio-keys/input/input2
+<6>[    0.271885] Run /init as init process
+
+Host-test corrections, NOT boot failures: the first text assertion expected LF-only lines while ADB supplied10CRLF endings. Rechecking the same captured bytes with splitlines() passed all requested fields; no reboot/retry was needed. An optional read of /proc/sys/kernel/panic reported no such file: the effective kernel has CONFIG_SYSCTL=n. CONFIG_PANIC_TIMEOUT=0 is verified in the effective build configuration, not through a successful live sysctl read. No config change was made just to satisfy that diagnostic.
+
+Command window: 2026-10-05T03:55:56.878303+00:00 through 2026-10-05T03:57:44.327051+00:00.
+
+Sam has been asked for a quick screen observation; it is PENDING at this checkpoint. Do not infer visible UI success solely from the DRM state. No repeated timed key capture, manual-reset trial, USB stress, storage-write, SMP/kexec, native-panel, touch/radio or retained-log experiment was performed in this cleanup check. Earlier key/reset results remain attached to the earlier exact volume image. All device commands completed; no background readers/jobs. The new cleanup image is left running via transientLK, with main retaining idle DUT ownership. Raw captures/private command records remain local; no serial/private backup paths are in this note.
