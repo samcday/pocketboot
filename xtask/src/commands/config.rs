@@ -775,21 +775,27 @@ mod tests {
         assert!(kconfig.contains("CONFIG_QCOM_SOC=y\n"));
         assert!(kconfig.contains("CONFIG_QCOM_A53PLL=y\n"));
         assert!(kconfig.contains("CONFIG_QCOM_CLK_APCS_MSM8916=y\n"));
-        assert!(kconfig.contains("CONFIG_PSTORE_CONSOLE=y\n"));
+        assert!(!kconfig.contains("CONFIG_PSTORE_CONSOLE=y\n"));
         assert!(kconfig.contains("CONFIG_KEYBOARD_GPIO=y\n"));
         assert!(kconfig.contains("CONFIG_INPUT_PM8941_PWRKEY=y\n"));
         assert!(kconfig.contains("# CONFIG_KEXEC is not set\n"));
         assert!(!kconfig.contains("CONFIG_CRASH_DUMP"));
 
+        let out_dir = std::path::Path::new("out");
+        assert_eq!(
+            super::super::kernel::kernel_dtb_path(
+                &workspace_root,
+                out_dir,
+                "arm64",
+                &device,
+                &config.kernel,
+                &device.stem,
+            ),
+            out_dir.join("arch/arm64/boot/dts/qcom/msm8939-xiaomi-ferrari.dtb")
+        );
+
         let bootimg = config.bootimg.unwrap();
-        for expected in ["maxcpus=1", "panic=-1", "pocketboot.acm"] {
-            assert!(
-                bootimg
-                    .cmdline
-                    .split_whitespace()
-                    .any(|arg| arg == expected)
-            );
-        }
+        assert_eq!(bootimg.cmdline, "maxcpus=1 pocketboot.acm");
         assert_eq!(bootimg.header_version, 0);
         assert_eq!(bootimg.page_size, 2048);
         assert_eq!(bootimg.kernel_image, "Image");

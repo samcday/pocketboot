@@ -1,6 +1,5 @@
 /linux
 /kernel
 /target
-/device-backups/
 __pycache__/
 *.py[cod]

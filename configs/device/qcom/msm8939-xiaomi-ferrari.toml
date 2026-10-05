@@ -14,7 +14,6 @@ CRASH_DUMP = "omit"
 EXTCON = true
 EXTCON_USB_GPIO = true
 INPUT_PM8941_PWRKEY = true
-PSTORE_CONSOLE = true
 
 [bootimg]
 # Legacy Android/QCDT envelope measured from the working LineageOS boot image.
@@ -28,8 +27,8 @@ second_offset = 0x00f00000
 tags_offset = 0x00000100
 # Userspace is embedded in the kernel, not an external Android ramdisk.
 ramdisk_size = 0
-# First test only CPU0; the secondary spin-table handoff is not yet validated.
-cmdline = "maxcpus=1 panic=-1 initcall_debug loglevel=8 pocketboot.acm"
+# Keep CPU0 only until the secondary spin-table handoff is validated.
+cmdline = "maxcpus=1 pocketboot.acm"
 
 [bootimg.qcdt]
 entries = [
