@@ -3,7 +3,7 @@ use std::{
     env,
     ffi::OsString,
     fs::{self, File},
-    io::{Read, Write},
+    io::{self, Seek, Write},
     os::unix::{ffi::OsStrExt, fs::PermissionsExt},
     path::{Path, PathBuf},
     process::{Command, Stdio},
@@ -36,7 +36,6 @@ pub(crate) struct BusyBoxArgs {
 
 #[derive(Debug)]
 struct BusyBoxPaths {
-    archive: PathBuf,
     source_parent: PathBuf,
     source: PathBuf,
     build: PathBuf,
@@ -83,7 +82,6 @@ impl BusyBoxPaths {
         let install = root.join(format!("install-{cache_name}"));
 
         Self {
-            archive: root.join(format!("busybox-{BUSYBOX_VERSION}.tar.bz2")),
             source_parent: root.join("src"),
             source: root.join("src").join(format!("busybox-{BUSYBOX_VERSION}")),
             build: root.join(format!("build-{cache_name}")),
@@ -129,8 +127,8 @@ pub(super) fn build(
         });
     }
 
-    ensure_busybox_archive(&paths.archive)?;
-    ensure_busybox_source(&paths.archive, &paths.source_parent, &paths.source)?;
+    let archive = open_busybox_archive()?;
+    ensure_busybox_source(archive, &paths.source_parent, &paths.source)?;
 
     fs::create_dir_all(&paths.build)
         .map_err(|err| format!("create {}: {err}", paths.build.display()))?;
@@ -353,17 +351,9 @@ fn hash_file(path: &Path) -> Result<String> {
 
 fn hash_file_into(path: &Path, hasher: &mut Sha256) -> Result<()> {
     let mut file = File::open(path).map_err(|err| format!("open {}: {err}", path.display()))?;
-    let mut buffer = [0; 64 * 1024];
-    loop {
-        let read = file
-            .read(&mut buffer)
-            .map_err(|err| format!("read {}: {err}", path.display()))?;
-        if read == 0 {
-            break;
-        }
-        hasher.update(&buffer[..read]);
-    }
-    Ok(())
+    io::copy(&mut file, hasher)
+        .map(|_| ())
+        .map_err(|err| format!("read {}: {err}", path.display()))
 }
 
 fn update_hash_field(hasher: &mut Sha256, bytes: &[u8]) {
@@ -371,45 +361,46 @@ fn update_hash_field(hasher: &mut Sha256, bytes: &[u8]) {
     hasher.update(bytes);
 }
 
-fn ensure_busybox_archive(archive: &Path) -> Result<()> {
-    if archive.is_file() {
-        verify_busybox_archive(archive)?;
-        return Ok(());
-    }
-
-    if let Some(parent) = archive
-        .parent()
-        .filter(|parent| !parent.as_os_str().is_empty())
-    {
-        fs::create_dir_all(parent).map_err(|err| format!("create {}: {err}", parent.display()))?;
-    }
-
-    let tmp = archive.with_extension("tar.bz2.tmp");
-    let curl = env::var_os("CURL").unwrap_or_else(|| "curl".into());
-    let mut command = Command::new(curl);
-    command
-        .args(["--fail", "--location", "--output"])
-        .arg(&tmp)
-        .arg(BUSYBOX_SOURCE_URL);
-    run_command(command, "download busybox")?;
-    verify_busybox_archive(&tmp)?;
-    fs::rename(&tmp, archive)
-        .map_err(|err| format!("rename {} to {}: {err}", tmp.display(), archive.display()))
+fn open_busybox_archive() -> Result<File> {
+    let root = dirs::cache_dir().ok_or("cannot locate download cache")?;
+    let cache = cached_path::Cache::builder()
+        .dir(root.join("pocketboot/downloads"))
+        // The checksum pins immutable content: cache hits must not make HTTP requests.
+        .freshness_lifetime(u64::MAX)
+        .build()
+        .map_err(|err| format!("create BusyBox download cache: {err}"))?;
+    open_verified_archive(&cache, BUSYBOX_SOURCE_URL, BUSYBOX_ARCHIVE_SHA256)
 }
 
-fn verify_busybox_archive(path: &Path) -> Result<()> {
-    let digest = hash_file(path)?;
-    if digest == BUSYBOX_ARCHIVE_SHA256 {
-        Ok(())
-    } else {
-        Err(format!(
-            "busybox archive checksum mismatch for {}: expected {BUSYBOX_ARCHIVE_SHA256}, got {digest}",
-            path.display()
-        ))
+fn open_verified_archive(cache: &cached_path::Cache, url: &str, sha256: &str) -> Result<File> {
+    let mut options = cached_path::Options::default().subdir(sha256);
+    loop {
+        let path = cache
+            .cached_path_with_options(url, &options)
+            .map_err(|err| format!("fetch {url}: {err}"))?;
+        let mut archive =
+            File::open(&path).map_err(|err| format!("open {}: {err}", path.display()))?;
+        let mut hasher = Sha256::new();
+        io::copy(&mut archive, &mut hasher)
+            .map_err(|err| format!("hash {}: {err}", path.display()))?;
+        let actual = format!("{:x}", hasher.finalize());
+        if actual == sha256 {
+            archive
+                .rewind()
+                .map_err(|err| format!("rewind {}: {err}", path.display()))?;
+            return Ok(archive);
+        }
+        if options.force {
+            return Err(format!(
+                "archive checksum mismatch for {url}: expected {sha256}, got {actual}"
+            ));
+        }
+        // Repair a corrupt cache entry once; never use bytes that fail verification.
+        options = options.force();
     }
 }
 
-fn ensure_busybox_source(archive: &Path, source_parent: &Path, source: &Path) -> Result<()> {
+fn ensure_busybox_source(archive: File, source_parent: &Path, source: &Path) -> Result<()> {
     if source.is_dir() {
         return Ok(());
     }
@@ -419,9 +410,10 @@ fn ensure_busybox_source(archive: &Path, source_parent: &Path, source: &Path) ->
     let mut command = Command::new("tar");
     command
         .arg("-xjf")
-        .arg(archive)
+        .arg("-")
         .arg("-C")
-        .arg(source_parent);
+        .arg(source_parent)
+        .stdin(Stdio::from(archive));
     run_command(command, "extract busybox")?;
     if source.is_dir() {
         Ok(())
@@ -861,7 +853,30 @@ fn strip_busybox(binary: &Path, target: &str) -> Result<()> {
 
 #[cfg(test)]
 mod tests {
+    use std::io::Read;
+
     use super::*;
+
+    #[test]
+    fn archive_verification_returns_rewound_file_and_rejects_wrong_hash() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("archive");
+        fs::write(&path, b"verified archive").unwrap();
+        let cache = cached_path::Cache::builder()
+            .dir(dir.path().join("cache"))
+            .build()
+            .unwrap();
+        let expected = format!("{:x}", Sha256::digest(b"verified archive"));
+        let mut archive = open_verified_archive(&cache, path.to_str().unwrap(), &expected).unwrap();
+        let mut contents = String::new();
+        archive.read_to_string(&mut contents).unwrap();
+        assert_eq!(contents, "verified archive");
+        assert!(
+            open_verified_archive(&cache, path.to_str().unwrap(), &"0".repeat(64))
+                .unwrap_err()
+                .contains("checksum mismatch")
+        );
+    }
 
     #[test]
     fn recipe_configures_a_4096_byte_interactive_editing_buffer() {
