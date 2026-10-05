@@ -1,8 +1,11 @@
 # ARM32 kexec bring-up
 
 Initial ARMv7 handoff is implemented and tested with two-kernel QEMU boots.
-No phone handoff is claimed. Expressltexx and Expressatt use different kernel
-trees and remain independent device PRs.
+[Expressltexx](samsung-expressltexx.md#hardware-validation) has also completed
+two consecutive Pocketboot-to-Pocketboot handoffs on hardware. Expressatt
+uses a different kernel tree and remains independently unvalidated.
+Those phone runs predate the ultrareview fixes; this round revalidated the
+loader in QEMU, not on hardware.
 
 ## Supported first-pass contract
 
@@ -14,8 +17,10 @@ trees and remain independent device PRs.
   unwrap a gzip-wrapped **zImage**.
 - A destination kernel built for the same platform, using the normal Linux
   DT-aware `AUTO_ZRELADDR` decompressor or a fixed `ZRELADDR` matching the
-  lowest RAM bank plus `0x8000`. For a RAM base not aligned to 128 MiB,
-  automatic placement requires the DT-aware decompressor introduced in
+  lowest RAM bank plus `0x8000`. For a fixed-address build, verify that
+  linker symbol in `arch/arm/boot/compressed/vmlinux`; its value is not in
+  the zImage size tag. For a RAM base not aligned to 128 MiB, automatic
+  placement requires the DT-aware decompressor introduced in
   Linux v5.12 (or a verified backport). The six-word tag does **not** prove
   that capability: it is a destination-build contract, not a runtime check.
   The DT and `/proc/iomem` must agree on the lowest RAM bank, aligned to
