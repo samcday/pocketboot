@@ -98,3 +98,33 @@ The parent announced a30s dual-evdev window at2026-10-04T23:35:55.964UTC. Both c
 
 Limits and final state
 The same VOLUME RAM image remains running, no background readers/jobs. Manual long-Power reset, observed return to stock fastboot and post-reset restoration are still pending. No source/ref/build edits, flash/erase/partition writes, HYP/bootloader/reset-policy changes, GPIO requests, I2C scans, touch/radio/SMP/kexec/native-panel qualification or direct-stock-loader experiment. Source-based electrical provenance is recorded separately on the volume-key Linux commit. This note does not extend the verified scope beyond the observations above.
+
+Ferrari volume candidate: manual recovery and restoration completed
+
+Sam reported "reset" after the requested physical long-Power reset. The host then observed stock fastboot productMSM8916 on the explicitly selected DUT. This establishes manual recovery to stock fastboot in this test; button duration, PMIC reset cause and DRAM power/retention were NOT instrumented or inferred.
+
+Before restoration the two exact binaries were rehashed:
+- Official lk2nd23.1 sourcee9c8b21735c13dd7ace808b1e35451638f0a0c6d, image428048bytes SHA2568f5f788b45b96447517ff121f20841e6bfc95a5d7c4b48fdedb855d90f593144.
+- VOLUME pocketboot962f8c19143cd435c9d08d70c099ef336d849e81 / Linux08aa2e8d8cfae38a6e7617a4ce4d9c85872db95f. Image10813440bytes SHA2560aba6ca874dc0155a0730690e914478c267001a41022e272b3c3976d2bb7ed6c. Original GHA run37197785302 attempt1/artifact11301780924, unchanged.
+
+Observed restoration: stockMSM8916 -> RAMboot officialLK -> observedlk2nd-msm8916 -> RAMboot exactVOLUME -> observedpocketboot fastboot -> working ADB shell and live Linux. Bounded product waits rejected stale transition responses and accepted only the expected product; one2s query expired during re-enumeration, then pocketboot returned. No image retry, alternate image or flash was needed.
+
+Final runtime: Linux7.3.0-rc5+ #1 SMP PREEMPT, buildSunOct4 11:20:23UTC2026; command line maxcpus=1 panic=-1 initcall_debug loglevel=8 pocketboot.acm. CPU0 online, uptime2.30s at inspection. Input devices pm8941_pwrkey,pm8941_resin,gpio-keys present; DRM connector reports connected. This is post-reset runtime evidence, not an additional human screen observation. The preceding note records Sam's functional VolumeUp/VolumeDown/Power-menu pass.
+
+Restored live dmesg59779bytes SHA256d21bdd521331a357a0205ac96dd7d125bea44e0c1ae8ad6ad7d4df98a03e88a6. Raw captures remain private; no raw logs, DUT serial or backup paths are published here.
+
+Recorded command intervals (UTC):
+manual-reset-stock-product: 2026-10-05T00:24:30.880244+00:00 -> 2026-10-05T00:24:30.883483+00:00, exit0
+manual-reset-restore-lk: 2026-10-05T00:25:09.729808+00:00 -> 2026-10-05T00:25:09.753732+00:00, exit0
+manual-reset-restored-lk-product-1: 2026-10-05T00:25:09.753824+00:00 -> 2026-10-05T00:25:09.757221+00:00, exit0
+manual-reset-restored-lk-product-2: 2026-10-05T00:25:10.007359+00:00 -> 2026-10-05T00:25:11.115318+00:00, exit0
+manual-reset-restore-volume: 2026-10-05T00:25:11.115443+00:00 -> 2026-10-05T00:25:11.489463+00:00, exit0
+manual-reset-restored-pocketboot-product-1: 2026-10-05T00:25:11.489568+00:00 -> 2026-10-05T00:25:11.492904+00:00, exit0
+manual-reset-restored-pocketboot-product-2: 2026-10-05T00:25:11.743068+00:00 -> 2026-10-05T00:25:13.744502+00:00, exit124
+manual-reset-restored-pocketboot-product-3: 2026-10-05T00:25:13.994678+00:00 -> 2026-10-05T00:25:15.098101+00:00, exit0
+manual-reset-restored-runtime: 2026-10-05T00:25:15.098230+00:00 -> 2026-10-05T00:25:15.121017+00:00, exit0
+manual-reset-restored-dmesg: 2026-10-05T00:25:15.121142+00:00 -> 2026-10-05T00:25:15.453957+00:00, exit0
+
+Bounded core/volume smoke qualification is complete: core rendered UI/USB/eMMC enumeration and empty deferred probes; volume candidate automated display/USB/input probing; Sam's direct functional key-menu observation; manual reset to stock fastboot; restoration of the identical volume artifact. The missed evdev window remains inconclusive and is NOT counted as a raw-event pass. No new Tested-by or sign-off trailer is inferred.
+
+Final state: exact VOLUME image running via transientLK, fastboot/ADB responding; no background test jobs/readers. No source edits, installs, flash/erase/partition writes, block mounts, HYP/bootloader/reset-policy changes, touch/radios/SMP/kexec/native-panel enablement or retained-memory experiment. This does not qualify direct-stock-ABOOT boot or persistent installation. Main retains idle DUT ownership.
