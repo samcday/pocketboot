@@ -22,6 +22,7 @@ cargo xtask build
 (You will need a bunch of undocumented cross-compile toolchain deps, sorry about that)
 
 Experimental Galaxy Express GT-I8730 build: [Expressltexx](docs/samsung-expressltexx.md).
+Experimental Galaxy Express SGH-I437 build: [Expressatt](docs/samsung-expressatt.md).
 
 Dev docs will be forthcoming. For now, ask your favourite clanker for an explanation.
 
