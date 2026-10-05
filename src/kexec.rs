@@ -8,7 +8,7 @@ use std::{
 use flate2::read::{GzDecoder, MultiGzDecoder};
 use ruzstd::decoding::StreamingDecoder;
 
-use crate::{pe, zboot};
+use crate::{pe, power, zboot};
 
 const LINUX_REBOOT_CMD_KEXEC: libc::c_int = 0x45584543;
 const GZIP_MAGIC: [u8; 2] = [0x1f, 0x8b];
@@ -96,6 +96,7 @@ pub(crate) fn prepare_kernel_payload(mut kernel: File) -> io::Result<File> {
 }
 
 pub(crate) fn exec_loaded_image() -> io::Result<()> {
+    power::sync_filesystems();
     let rc = unsafe { libc::reboot(LINUX_REBOOT_CMD_KEXEC) };
     if rc < 0 {
         return Err(io::Error::last_os_error());
