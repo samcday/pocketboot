@@ -41,9 +41,48 @@ Review bots are advisory and handled separately, not another landing ceremony.
    accurately, including any pending post-push run. A branch or PR alone is not
    success. If blocked, say it has not landed; distinguish uncertain confirmation
    after a successful push from failure to publish.
+7. **Reconcile the initiating checkout.** This is part of the requested workflow,
+   distinct from publishing upstream. In an isolated Delta Land subthread, use
+   `send_agent_message` to request the parent perform the reconciliation below
+   in its own attached checkout. Include the repository, upstream remote, target
+   branch, landed SHA, and any known unlanded edits. Do not reach into the parent
+   checkout by filesystem path. A landing card or child-to-parent file merge is
+   not checkout reconciliation. If a handoff is unavailable or unconfirmed,
+   report publication as landed but parent cleanup as pending; do not poll.
 
-Use `GIT_EDITOR=true` for commits/rebases; no interactive rebases. Leave branches
-and unrelated work intact. Do not weaken checks or change repository settings.
+Use `GIT_EDITOR=true` for commits/rebases/merges; no interactive rebases. Leave
+branches and unrelated work intact. Do not weaken checks or change repository
+settings.
+
+## Parent checkout reconciliation
+
+Execute this on an explicit cleanup request or handoff, not on an informational
+landing event alone. Inspect the parent's current state, not the snapshot from
+when the Land subthread started; the user may have continued editing.
+
+1. Fetch the configured upstream and record the target SHA. Confirm the landed
+   SHA is reachable from it, the current branch is the target branch, and the
+   current `HEAD` is its ancestor. Stop on divergence, a different branch, or
+   staged changes rather than rewriting history or flattening the user's index.
+2. Record status and the contents of remaining edits. Classify modified paths:
+   an already-landed path must match the fetched target in full, including its
+   file mode. Verify with `git diff --no-ext-diff --quiet <target-sha> -- <paths>`.
+   Preserve unlanded, untracked, and ignored work. Stop if a file mixes landed and
+   unlanded edits and cannot be carried through a normal fast-forward.
+3. If there are already-landed modifications, save only those explicitly named
+   paths with `git stash push -m "post-land reconciliation" -- <paths>`, recording
+   the recovery stash's object ID. Never run this with an empty path list, and
+   never blindly pop/apply that stash: its changes are already upstream.
+4. Run
+   `GIT_EDITOR=true git merge --ff-only --no-autostash --no-overwrite-ignore <target-sha>`.
+   Disable configured autostash and refuse collisions with ignored files. Leave
+   unlanded edits in place; if Git refuses, stop and retain the recovery stash.
+   Do not use `reset --hard`, `clean`, blanket restores, or an automatic stash pop.
+5. Verify `HEAD` equals the recorded target, already-landed paths no longer show
+   as dirty, and every unlanded edit/untracked file is unchanged. Report remaining
+   edits and the recovery stash separately from publication status. Keep the
+   recovery stash unless its removal is explicitly requested; do not commit or
+   publish leftovers just to obtain a clean diff.
 
 ## Sources of truth
 
