@@ -18,6 +18,7 @@ use gadgetry_most_foul::{
 use crate::{
     adb,
     fastboot::{self, PostResponseAction},
+    usb_role,
 };
 
 const CONFIGFS: &str = "/sys/kernel/config";
@@ -37,6 +38,7 @@ pub(crate) type ThreadResult = io::Result<Option<PostResponseAction>>;
 pub(crate) struct Gadget {
     state: Arc<Mutex<State>>,
     serialno: String,
+    usb_role: usb_role::Policy,
 }
 
 #[derive(Default)]
@@ -133,7 +135,13 @@ impl Gadget {
         Self {
             state: Arc::new(Mutex::new(State::default())),
             serialno: serialno.into(),
+            usb_role: usb_role::Policy::default(),
         }
+    }
+
+    pub(crate) fn with_usb_role(mut self, policy: usb_role::Policy) -> Self {
+        self.usb_role = policy;
+        self
     }
 
     pub(crate) fn spawn(&self, mode: Mode) -> io::Result<thread::JoinHandle<ThreadResult>> {
@@ -266,6 +274,13 @@ impl Gadget {
         let udc_name = udc.name().to_string_lossy().into_owned();
         reg.bind(Some(&udc))?;
         tracing::info!(udc = %udc_name, "USB gadget bound");
+        if let Some(role_switch) = self.usb_role.apply(Path::new("/sys/class"), udc.name())? {
+            tracing::info!(
+                udc = %udc_name,
+                role_switch = %role_switch.display(),
+                "USB device role requested"
+            );
+        }
 
         let mut state = self.state.lock().unwrap();
         if state.reg.is_some() {
@@ -525,6 +540,15 @@ mod tests {
         Arc,
         atomic::{AtomicBool, Ordering},
     };
+
+    #[test]
+    fn usb_role_policy_defaults_to_unchanged_and_survives_clone() {
+        let gadget = Gadget::new("test-serial");
+        assert_eq!(gadget.usb_role, usb_role::Policy::Unchanged);
+
+        let gadget = gadget.with_usb_role(usb_role::Policy::Device).clone();
+        assert_eq!(gadget.usb_role, usb_role::Policy::Device);
+    }
 
     #[test]
     fn acknowledged_action_takes_precedence_over_unbind_failure() {

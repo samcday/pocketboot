@@ -1,0 +1,45 @@
+From: Sam Day <me@samcday.com>
+Subject: [PATCH 7/7] driver core: honor an explicit probe timeout without modules
+
+An RPM power-domain provider may appear asynchronously after initcalls
+finish, even when every driver is built in. With MODULES disabled,
+driver_deferred_probe_check_state() currently returns -ENODEV immediately
+after initcalls_done, ignoring an explicit deferred_probe_timeout.
+Consumers such as SDHCI then fail permanently before the provider arrives.
+
+Keep returning -EPROBE_DEFER while a positive requested timeout remains
+pending. Nonpositive values retain the existing built-in-only behavior,
+including the default zero: return -ENODEV after initcalls. A positive
+timeout uses the existing timeout work and returns -ENODEV after expiry.
+Module-enabled behavior is unchanged.
+
+This only changes the missing-provider result. It does not postpone the
+MODULES=n fw_devlink_drivers_done()/fw_devlink_probing_done() calls or
+make the wider sync_state policy equivalent to a module-enabled kernel.
+
+Base: pem120/linux-msm89x7 a51b91b503307d35902447dd1f90db765372cf3b
+Assisted-by: LLM
+
+diff --git a/drivers/base/dd.c b/drivers/base/dd.c
+--- a/drivers/base/dd.c
++++ b/drivers/base/dd.c
+@@ -278,7 +278,8 @@
+  * @dev: device to check
+  *
+  * Return:
+- * * -ENODEV if initcalls have completed and modules are disabled.
++ * * -ENODEV if initcalls have completed, modules are disabled and no
++ *   positive deferred probe timeout remains.
+  * * -ETIMEDOUT if the deferred probe timeout was set and has expired
+  *   and modules are enabled.
+  * * -EPROBE_DEFER in other cases.
+@@ -288,7 +289,8 @@
+  */
+ int driver_deferred_probe_check_state(struct device *dev)
+ {
+-	if (!IS_ENABLED(CONFIG_MODULES) && initcalls_done) {
++	if (!IS_ENABLED(CONFIG_MODULES) && initcalls_done &&
++	    driver_deferred_probe_timeout <= 0) {
+ 		dev_warn(dev, "ignoring dependency for device, assuming no driver\n");
+ 		return -ENODEV;
+ 	}
