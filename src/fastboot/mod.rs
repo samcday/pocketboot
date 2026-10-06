@@ -72,13 +72,6 @@ impl CommandResult {
         }
     }
 
-    pub(crate) fn continue_then(action: PostResponseAction) -> Self {
-        Self {
-            flow: CommandFlow::Continue,
-            action: Some(action),
-        }
-    }
-
     pub(crate) fn exit(action: Option<PostResponseAction>) -> Self {
         Self {
             flow: CommandFlow::Exit,
@@ -831,7 +824,10 @@ mod tests {
 
     #[test]
     fn continue_action_failure_does_not_exit_server() {
-        let result = CommandResult::continue_then(Box::new(|| Err(io::Error::other("boom"))));
+        let result = CommandResult {
+            flow: CommandFlow::Continue,
+            action: Some(Box::new(|| Err(io::Error::other("boom")))),
+        };
 
         assert!(matches!(
             finish_command_result("oem test", result).unwrap(),

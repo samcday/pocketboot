@@ -2182,27 +2182,18 @@ mod tests {
 
             for cpu in 0..4 {
                 let base = 0x0b088000 + cpu * 0x10000;
-                let name = format!("power-manager@{base:x}");
-                write_acc_or_saw(
+                write_power_manager_node(
                     structure,
                     reg,
                     compatible,
                     status,
                     phandle,
-                    name.as_bytes(),
                     base,
                     0x100 + cpu,
                 );
             }
-            write_acc_or_saw(
-                structure,
-                reg,
-                compatible,
-                status,
-                phandle,
-                b"power-manager@b099000",
-                0x0b099000,
-                0x200,
+            write_power_manager_node(
+                structure, reg, compatible, status, phandle, 0x0b099000, 0x200,
             );
             write_be32_vec(structure, FDT_END_NODE);
         })
@@ -2239,17 +2230,17 @@ mod tests {
         write_be32_vec(structure, FDT_END_NODE);
     }
 
-    fn write_acc_or_saw(
+    fn write_power_manager_node(
         structure: &mut Vec<u8>,
         reg: u32,
         compatible: u32,
         status: u32,
         phandle: u32,
-        name: &[u8],
         base: u32,
         phandle_value: u32,
     ) {
-        write_begin_node_vec(structure, name);
+        let name = format!("power-manager@{base:x}");
+        write_begin_node_vec(structure, name.as_bytes());
         write_prop_vec(structure, compatible, b"qcom,msm8916-acc\0");
         let mut value = Vec::new();
         write_be32_vec(&mut value, base);
