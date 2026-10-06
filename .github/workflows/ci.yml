@@ -84,6 +84,106 @@ jobs:
           echo "The CI Image workflow may still be running, or this PR may need a ci-ok label."
           exit 1
 
+  # Local verification (Linux): run these steps with RUSTUP_TOOLCHAIN=1.96.0
+  # and the same rustup targets/components installed by the setup step.
+  rust-checks:
+    name: Rust ${{ matrix.check }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    # Do not execute contributor code before the existing authorization gate.
+    needs: ci-image
+    container:
+      image: ${{ needs.ci-image.outputs.image }}
+      credentials:
+        username: ${{ github.actor }}
+        password: ${{ secrets.GITHUB_TOKEN }}
+    strategy:
+      fail-fast: false
+      matrix:
+        check: [fmt, clippy, test]
+
+    steps:
+      - name: Checkout pocketboot
+        uses: actions/checkout@v7
+        with:
+          repository: ${{ github.event.pull_request.head.repo.full_name || github.repository }}
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+
+      - name: Set up Rust cache
+        uses: actions-rust-lang/setup-rust-toolchain@v1
+        with:
+          # Match the pinned CI image without changing the kernel jobs' toolchain.
+          toolchain: "1.96.0"
+          components: clippy,rustfmt
+          target: aarch64-unknown-linux-musl,aarch64-unknown-none,armv7-unknown-linux-musleabihf
+          # Preserve .cargo/config.toml's bare-metal PIC flags.
+          rustflags: ""
+          cache-shared-key: pocketboot-hygiene-${{ matrix.check }}-df-${{ hashFiles('.github/Dockerfile') }}
+          cache-bin: false
+          cache-on-failure: true
+
+      - name: Check Rust formatting
+        if: matrix.check == 'fmt'
+        run: |
+          cargo fmt --all -- --check
+          # This standalone no_std fixture is not discovered by Cargo.
+          rustfmt --edition 2024 --check pocketpreboot/tests/qemu/startup.rs
+
+      - name: Run Clippy
+        if: matrix.check == 'clippy'
+        run: |
+          host=$(rustc --print host-tuple)
+          cargo clippy --locked --target "$host" -p xtask -p pocketboot \
+            --all-targets --all-features -- -D warnings
+          cargo clippy --locked --target "$host" -p pocketpreboot \
+            --all-targets --features soc-msm8916 -- -D warnings
+
+          # Lint architecture-specific Linux code without executing cross binaries.
+          for target in aarch64-unknown-linux-musl armv7-unknown-linux-musleabihf; do
+            cargo clippy --locked --target "$target" -p pocketboot \
+              --bin pocketboot --all-features -- -D warnings
+          done
+
+          # Firmware has no libtest, and SoC features are mutually exclusive.
+          for device in device-exynos7870-j7xelte device-msm8916-samsung-a5u-eur \
+            device-msm8916-samsung-gt510 device-apq8016-sbc; do
+            for features in "$device" "$device,debug-ram-trace"; do
+              cargo clippy --locked --release --target aarch64-unknown-none \
+                -p pocketpreboot --bin pocketpreboot --features "$features" -- -D warnings
+            done
+          done
+
+      - name: Run Rust tests
+        if: matrix.check == 'test'
+        run: |
+          # Explicitly native, even if CARGO_BUILD_TARGET is set locally.
+          host=$(rustc --print host-tuple)
+          cargo test --locked --target "$host" -p xtask -p pocketboot \
+            --all-targets --all-features
+          cargo test --locked --target "$host" -p pocketpreboot \
+            --all-targets --features soc-msm8916
+
+  # Require this stable aggregate in branch protection, not the skippable matrix.
+  rust-hygiene:
+    name: Rust hygiene
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    needs: [ci-image, rust-checks]
+    # A skipped dependent job is not proof of success. Fail closed on missing
+    # authorization, image failures, failed checks, skips, and cancellations.
+    if: ${{ always() }}
+    steps:
+      - name: Require every Rust check to succeed
+        env:
+          CI_IMAGE_RESULT: ${{ needs.ci-image.result }}
+          RUST_CHECKS_RESULT: ${{ needs.rust-checks.result }}
+        run: |
+          echo "CI image/authorization: $CI_IMAGE_RESULT"
+          echo "Rust checks: $RUST_CHECKS_RESULT"
+          test "$CI_IMAGE_RESULT" = success
+          test "$RUST_CHECKS_RESULT" = success
+
   ci-matrix:
     name: CI matrix
     runs-on: ubuntu-latest
