@@ -1623,11 +1623,11 @@ fn set_sync_mtime(path: &Path, mtime: u32) -> io::Result<()> {
         .map_err(|_| io::Error::new(io::ErrorKind::InvalidInput, "path contains interior NUL"))?;
     let times = [
         libc::timespec {
-            tv_sec: mtime as libc::time_t,
+            tv_sec: mtime as _,
             tv_nsec: 0,
         },
         libc::timespec {
-            tv_sec: mtime as libc::time_t,
+            tv_sec: mtime as _,
             tv_nsec: 0,
         },
     ];

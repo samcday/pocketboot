@@ -1303,8 +1303,7 @@ impl KmsDisplay {
                 shadow,
                 format,
                 pitch,
-                self.width,
-                self.height,
+                (self.width, self.height),
                 &pending_damage,
                 copy.mode,
             )?;
@@ -1744,8 +1743,7 @@ mod drm_lab_tests {
                 &mut shadow,
                 DrmFourcc::Xrgb8888,
                 PITCH,
-                WIDTH,
-                HEIGHT,
+                (WIDTH, HEIGHT),
                 &damage,
                 CopyMode::Full(FullCopyReason::ValidationSeed),
             )
@@ -1778,8 +1776,7 @@ mod drm_lab_tests {
                 &mut shadow,
                 DrmFourcc::Xrgb8888,
                 PITCH,
-                WIDTH,
-                HEIGHT,
+                (WIDTH, HEIGHT),
                 &seed,
                 CopyMode::Full(FullCopyReason::ValidationSeed),
             )
@@ -1804,8 +1801,7 @@ mod drm_lab_tests {
                 &mut shadow,
                 DrmFourcc::Xrgb8888,
                 PITCH,
-                WIDTH,
-                HEIGHT,
+                (WIDTH, HEIGHT),
                 &damage,
                 CopyMode::Damage,
             )
@@ -1837,8 +1833,7 @@ mod drm_lab_tests {
                 &mut shadow,
                 DrmFourcc::Xrgb8888,
                 PITCH,
-                WIDTH,
-                HEIGHT,
+                (WIDTH, HEIGHT),
                 &seed,
                 CopyMode::Full(FullCopyReason::ValidationSeed),
             )
@@ -1854,8 +1849,7 @@ mod drm_lab_tests {
                 &mut shadow,
                 DrmFourcc::Xrgb8888,
                 PITCH,
-                WIDTH,
-                HEIGHT,
+                (WIDTH, HEIGHT),
                 &PendingDamage::Clean,
                 CopyMode::Clean,
             )
@@ -2534,8 +2528,7 @@ impl CachedRenderBuffer {
         shadow: &mut [u8],
         format: DrmFourcc,
         pitch: u32,
-        width: u32,
-        height: u32,
+        (width, height): (u32, u32),
         damage: &PendingDamage,
         mode: CopyMode,
     ) -> Result<Option<DrmMismatch>, String> {

@@ -26,6 +26,7 @@ pub fn stage(value: u64) {
     }
 }
 
+#[cfg(feature = "soc-msm8916")]
 pub fn write_byte(byte: u8) {
     unsafe {
         let length = base().add(16).cast::<u64>();
