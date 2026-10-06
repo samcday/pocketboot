@@ -1,0 +1,31 @@
+name = "OnePlus 8 (instantnoodle, experimental)"
+
+# Mainline-based board bring-up tree, not upstream device support.
+# Keep this board-specific source out of the shared SM8250 configuration.
+[kernel-source]
+remote = "https://github.com/Xo666/mainline-instantnoodle.git"
+# https://github.com/Xo666/mainline-instantnoodle/tree/6.16.7
+sha = "408762bfe17332622560658f394f9cdbb1c9902e"
+
+[kconfig]
+# Power/volume buttons and the board's Samsung touchscreen
+INPUT_PM8941_PWRKEY = true
+TOUCHSCREEN_S6SY761 = true
+REGULATOR_FIXED_VOLTAGE = true
+
+# The panel is not driven by this minimal kernel. Preserve the bootloader's
+# framebuffer for simpledrm rather than attempting an unverified DSI takeover.
+
+[bootimg]
+# Geometry from LineageOS's instantnoodle -> sm8250-common BoardConfig.
+# See docs/instantnoodle-bringup.md for pinned sources and test limitations.
+header_version = 2
+page_size = 4096
+kernel_image = "Image"
+base = 0x0
+kernel_offset = 0x00008000
+ramdisk_offset = 0x01000000
+second_offset = 0x00f00000
+tags_offset = 0x00000100
+dtb_offset = 0x01f00000
+cmdline = "clk_ignore_unused pd_ignore_unused"

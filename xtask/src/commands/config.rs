@@ -736,6 +736,7 @@ mod tests {
             "qcom/sdm670-google-sargo",
             "qcom/sdm845-google-crosshatch",
             "qcom/sdm845-oneplus-fajita",
+            "qcom/sm8250-oneplus-instantnoodle",
             "qemu/aarch64-virt",
         ] {
             let device = KernelDevice::parse(device_id).unwrap();
@@ -757,6 +758,44 @@ mod tests {
                 assert!(kconfig.contains("CONFIG_KEYBOARD_GPIO=y\n"));
             }
         }
+    }
+
+    #[test]
+    fn instantnoodle_pins_its_board_tree_and_boot_critical_drivers() {
+        let workspace_root = super::super::workspace_root().unwrap();
+        let device = KernelDevice::parse("qcom/sm8250-oneplus-instantnoodle").unwrap();
+        let config = load_device_config(&workspace_root, &device).unwrap();
+        let source = config.kernel_source.as_ref().unwrap();
+        assert_eq!(source.scope, KernelSourceScope::Device);
+        assert_eq!(
+            source.remote,
+            "https://github.com/Xo666/mainline-instantnoodle.git"
+        );
+        let kconfig = config.kconfig_contents().unwrap();
+        for symbol in [
+            "KEXEC",
+            "DRM_SIMPLEDRM",
+            "SM_GCC_8250",
+            "PINCTRL_SM8250",
+            "INTERCONNECT_QCOM_SM8250",
+            "SCSI_UFS_QCOM",
+            "PHY_QCOM_QMP_UFS",
+            "USB_DWC3_GADGET",
+            "USB_DWC3_QCOM",
+            "PHY_QCOM_USB_SNPS_FEMTO_V2",
+            "PHY_QCOM_QMP_COMBO",
+            "USB_CONFIGFS_F_FS",
+            "INPUT_PM8941_PWRKEY",
+            "KEYBOARD_GPIO",
+            "PINCTRL_QCOM_SPMI_PMIC",
+            "TOUCHSCREEN_S6SY761",
+        ] {
+            assert!(
+                kconfig.contains(&format!("CONFIG_{symbol}=y\n")),
+                "missing built-in CONFIG_{symbol}:\n{kconfig}"
+            );
+        }
+        assert!(!kconfig.contains("CONFIG_DRM_MSM=y\n"));
     }
 
     #[test]
