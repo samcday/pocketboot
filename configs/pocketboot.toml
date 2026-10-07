@@ -38,6 +38,7 @@ SIGNALFD = true
 TIMERFD = true
 POSIX_TIMERS = true
 DEBUG_FS = true
+DEVMEM = true
 
 # Usual early userspace mounts
 PROC_FS = true
