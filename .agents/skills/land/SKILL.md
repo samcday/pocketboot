@@ -18,6 +18,7 @@ Preparation:
  * Ensure `cargo clippy` and `cargo fmt` are clean.
  * Ensuring source branch is rebased on latest target (ensure remote is fetched).
  * Agent may handle all rebasing and stop only for confirmation on significant conflicts).
+ * The source branch being landed may always be force-pushed with `--force-with-lease`, using an explicit expected remote SHA. This permission does not apply to the target branch or unrelated branches. If the lease fails, fetch and inspect before retrying.
 
 Landing procedure:
 
