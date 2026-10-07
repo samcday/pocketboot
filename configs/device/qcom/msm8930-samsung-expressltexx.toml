@@ -1,5 +1,10 @@
 name = "Samsung Galaxy Express GT-I8730"
 
+[kernel-source]
+# samsung-expressltexx-mainlining's Linux gitlink / samsung-expressltexx branch.
+remote = "https://github.com/samcday/linux.git"
+sha = "3bc07d096bddd33218b8c13b9fa30ffdaba3c050"
+
 [kernel]
 dtb_stem = "qcom-msm8930-samsung-expressltexx"
 
@@ -7,6 +12,20 @@ dtb_stem = "qcom-msm8930-samsung-expressltexx"
 target = "armv7-unknown-linux-musleabihf"
 
 [kconfig]
+# Appended-DTB AUTO_ZRELADDR skips RAM validation before ATAG conversion,
+# choosing 0x80008000 and placing its page tables in SMEM. This is a
+# board-specific image: use the known RAM base without patching head.S.
+ARCH_MULTIPLATFORM = false
+AUTO_ZRELADDR = false
+PHYS_OFFSET = { hex = 0x80200000 }
+
+# PM8917's direct L31 rail powers maXTouch; it is not an RPM regulator.
+REGULATOR_QCOM_PM8917 = true
+TOUCHSCREEN_ATMEL_MXT = true
+I2C_GPIO = true
+NEW_LEDS = true
+LEDS_CLASS = true
+KEYBOARD_TM2_TOUCHKEY = true
 
 [bootimg]
 header_version = 0
@@ -18,5 +37,10 @@ ramdisk_offset = 0x02200000
 second_offset = 0x00f00000
 tags_offset = 0x02000000
 dtb_offset = 0x0
+# Preserve the nonempty external ramdisk in the hardware-booted stock wrapper.
+# The real pocketboot initramfs is built into zImage.
+ramdisk_size = 1
 append_dtb = true
-cmdline = ""
+# Empty headers make stock aboot inject "mem=100M console=null", overriding
+# the firmware RAM map and making the SMEM carveout look like ordinary RAM.
+cmdline = "earlycon=msm_serial_dm,0x16440000 console=ttyMSM0,115200n8"

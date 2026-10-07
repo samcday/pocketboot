@@ -141,3 +141,88 @@ fn sanitize(value: &str) -> String {
         })
         .collect()
 }
+
+#[cfg(test)]
+mod expressltexx_tests {
+    use super::*;
+
+    #[test]
+    fn expressltexx_is_a_pinned_armv7_ci_build() {
+        let root = workspace_root().unwrap();
+        let id = "qcom/msm8930-samsung-expressltexx";
+        let device = KernelDevice::parse(id).unwrap();
+        let config = config::load_device_config(&root, &device).unwrap();
+        let source = config.kernel_source.as_ref().unwrap();
+        assert_eq!(source.scope, config::KernelSourceScope::Device);
+        assert_eq!(source.remote, "https://github.com/samcday/linux.git");
+        let matrix = ci_matrix(&root).unwrap();
+        let entries: Vec<_> = matrix.include.iter().filter(|e| e.device == id).collect();
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].sha, source.sha);
+        assert_eq!(
+            entries[0].artifact,
+            "bootimg-qcom-msm8930-samsung-expressltexx"
+        );
+        assert_eq!(entries[0].rust_targets, "armv7-unknown-linux-musleabihf");
+        assert!(entries[0].bootimg);
+        assert_eq!(config.kernel.arch.as_deref(), Some("arm"));
+        assert_eq!(config.kernel.image.as_deref(), Some("zImage"));
+        assert_eq!(
+            config.kernel.dtb_stem.as_deref(),
+            Some("qcom-msm8930-samsung-expressltexx")
+        );
+    }
+
+    #[test]
+    fn expressltexx_preserves_the_cold_boot_contract() {
+        let root = workspace_root().unwrap();
+        let device = KernelDevice::parse("qcom/msm8930-samsung-expressltexx").unwrap();
+        let config = config::load_device_config(&root, &device).unwrap();
+        let contents = config.kconfig_contents().unwrap();
+        for symbol in [
+            "DRM_SIMPLEDRM",
+            "REGULATOR_QCOM_PM8917",
+            "PINCTRL_QCOM_SSBI_PMIC",
+            "MMC_ARMMMCI",
+            "MMC_QCOM_DML",
+            "USB_CHIPIDEA_UDC",
+            "USB_CONFIGFS_F_FS",
+            "INPUT_PMIC8XXX_PWRKEY",
+            "TOUCHSCREEN_ATMEL_MXT",
+            "KEYBOARD_TM2_TOUCHKEY",
+            "ARM_APPENDED_DTB",
+            "ARM_ATAG_DTB_COMPAT",
+            "ARM_ATAG_DTB_COMPAT_CMDLINE_FROM_BOOTLOADER",
+        ] {
+            let expected = format!("CONFIG_{symbol}=y");
+            assert!(contents.lines().any(|line| line == expected), "{expected}");
+        }
+        for expected in [
+            "# CONFIG_SMP is not set",
+            "# CONFIG_ARCH_MULTIPLATFORM is not set",
+            "# CONFIG_AUTO_ZRELADDR is not set",
+            "CONFIG_PHYS_OFFSET=0x80200000",
+            "CONFIG_ARM_PATCH_PHYS_VIRT=y",
+        ] {
+            assert!(contents.lines().any(|line| line == expected), "{expected}");
+        }
+        let boot = config.bootimg.unwrap();
+        assert_eq!((boot.header_version, boot.page_size), (0, 2048));
+        assert_eq!(boot.kernel_image, "zImage");
+        assert_eq!((boot.base, boot.kernel_offset), (0x80200000, 0x8000));
+        assert_eq!(
+            (boot.ramdisk_offset, boot.tags_offset),
+            (0x02200000, 0x02000000)
+        );
+        assert_eq!(boot.ramdisk_size, 1);
+        assert!(boot.cmdline.contains("console=ttyMSM0,115200n8"));
+        assert!(
+            !boot
+                .cmdline
+                .split_whitespace()
+                .any(|arg| arg.starts_with("mem="))
+        );
+        assert!(boot.append_dtb);
+        assert!(boot.preboot.is_none());
+    }
+}
