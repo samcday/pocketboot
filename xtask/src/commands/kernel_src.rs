@@ -2,11 +2,13 @@ use std::{
     collections::BTreeSet,
     env,
     ffi::OsStr,
-    fs,
+    fs::{self, OpenOptions},
     io::Write,
     path::{Path, PathBuf},
     process::{Command, Output, Stdio},
 };
+
+use sha2::{Digest, Sha256};
 
 use crate::Result;
 
@@ -240,18 +242,67 @@ fn ensure_kernel_source(
     identity: &KernelSourceIdentity,
     source: &KernelSource,
 ) -> Result<KernelSourceStatus> {
-    if let Some(head) = existing_source_head(source_tree)?
-        && head.eq_ignore_ascii_case(&source.sha)
-    {
+    if !source_requires_update(source_tree, &source.sha)? {
         return Ok(KernelSourceStatus::Current);
     }
 
     match kernel_repo(workspace_root)? {
         Some(repo) => setup_worktree_source(&repo, source_tree, identity, source)?,
-        None => setup_direct_source(source_tree, source)?,
+        None => {
+            let cache = dirs::cache_dir()
+                .ok_or("cannot locate kernel source cache")?
+                .join("pocketboot/kernels");
+            setup_cached_source(&cache, source_tree, source)?;
+        }
     }
     verify_source_head(source_tree, &source.sha)?;
     Ok(KernelSourceStatus::Updated)
+}
+
+fn setup_cached_source(cache: &Path, source_tree: &Path, source: &KernelSource) -> Result<()> {
+    if !source_requires_update(source_tree, &source.sha)? {
+        return Ok(());
+    }
+    fs::create_dir_all(cache)
+        .map_err(|err| format!("create kernel source cache {}: {err}", cache.display()))?;
+    let key = format!("{:x}", Sha256::digest(source.remote.as_bytes()));
+    let repo = cache.join(format!("{key}.git"));
+    let lock_path = cache.join(format!("{key}.lock"));
+    // Serialize initialization, fetches (including Git's shared shallow file),
+    // and local transfers across processes. Closing the file releases the lock,
+    // including after errors; the lock file itself must not be removed.
+    let lock = OpenOptions::new()
+        .read(true)
+        .write(true)
+        .create(true)
+        .truncate(false)
+        .open(&lock_path)
+        .map_err(|err| format!("open kernel cache lock {}: {err}", lock_path.display()))?;
+    println!("kernel source cache {}", repo.display());
+    lock.lock()
+        .map_err(|err| format!("lock kernel cache {}: {err}", lock_path.display()))?;
+
+    // Another process may have populated or edited this source while we waited.
+    if !source_requires_update(source_tree, &source.sha)? {
+        return Ok(());
+    }
+    // git init is idempotent, including after an interrupted initialization.
+    let mut command = Command::new("git");
+    command.args(["init", "--bare", "--quiet"]).arg(&repo);
+    run_command(command, "init kernel source cache")?;
+    ensure_remote(&repo, "origin", &source.remote, false)?;
+    ensure_revision(&repo, "origin", &source.sha)?;
+    if !path_exists(source_tree)? {
+        // Keep each source self-contained. Linked worktrees and --shared clones
+        // would break when the cache is evicted or a target directory restored.
+        // Fetch only this pin locally, not all the revisions in the cache.
+        create_parent_dir(source_tree)?;
+        let mut command = Command::new("git");
+        command.arg("init").arg(source_tree);
+        run_command(command, "init kernel source repository")?;
+    }
+    ensure_remote(source_tree, "origin", &source.remote, true)?;
+    checkout_revision(&repo, source_tree, &source.sha)
 }
 
 fn setup_worktree_source(
@@ -260,15 +311,16 @@ fn setup_worktree_source(
     identity: &KernelSourceIdentity,
     source: &KernelSource,
 ) -> Result<()> {
+    if !source_requires_update(source_tree, &source.sha)? {
+        return Ok(());
+    }
+
     let remote_name = remote_name(&identity.tree_name);
     ensure_remote(repo, &remote_name, &source.remote, false)?;
-    fetch_remote(repo, &remote_name, &source.sha)?;
+    ensure_revision(repo, &remote_name, &source.sha)?;
 
     if path_exists(source_tree)? {
-        ensure_clean_source(source_tree)?;
-        fetch_url(source_tree, &source.remote, &source.sha)?;
-        checkout_fetch_head(source_tree)?;
-        return Ok(());
+        return checkout_revision(repo, source_tree, &source.sha);
     }
 
     create_parent_dir(source_tree)?;
@@ -280,28 +332,63 @@ fn setup_worktree_source(
     run_command(command, "add kernel source worktree")
 }
 
-fn setup_direct_source(source_tree: &Path, source: &KernelSource) -> Result<()> {
-    if path_exists(source_tree)? {
-        ensure_git_work_tree(source_tree)?;
-        ensure_clean_source(source_tree)?;
-    } else {
-        create_parent_dir(source_tree)?;
-        let mut command = Command::new("git");
-        command.arg("init").arg(source_tree);
-        run_command(command, "init kernel source repository")?;
+fn checkout_revision(repo: &Path, source_tree: &Path, sha: &str) -> Result<()> {
+    // Existing standalone trees get missing objects from the local repository,
+    // not again from upstream. Linked worktrees already share its objects.
+    if !has_commit(source_tree, sha)? {
+        let mut command = git_at(source_tree);
+        command
+            .args(["fetch", "--depth=1", "--no-tags", "--update-shallow"])
+            .arg(repo)
+            .arg(sha);
+        run_command(command, "fetch cached kernel source")?;
     }
-
-    ensure_remote(source_tree, "origin", &source.remote, true)?;
-    fetch_remote(source_tree, "origin", &source.sha)?;
-    checkout_fetch_head(source_tree)
+    let mut command = git_at(source_tree);
+    command.args(["checkout", "--detach", sha]);
+    run_command(command, "checkout kernel source")
 }
 
-fn existing_source_head(source_tree: &Path) -> Result<Option<String>> {
+fn ensure_revision(repo: &Path, remote: &str, sha: &str) -> Result<()> {
+    // Each requested revision gets a durable ref: FETCH_HEAD alone is replaced
+    // by the next fetch and would let GC discard an older cached revision.
+    let revision_ref = format!("refs/pocketboot/sources/{sha}");
+    if !has_commit(repo, sha)? {
+        let mut command = git_at(repo);
+        command.args([
+            "fetch",
+            "--depth=1",
+            "--no-tags",
+            "--no-auto-maintenance",
+            remote,
+            &format!("{sha}:{revision_ref}"),
+        ]);
+        run_command(command, "fetch kernel source")?;
+    }
+    let mut command = git_at(repo);
+    command.args(["update-ref", &revision_ref, sha]);
+    run_command(command, "pin cached kernel source")
+}
+
+fn has_commit(repo: &Path, sha: &str) -> Result<bool> {
+    let output = git_at(repo)
+        .args(["cat-file", "-e", &format!("{sha}^{{commit}}")])
+        .output()
+        .map_err(|err| format!("check kernel source revision: {err}"))?;
+    Ok(output.status.success())
+}
+
+// Edits at the requested revision are allowed; changing pins requires a clean
+// source. Never mistake an ordinary directory for its ancestor's repository.
+fn source_requires_update(source_tree: &Path, sha: &str) -> Result<bool> {
     if !path_exists(source_tree)? {
-        return Ok(None);
+        return Ok(true);
     }
     ensure_git_work_tree(source_tree)?;
-    current_head(source_tree)
+    if current_head(source_tree)?.is_some_and(|head| head.eq_ignore_ascii_case(sha)) {
+        return Ok(false);
+    }
+    ensure_clean_source(source_tree)?;
+    Ok(true)
 }
 
 fn verify_source_head(source_tree: &Path, expected: &str) -> Result<()> {
@@ -366,32 +453,16 @@ fn ensure_remote(repo: &Path, name: &str, url: &str, update_existing: bool) -> R
 
 fn remote_url(repo: &Path, name: &str) -> Result<Option<String>> {
     let mut command = git_at(repo);
-    command.args(["remote", "get-url", name]);
+    // remote get-url expands url.*.insteadOf. Compare the stored value so a
+    // user's transport rewrite does not look like a conflicting cache remote.
+    command.args(["config", "--get", &format!("remote.{name}.url")]);
     let output = command
         .output()
-        .map_err(|err| format!("spawn git remote get-url: {err}"))?;
+        .map_err(|err| format!("spawn git config remote URL: {err}"))?;
     if !output.status.success() {
         return Ok(None);
     }
-    Ok(Some(stdout(output.stdout, "git remote get-url")?))
-}
-
-fn fetch_remote(repo: &Path, remote: &str, sha: &str) -> Result<()> {
-    let mut command = git_at(repo);
-    command.args(["fetch", "--depth=1", remote, sha]);
-    run_command(command, "fetch kernel source")
-}
-
-fn fetch_url(repo: &Path, url: &str, sha: &str) -> Result<()> {
-    let mut command = git_at(repo);
-    command.args(["fetch", "--depth=1", url, sha]);
-    run_command(command, "fetch kernel source")
-}
-
-fn checkout_fetch_head(repo: &Path) -> Result<()> {
-    let mut command = git_at(repo);
-    command.args(["checkout", "--detach", "FETCH_HEAD"]);
-    run_command(command, "checkout kernel source")
+    Ok(Some(stdout(output.stdout, "git config remote URL")?))
 }
 
 fn ensure_clean_source(repo: &Path) -> Result<()> {
@@ -443,17 +514,31 @@ fn ensure_git_work_tree(repo: &Path) -> Result<()> {
 }
 
 fn is_git_repo(repo: &Path) -> Result<bool> {
+    if is_git_work_tree(repo)? {
+        return Ok(true);
+    }
+    // Also accept a bare repository (or the Git directory itself), but not a
+    // subdirectory that merely discovers an ancestor's repository.
     let mut command = git_at(repo);
-    command.args(["rev-parse", "--git-dir"]);
+    command.args(["rev-parse", "--absolute-git-dir"]);
     let output = command
         .output()
-        .map_err(|err| format!("spawn git rev-parse --git-dir: {err}"))?;
-    Ok(output.status.success())
+        .map_err(|err| format!("spawn git rev-parse --absolute-git-dir: {err}"))?;
+    if !output.status.success() {
+        return Ok(false);
+    }
+    let git_dir = fs::canonicalize(stdout(output.stdout, "git rev-parse --absolute-git-dir")?)
+        .map_err(|err| format!("canonicalize Git directory: {err}"))?;
+    let repo = fs::canonicalize(repo)
+        .map_err(|err| format!("canonicalize repository {}: {err}", repo.display()))?;
+    Ok(repo == git_dir)
 }
 
 fn is_git_work_tree(repo: &Path) -> Result<bool> {
     let mut command = git_at(repo);
-    command.args(["rev-parse", "--is-inside-work-tree"]);
+    // A leftover directory inside pocketboot is not itself a kernel checkout.
+    // Require an empty prefix, or Git could fetch into and checkout pocketboot.
+    command.args(["rev-parse", "--is-inside-work-tree", "--show-prefix"]);
     let output = command
         .output()
         .map_err(|err| format!("spawn git rev-parse --is-inside-work-tree: {err}"))?;
@@ -846,5 +931,330 @@ mod tests {
             fs::read_to_string(f.root.join("outside")).unwrap(),
             "original\n"
         );
+    }
+
+    // Exercise real Git operations against tiny local repositories. Removing
+    // the upstream path makes any accidental refetch fail without using a
+    // network connection or touching the user's actual kernel/download cache.
+    struct SourceFixture {
+        root: tempfile::TempDir,
+        upstream: PathBuf,
+        cache: PathBuf,
+        source: KernelSource,
+    }
+
+    fn source_git(repo: &Path, args: &[&str]) -> String {
+        let output = git_at(repo)
+            .env("GIT_EDITOR", "true")
+            .args([
+                "-c",
+                "user.name=pocketboot tests",
+                "-c",
+                "user.email=tests@example.invalid",
+                "-c",
+                "commit.gpgsign=false",
+                "-c",
+                "core.hooksPath=/dev/null",
+            ])
+            .args(args)
+            .output()
+            .unwrap();
+        assert!(output.status.success(), "{args:?}: {output:?}");
+        stdout(output.stdout, "test git").unwrap()
+    }
+
+    impl SourceFixture {
+        fn new() -> Self {
+            let root = tempfile::tempdir().unwrap();
+            let upstream = root.path().join("upstream with spaces");
+            fs::create_dir_all(upstream.join("scripts/kconfig")).unwrap();
+            source_git(&upstream, &["init", "--quiet"]);
+            for (path, contents) in [
+                ("Makefile", ""),
+                ("README", "Linux kernel\n"),
+                ("scripts/kconfig/merge_config.sh", ""),
+                ("core", "one\n"),
+            ] {
+                fs::write(upstream.join(path), contents).unwrap();
+            }
+            source_git(&upstream, &["add", "."]);
+            source_git(&upstream, &["commit", "--quiet", "-m", "initial kernel"]);
+            let source = KernelSource {
+                scope: config::KernelSourceScope::Soc,
+                identity: KernelSourceIdentity {
+                    id: "test/soc".into(),
+                    label: "test SoC".into(),
+                    tree_name: "soc".into(),
+                    tree_path: PathBuf::from("soc"),
+                },
+                remote: upstream.to_str().unwrap().into(),
+                sha: source_git(&upstream, &["rev-parse", "HEAD"]),
+                patches: Vec::new(),
+            };
+            Self {
+                cache: root.path().join("host cache"),
+                root,
+                upstream,
+                source,
+            }
+        }
+
+        fn prepare(&self, checkout: &str, source: &KernelSource) -> PathBuf {
+            let tree = self
+                .root
+                .path()
+                .join(checkout)
+                .join("target/kernel/src/soc");
+            setup_cached_source(&self.cache, &tree, source).unwrap();
+            verify_source_head(&tree, &source.sha).unwrap();
+            kernel_tree(&tree).unwrap()
+        }
+
+        fn next_revision(&self) -> KernelSource {
+            fs::write(self.upstream.join("core"), "two\n").unwrap();
+            source_git(&self.upstream, &["commit", "--quiet", "-am", "next kernel"]);
+            KernelSource {
+                sha: source_git(&self.upstream, &["rev-parse", "HEAD"]),
+                ..self.source.clone()
+            }
+        }
+
+        fn offline(&self) {
+            fs::rename(&self.upstream, self.root.path().join("offline")).unwrap();
+        }
+
+        fn cached_repos(&self) -> Vec<PathBuf> {
+            fs::read_dir(&self.cache)
+                .unwrap()
+                .map(|entry| entry.unwrap().path())
+                .filter(|path| path.extension() == Some(OsStr::new("git")))
+                .collect()
+        }
+    }
+
+    #[test]
+    fn kernel_cache_reuses_a_pin_offline_across_checkouts_and_source_identities() {
+        let f = SourceFixture::new();
+        let first = f.prepare("first checkout", &f.source);
+        let patch = PathBuf::from("local.patch");
+        fs::write(
+            f.root.path().join(&patch),
+            "diff --git a/core b/core\n--- a/core\n+++ b/core\n@@ -1 +1 @@\n-one\n+patched\n",
+        )
+        .unwrap();
+        ensure_kernel_patches(f.root.path(), &first, &[patch]).unwrap();
+        f.offline();
+
+        let mut another_soc = f.source.clone();
+        another_soc.identity.tree_name = "another-soc".into();
+        let second = f.prepare("second checkout", &another_soc);
+        assert_eq!(f.cached_repos().len(), 1);
+        assert_eq!(fs::read_to_string(first.join("core")).unwrap(), "patched\n");
+        assert_eq!(fs::read_to_string(second.join("core")).unwrap(), "one\n");
+        assert!(first.join(".git").is_dir());
+        assert!(second.join(".git").is_dir());
+        assert!(!second.join(".git/objects/info/alternates").exists());
+    }
+
+    #[test]
+    fn kernel_cache_reuse_respects_git_url_rewrites() {
+        let f = SourceFixture::new();
+        f.prepare("first", &f.source);
+        let repo = &f.cached_repos()[0];
+        source_git(
+            repo,
+            &[
+                "config",
+                "url.unavailable://rewritten.insteadOf",
+                &f.source.remote,
+            ],
+        );
+        assert_ne!(
+            source_git(repo, &["remote", "get-url", "origin"]),
+            f.source.remote
+        );
+        f.offline();
+        f.prepare("second", &f.source);
+    }
+
+    #[test]
+    fn kernel_cache_materializes_only_the_requested_pin() {
+        let f = SourceFixture::new();
+        f.prepare("first", &f.source);
+        let next = f.next_revision();
+        f.prepare("second", &next);
+        f.offline();
+        let tree = f.prepare("third", &f.source);
+        assert!(!has_commit(&tree, &next.sha).unwrap());
+    }
+
+    #[test]
+    fn kernel_cache_retains_old_pins_and_updates_existing_sources_offline() {
+        let f = SourceFixture::new();
+        let first = f.prepare("first", &f.source);
+        let next = f.next_revision();
+        f.prepare("second", &next);
+        f.offline();
+
+        let repo = &f.cached_repos()[0];
+        source_git(repo, &["reflog", "expire", "--expire=now", "--all"]);
+        source_git(repo, &["gc", "--prune=now"]);
+        for sha in [&f.source.sha, &next.sha] {
+            assert_eq!(
+                source_git(
+                    repo,
+                    &["rev-parse", &format!("refs/pocketboot/sources/{sha}")]
+                ),
+                *sha
+            );
+        }
+        // first is still missing the new revision, so this requires a local
+        // fetch from a shallow cache into an existing shallow repository.
+        f.prepare("first", &next);
+        assert_eq!(fs::read_to_string(first.join("core")).unwrap(), "two\n");
+        f.prepare("first", &f.source);
+        assert_eq!(fs::read_to_string(first.join("core")).unwrap(), "one\n");
+
+        fs::remove_dir_all(first).unwrap(); // simulate cargo clean
+        f.prepare("first", &f.source);
+    }
+
+    #[test]
+    fn kernel_cache_preserves_dirty_sources_and_refuses_pin_changes() {
+        let f = SourceFixture::new();
+        let first = f.prepare("first", &f.source);
+        let next = f.next_revision();
+        fs::write(first.join("core"), "local work\n").unwrap();
+        f.offline();
+        f.prepare("first", &f.source);
+        let error = setup_cached_source(&f.cache, &first, &next).unwrap_err();
+        assert!(error.contains("uncommitted changes"), "{error}");
+        verify_source_head(&first, &f.source.sha).unwrap();
+        assert_eq!(
+            fs::read_to_string(first.join("core")).unwrap(),
+            "local work\n"
+        );
+    }
+
+    #[test]
+    fn kernel_cache_separates_remotes_with_the_same_source_identity() {
+        let f = SourceFixture::new();
+        let other = SourceFixture::new();
+        let other_source = other.next_revision();
+        f.prepare("first", &f.source);
+        f.prepare("second", &other_source);
+        assert_eq!(f.cached_repos().len(), 2);
+        f.offline();
+        other.offline();
+        f.prepare("third", &f.source);
+        f.prepare("fourth", &other_source);
+    }
+
+    #[test]
+    fn kernel_cache_releases_lock_after_a_failed_fetch() {
+        let f = SourceFixture::new();
+        let unavailable = KernelSource {
+            sha: "f".repeat(40),
+            ..f.source.clone()
+        };
+        let tree = f.root.path().join("failed");
+        assert!(setup_cached_source(&f.cache, &tree, &unavailable).is_err());
+        assert!(!tree.exists());
+        f.prepare("retry", &f.source);
+    }
+
+    #[test]
+    fn kernel_cache_recovers_an_interrupted_initialization() {
+        let f = SourceFixture::new();
+        let key = format!("{:x}", Sha256::digest(f.source.remote.as_bytes()));
+        fs::create_dir_all(f.cache.join(format!("{key}.git/objects"))).unwrap();
+        f.prepare("first", &f.source);
+    }
+
+    #[test]
+    fn kernel_source_directory_must_be_a_repository_root() {
+        let f = SourceFixture::new();
+        let next = f.next_revision();
+        let tree = f.upstream.join("target/kernel/src/soc");
+        fs::create_dir_all(&tree).unwrap();
+        let error = setup_cached_source(&f.cache, &tree, &f.source).unwrap_err();
+        assert!(error.contains("not a git worktree"), "{error}");
+        verify_source_head(&f.upstream, &next.sha).unwrap();
+        assert!(!f.cache.exists());
+        assert!(remote_url(&f.upstream, "origin").unwrap().is_none());
+    }
+
+    #[test]
+    fn top_level_kernel_directory_must_be_a_repository_root() {
+        let f = SourceFixture::new();
+        fs::create_dir(f.upstream.join("kernel")).unwrap();
+        let error = kernel_repo(&f.upstream).unwrap_err();
+        assert!(error.contains("not a git repository"), "{error}");
+        verify_source_head(&f.upstream, &f.source.sha).unwrap();
+    }
+
+    #[test]
+    fn top_level_kernel_directory_can_be_a_bare_repository() {
+        let f = SourceFixture::new();
+        let repo = f.root.path().join("kernel");
+        source_git(f.root.path(), &["init", "--bare", repo.to_str().unwrap()]);
+        assert_eq!(kernel_repo(f.root.path()).unwrap(), Some(repo));
+    }
+
+    #[test]
+    fn kernel_cache_serializes_concurrent_cold_requests() {
+        let f = SourceFixture::new();
+        let next = f.next_revision();
+        let barrier = std::sync::Barrier::new(3);
+        std::thread::scope(|scope| {
+            for (name, source) in [
+                ("first", &f.source),
+                ("second", &next),
+                ("third", &f.source),
+            ] {
+                let (f, barrier) = (&f, &barrier);
+                scope.spawn(move || {
+                    barrier.wait();
+                    f.prepare(name, source);
+                });
+            }
+        });
+        assert_eq!(f.cached_repos().len(), 1);
+        f.offline();
+        f.prepare("fourth", &f.source);
+        f.prepare("fifth", &next);
+    }
+
+    #[test]
+    fn kernel_cache_eviction_and_relocation_do_not_break_existing_sources() {
+        let f = SourceFixture::new();
+        let first = f.prepare("first", &f.source);
+        f.offline();
+        fs::remove_dir_all(&f.cache).unwrap();
+        let restored = f.root.path().join("restored");
+        fs::rename(first, &restored).unwrap();
+        source_git(&restored, &["fsck", "--full"]);
+        setup_cached_source(&f.cache, &restored, &f.source).unwrap();
+        verify_source_head(&restored, &f.source.sha).unwrap();
+        assert_eq!(fs::read_to_string(restored.join("core")).unwrap(), "one\n");
+        assert!(!f.cache.exists());
+    }
+
+    #[test]
+    fn kernel_cache_preserves_top_level_kernel_repository_support() {
+        let f = SourceFixture::new();
+        let repo = f.root.path().join("kernel");
+        fs::rename(&f.upstream, &repo).unwrap();
+        fs::write(repo.join("core"), "local kernel work\n").unwrap();
+        let tree = f.root.path().join("target/kernel/src/soc");
+        ensure_kernel_source(f.root.path(), &tree, &f.source.identity, &f.source).unwrap();
+        verify_source_head(&tree, &f.source.sha).unwrap();
+        assert!(tree.join(".git").is_file());
+        assert_eq!(fs::read_to_string(tree.join("core")).unwrap(), "one\n");
+        assert_eq!(
+            fs::read_to_string(repo.join("core")).unwrap(),
+            "local kernel work\n"
+        );
+        assert!(!f.cache.exists());
     }
 }
