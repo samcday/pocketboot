@@ -1,0 +1,93 @@
+# Evidence: prefer kernel-marked USERDEF DRM modes
+
+## Provenance and scope
+
+This is a self-contained extraction of the existing 2026-09-28 DragonBoard
+410c cold-control results, not a new hardware run. It accompanies the rebased
+landing of pocketboot PR #36. The source is the refs/notes/evidence note on
+pocketboot lab commit c90012f51fb90d608bccd1b6772cea4308d6d8e0, also attached to
+Linux commit 390b5df1e6a879d9a7c26b3d598a76c902fee99e.
+
+The lab commit, original PR commit 56c9c917911179961fa9c323b7511b0d7d8ffc7e,
+and landing commit 39913782fc68cd8506f853649da2f72f41dfc02a have the same stable
+patch-id: 8bd866ed2307df2b9a214f5ee372fe6bd2d9d6e2. The landing commit changes
+only the USERDEF > PREFERRED > pixel-area mode-ranking key; it does not parse
+video=, change connector selection, change equal-key ordering, or add a
+modeset retry. Its complete rebased build has not been re-tested by this note.
+
+## Test setup
+
+Board: DragonBoard 410c (APQ8016/MSM8916), ADV7533 HDMI, no attached HDMI sink
+or capture dongle. Modes were forced by video=HDMI-A-1:<mode>e.
+
+Pocketboot initramfs: lab commit c90012f51fb90d608bccd1b6772cea4308d6d8e0,
+with the PR #23 HDMI configuration and PR #24 fixed secure-page-table work
+below the UI change, not plain main. Initramfs SHA-256:
+50fb48314e9a2ccb5a1b5023622ab4917292f08ad0cb70a90ad4a8dab890e307.
+
+Kernel: pocketboot/msm8916 base d87323486b79a31b9b25eb6fe30f1b503f142ff2
+(Linux 7.1.0-rc6+) with the BASE lab patch set documented in the full note.
+The three cold controls used that same BASE kernel, without a kexec hop.
+
+## Cold-control observations
+
+| Control | Requested mode | Observed dri/0/state CRTC mode | Buffers | Result |
+| --- | --- | --- | --- | --- |
+| C1-cold-1280x720 | 1280x720@60e | "1280x720": 60 74440 ... 0x20 0x6; USERDEF CVT, active=1 | 3 x 3686400 bytes | Requested geometry active |
+| C2-cold-640x480 | 640x480@60e | "640x480": 60 25175 ... 0x60 0xa; DRIVER|USERDEF, active=1 | 3 x 1228800 bytes | Requested smaller geometry active |
+| C5-cold-1920x1080 | 1920x1080@30e | "1280x720": 60 74250 ... 0x40 0x5; DRIVER only | 3 x 3686400 bytes | Requested mode rejected by kernel; driver fallback selected |
+
+For C5, cold-dmesg.txt line 282 recorded:
+
+    msm_mdp 1a01000.display-controller: [drm] User-defined mode not supported: "1920x1080": 30 80192 ...
+
+The kernel rejected the 80.192 MHz CVT mode at mode_valid. This is not evidence
+that pocketboot can honor a mode removed by kernel validation.
+
+## Caveats
+
+- The old-code selection of 1024x768 instead of a requested 640x480 was derived
+  from code, not reproduced as a before/after hardware comparison.
+- These observations establish programmed CRTC state and allocation, not
+  visual output: no sink or capture dongle was connected.
+- Mode type varied across later lab rows (the original note's A2 caveat):
+  1280x720 was sometimes USERDEF CVT at 74440 kHz and sometimes DRIVER|USERDEF
+  CEA at 74250 kHz, while C5 used DRIVER only. ADV7533 sink sensing fluctuated;
+  geometry and GEM allocation stayed the same.
+- INFO-level pocketboot UI/page-flip messages were absent because kmsg tracing
+  defaulted to WARN. The observations came from dri/0/state and dri/0/gem.
+- Each cold control had one baseline MDP5 modeset underrun and no cb=4 faults.
+- This note does not establish behavior with EDID, on fixed DSI panels, or
+  under multi-connector configurations.
+
+## Raw-record pointers
+
+Original host-local records were under
+/var/home/sam/tmp/qcom-iommu-kexec-20260928, especially
+runs/C1-cold-1280x720, runs/C2-cold-640x480, and runs/C5-cold-1920x1080
+(cold-state.txt, cold-iovas.txt, cold-dmesg.txt, result.json).
+The full note contains the image/kernel digests and UART provenance.
+
+Fetch/read the durable full record with:
+
+    git fetch origin refs/notes/evidence:refs/notes/evidence
+    git notes --ref=evidence show c90012f51fb90d608bccd1b6772cea4308d6d8e0
+
+## Landing record
+
+Sam merged PR #65 on 2026-10-07 as
+ d6fb42bbe36eeb39d5e270975d9a1a167d1d59b2
+(https://github.com/samcday/pocketboot/pull/65), explicitly waiving a new
+hardware run for this rebased change. The landed tree is identical to the
+validated landing-branch tree at 39913782fc68cd8506f853649da2f72f41dfc02a.
+
+Local CI-equivalent Rust checks passed, including 259 tests; PR CI passed
+Rust hygiene and all nine device jobs:
+https://github.com/samcday/pocketboot/actions/runs/37565915621
+CodeRabbit reported no actionable issues and Claude review passed.
+
+No new device test was performed. The observations above remain historical
+lab evidence only. The current DB410c CI job is kernel-only and uploads no
+boot-image artifact, and its stock configuration lacks native HDMI support.
+A separate follow-up will establish suitable CI artifacts and validate one
+on Sam's DB410c; this note does not claim that follow-up is complete.
