@@ -41,6 +41,6 @@ dtb_offset = 0x0
 # The real pocketboot initramfs is built into zImage.
 ramdisk_size = 1
 append_dtb = true
-# Empty headers make stock aboot inject "mem=100M console=null", overriding
-# the firmware RAM map and making the SMEM carveout look like ordinary RAM.
-cmdline = "earlycon=msm_serial_dm,0x16440000 console=ttyMSM0,115200n8"
+# Keep the header nonempty without adding kernel arguments: stock aboot's
+# empty-header fallback injects "mem=100M console=null".
+cmdline = " "

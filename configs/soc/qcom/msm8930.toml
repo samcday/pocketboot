@@ -7,13 +7,10 @@ image = "zImage"
 [kconfig]
 # Platform
 MMU = true
-# Preserve the uniprocessor configuration used for Expressltexx cold boots.
-# ARM32 kexec support is separate from these development builds.
-SMP = false
-HOTPLUG_CPU = "omit"
+SMP = true
 ARCH_MULTI_V7 = true
 ARCH_QCOM = true
-NR_CPUS = "omit"
+NR_CPUS = 2
 HIGHMEM = true
 CMA = true
 DMA_CMA = true
