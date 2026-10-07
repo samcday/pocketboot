@@ -7,10 +7,13 @@ image = "zImage"
 [kconfig]
 # Platform
 MMU = true
-SMP = true
+# Preserve the uniprocessor configuration used for Expressltexx cold boots.
+# ARM32 kexec support is separate from these development builds.
+SMP = false
+HOTPLUG_CPU = "omit"
 ARCH_MULTI_V7 = true
 ARCH_QCOM = true
-NR_CPUS = 2
+NR_CPUS = "omit"
 HIGHMEM = true
 CMA = true
 DMA_CMA = true
@@ -21,7 +24,7 @@ NEON = true
 ARM_THUMB = true
 COMPAT_32BIT_TIME = true
 
-# ARM32 boot handoff from lk2nd/aboot with a DTB at r2.
+# Stock aboot passes ATAGS in r2; zImage finds the appended DTB.
 ARM_PATCH_PHYS_VIRT = true
 ATAGS = true
 ARM_APPENDED_DTB = true
@@ -29,7 +32,7 @@ ARM_ATAG_DTB_COMPAT = true
 ARM_ATAG_DTB_COMPAT_CMDLINE_FROM_BOOTLOADER = true
 AUTO_ZRELADDR = true
 
-# TODO:
+# Kernel Rust/QR panic rendering and kexec_file_load are not supported on ARM32.
 RUST = false
 KEXEC_FILE = "omit"
 RANDOMIZE_BASE = "omit"
@@ -55,14 +58,15 @@ PINCTRL = true
 GPIOLIB = true
 PINCTRL_MSM = true
 PINCTRL_MSM8960 = true
+PINCTRL_QCOM_SSBI_PMIC = true
 MFD_PM8XXX = true
 REGULATOR = true
 REGULATOR_QCOM_RPM = true
-REGULATOR_QCOM_PM8917 = true
 POWER_RESET = true
 POWER_RESET_MSM = true
+INPUT_PMIC8XXX_PWRKEY = true
 
-# BLSP UART/I2C and DMA
+# GSBI UART/I2C and DMA
 SERIAL_MSM = true
 SERIAL_MSM_CONSOLE = true
 I2C_QUP = true
@@ -73,15 +77,6 @@ QCOM_GSBI = true
 # eMMC/SD storage on MSM8930 is PL18x/AMBA, not SDHCI.
 MMC_ARMMMCI = true
 MMC_QCOM_DML = true
-
-# Simple-framebuffer handoff
-#FB = true
-#FB_SIMPLE = true
-#DUMMY_CONSOLE = true
-#FRAMEBUFFER_CONSOLE = true
-
-# touch
-TOUCHSCREEN_ATMEL_MXT = true
 
 # USB HS controller/PHY for the configfs gadget UDC.
 USB_EHCI_HCD = true

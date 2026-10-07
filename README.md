@@ -21,6 +21,9 @@ cargo xtask build
 
 (You will need a bunch of undocumented cross-compile toolchain deps, sorry about that)
 
+Experimental Galaxy Express GT-I8730 development image:
+[Expressltexx](docs/samsung-expressltexx.md) (ARM32 kexec is not supported yet).
+
 ### Kernel sources
 
 Builds prefer an explicit `KERNEL_TREE` argument, then an attached Delta kernel
