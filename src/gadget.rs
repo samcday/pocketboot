@@ -1,5 +1,7 @@
 use std::{
-    fs, io,
+    ffi::OsStr,
+    fs,
+    io::{self, Write},
     os::unix::{ffi::OsStrExt, fs::symlink},
     path::{Path, PathBuf},
     sync::{Arc, Mutex},
@@ -37,6 +39,7 @@ pub(crate) type ThreadResult = io::Result<Option<PostResponseAction>>;
 pub(crate) struct Gadget {
     state: Arc<Mutex<State>>,
     serialno: String,
+    usb_device_role: bool,
 }
 
 #[derive(Default)]
@@ -133,7 +136,13 @@ impl Gadget {
         Self {
             state: Arc::new(Mutex::new(State::default())),
             serialno: serialno.into(),
+            usb_device_role: false,
         }
+    }
+
+    pub(crate) fn with_usb_device_role(mut self, requested: bool) -> Self {
+        self.usb_device_role = requested;
+        self
     }
 
     pub(crate) fn spawn(&self, mode: Mode) -> io::Result<thread::JoinHandle<ThreadResult>> {
@@ -266,6 +275,8 @@ impl Gadget {
         let udc_name = udc.name().to_string_lossy().into_owned();
         reg.bind(Some(&udc))?;
         tracing::info!(udc = %udc_name, "USB gadget bound");
+        // Keep reg local until this succeeds: its drop unbinds/removes on error.
+        self.request_usb_device_role(Path::new("/sys/class"), udc.name())?;
 
         let mut state = self.state.lock().unwrap();
         if state.reg.is_some() {
@@ -281,6 +292,24 @@ impl Gadget {
             state.ums.clear();
         }
         state.reg = Some(reg);
+        Ok(())
+    }
+
+    fn request_usb_device_role(&self, sys_class: &Path, udc: &OsStr) -> io::Result<()> {
+        if !self.usb_device_role {
+            return Ok(());
+        }
+        let role_switch = request_device_role(sys_class, udc).map_err(|err| {
+            io::Error::new(
+                err.kind(),
+                format!("request USB device role for UDC {}: {err}", udc.display()),
+            )
+        })?;
+        tracing::info!(
+            udc = %udc.display(),
+            role_switch = %role_switch.display(),
+            "USB device role requested"
+        );
         Ok(())
     }
 
@@ -318,6 +347,70 @@ fn resolve_fastboot_result(
 
     unbind_result?;
     Ok(None)
+}
+
+fn request_device_role(sys_class: &Path, udc: &OsStr) -> io::Result<PathBuf> {
+    let controller = canonical_controller(&sys_class.join("udc").join(udc))?;
+    let role_class = sys_class.join("usb_role");
+    let entries = fs::read_dir(&role_class).map_err(|err| {
+        io::Error::new(
+            err.kind(),
+            format!("read USB role-switch class {}: {err}", role_class.display()),
+        )
+    })?;
+    let mut matched: Option<PathBuf> = None;
+    for entry in entries {
+        let role_switch = entry?.path();
+        // Fail closed on unresolved entries: uniqueness is unproven.
+        if canonical_controller(&role_switch)? != controller {
+            continue;
+        }
+        if let Some(previous) = matched {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                format!(
+                    "ambiguous USB role switches for {}: {} and {}",
+                    controller.display(),
+                    previous.display(),
+                    role_switch.display()
+                ),
+            ));
+        }
+        matched = Some(role_switch);
+    }
+    let role_switch = matched.ok_or_else(|| {
+        io::Error::new(
+            io::ErrorKind::NotFound,
+            format!(
+                "no USB role switch matches UDC device {}",
+                controller.display()
+            ),
+        )
+    })?;
+    let role = role_switch.join("role");
+    // Prove a unique match before opening; never create a missing attribute.
+    fs::OpenOptions::new()
+        .write(true)
+        .truncate(true)
+        .open(&role)
+        .and_then(|mut file| file.write_all(b"device"))
+        .map_err(|err| {
+            io::Error::new(
+                err.kind(),
+                format!("write USB role attribute {}: {err}", role.display()),
+            )
+        })?;
+    Ok(role_switch)
+}
+
+fn canonical_controller(class_device: &Path) -> io::Result<PathBuf> {
+    let device = class_device.join("device");
+    fs::canonicalize(&device).map_err(|err| {
+        io::Error::new(
+            err.kind(),
+            format!("resolve USB controller device {}: {err}", device.display()),
+        )
+    })
 }
 
 fn config_with_functions(functions: &[&dyn GadgetFunction]) -> Config {
@@ -521,10 +614,155 @@ fn wait_for_udc(timeout: Duration) -> io::Result<Udc> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::sync::{
-        Arc,
-        atomic::{AtomicBool, Ordering},
+    use std::{
+        sync::{
+            Arc,
+            atomic::{AtomicBool, Ordering},
+        },
+        time::{SystemTime, UNIX_EPOCH},
     };
+
+    struct UsbRoleFixture {
+        root: PathBuf,
+    }
+
+    impl UsbRoleFixture {
+        fn new() -> Self {
+            let nonce = SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_nanos();
+            let root = std::env::temp_dir().join(format!(
+                "pocketboot-usb-role-test-{}-{nonce}",
+                std::process::id()
+            ));
+            fs::create_dir_all(root.join("class/udc")).unwrap();
+            fs::create_dir_all(root.join("class/usb_role")).unwrap();
+            let fixture = Self { root };
+            let controller = fixture.controller("chosen");
+            let udc = fixture.root.join("class/udc/chosen");
+            fs::create_dir(&udc).unwrap();
+            symlink(controller, udc.join("device")).unwrap();
+            fixture
+        }
+
+        fn controller(&self, name: &str) -> PathBuf {
+            let path = self.root.join("devices").join(name);
+            fs::create_dir_all(&path).unwrap();
+            path
+        }
+
+        fn role_switch(&self, name: &str, controller: &Path) -> PathBuf {
+            let path = self.root.join("class/usb_role").join(name);
+            fs::create_dir(&path).unwrap();
+            symlink(controller, path.join("device")).unwrap();
+            fs::write(path.join("role"), b"none\n").unwrap();
+            path
+        }
+
+        fn request(&self) -> io::Result<()> {
+            Gadget::new("test")
+                .with_usb_device_role(true)
+                .request_usb_device_role(&self.root.join("class"), OsStr::new("chosen"))
+        }
+    }
+
+    impl Drop for UsbRoleFixture {
+        fn drop(&mut self) {
+            let _ = fs::remove_dir_all(&self.root);
+        }
+    }
+
+    fn assert_role_unchanged(role_switch: &Path) {
+        assert_eq!(fs::read(role_switch.join("role")).unwrap(), b"none\n");
+    }
+
+    #[test]
+    fn default_usb_role_does_not_access_sysfs() {
+        let gadget = Gadget::new("test");
+        assert!(!gadget.usb_device_role);
+        gadget
+            .request_usb_device_role(Path::new("/nonexistent"), OsStr::new("missing"))
+            .unwrap();
+        assert!(gadget.with_usb_device_role(true).clone().usb_device_role);
+    }
+
+    #[test]
+    fn usb_role_matches_only_the_exact_canonical_udc_controller() {
+        let fixture = UsbRoleFixture::new();
+        let controller = fixture.controller("chosen");
+        let alias = fixture.root.join("alias");
+        symlink(&controller, &alias).unwrap();
+        let matched = fixture.role_switch("z-matched", &alias);
+        let unrelated = fixture.role_switch("a-unrelated", &fixture.controller("other"));
+        let child = fixture.role_switch("b-child", &fixture.controller("chosen/child"));
+        let parent = fixture.role_switch("c-parent", &fixture.root.join("devices"));
+
+        fixture.request().unwrap();
+
+        assert_eq!(fs::read(matched.join("role")).unwrap(), b"device");
+        for role_switch in [&unrelated, &child, &parent] {
+            assert_role_unchanged(role_switch);
+        }
+    }
+
+    #[test]
+    fn missing_usb_role_match_leaves_unrelated_controller_unchanged() {
+        let fixture = UsbRoleFixture::new();
+        let unrelated = fixture.role_switch("other", &fixture.controller("other"));
+
+        let err = fixture.request().unwrap_err();
+
+        assert_eq!(err.kind(), io::ErrorKind::NotFound);
+        assert!(err.to_string().contains("no USB role switch matches"));
+        assert!(err.to_string().contains("UDC chosen"));
+        assert_role_unchanged(&unrelated);
+    }
+
+    #[test]
+    fn ambiguous_usb_role_match_leaves_all_controllers_unchanged() {
+        let fixture = UsbRoleFixture::new();
+        let controller = fixture.controller("chosen");
+        let first = fixture.role_switch("first", &controller);
+        let second = fixture.role_switch("second", &controller);
+        let unrelated = fixture.role_switch("other", &fixture.controller("other"));
+
+        let err = fixture.request().unwrap_err();
+
+        assert_eq!(err.kind(), io::ErrorKind::InvalidData);
+        assert!(err.to_string().contains("ambiguous"));
+        for role_switch in [&first, &second, &unrelated] {
+            assert_role_unchanged(role_switch);
+        }
+    }
+
+    #[test]
+    fn unresolved_usb_role_controller_prevents_writes() {
+        let fixture = UsbRoleFixture::new();
+        let matched = fixture.role_switch("matched", &fixture.controller("chosen"));
+        let broken = fixture.role_switch("broken", &fixture.root.join("missing"));
+
+        let err = fixture.request().unwrap_err();
+
+        assert_eq!(err.kind(), io::ErrorKind::NotFound);
+        assert!(err.to_string().contains("resolve USB controller device"));
+        assert_role_unchanged(&matched);
+        assert_role_unchanged(&broken);
+    }
+
+    #[test]
+    fn missing_usb_role_attribute_is_not_created() {
+        let fixture = UsbRoleFixture::new();
+        let matched = fixture.role_switch("matched", &fixture.controller("chosen"));
+        let role = matched.join("role");
+        fs::remove_file(&role).unwrap();
+
+        let err = fixture.request().unwrap_err();
+
+        assert_eq!(err.kind(), io::ErrorKind::NotFound);
+        assert!(err.to_string().contains(&role.display().to_string()));
+        assert!(!role.exists());
+    }
 
     #[test]
     fn acknowledged_action_takes_precedence_over_unbind_failure() {

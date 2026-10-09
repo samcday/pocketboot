@@ -1,0 +1,49 @@
+name = "Qualcomm MSM8917/APQ8017"
+
+[kconfig]
+ARCH_QCOM = true
+QCOM_SOC = true
+NR_CPUS = 4
+
+# RPM firmware and resource providers
+QCOM_SCM = true
+QCOM_SMEM = true
+QCOM_SOCINFO = true
+HWSPINLOCK = true
+HWSPINLOCK_QCOM = true
+MAILBOX = true
+QCOM_APCS_IPC = true
+RPMSG_QCOM_SMD = true
+QCOM_SMD_RPM = true
+QCOM_CLK_SMD_RPM = true
+QCOM_RPMPD = true
+# Select hidden PM_OPP for RPM performance-state tables.
+PM_DEVFREQ = true
+
+# Clocks, pinctrl, GPIO, PMIC and regulators
+COMMON_CLK_QCOM = true
+MSM_GCC_8917 = true
+PINCTRL_MSM = true
+PINCTRL_MSM8917 = true
+SPMI = true
+SPMI_MSM_PMIC_ARB = true
+MFD_SPMI_PMIC = true
+PINCTRL_QCOM_SPMI_PMIC = true
+REGULATOR = true
+REGULATOR_QCOM_SMD_RPM = true
+POWER_RESET_MSM = true
+POWER_RESET_QCOM_PON = true
+
+# ChipIdea MSM + 28nm femto PHY, not DWC3/QUSB2
+USB_CHIPIDEA = true
+USB_CHIPIDEA_UDC = true
+USB_CHIPIDEA_MSM = true
+USB_ROLE_SWITCH = true
+# Hidden while EHCI is disabled; strict merge needs the raw =n form.
+USB_CHIPIDEA_HOST = { raw = "n" }
+USB_CHIPIDEA_GENERIC = false
+USB_CHIPIDEA_IMX = false
+USB_CHIPIDEA_NPCM = false
+USB_CHIPIDEA_TEGRA = false
+GENERIC_PHY = true
+PHY_QCOM_USB_HS_28NM = true

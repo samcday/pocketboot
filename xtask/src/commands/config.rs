@@ -620,6 +620,79 @@ mod tests {
     use super::*;
 
     #[test]
+    fn tbx304x_minimal_candidate_contract() {
+        let root = Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap();
+        let device = KernelDevice::parse("qcom/msm8917-lenovo-tbx304x").unwrap();
+        let config = load_device_config(root, &device).unwrap();
+        assert!(config.kernel_source.is_some());
+        assert_eq!(
+            super::super::kernel::kernel_dtb_stem(&config.kernel, &device).unwrap(),
+            "msm8917-lenovo-tbx304x"
+        );
+        for symbol in [
+            "MODULES",
+            "QCOM_SOC",
+            "PM_DEVFREQ",
+            "USB_CHIPIDEA",
+            "USB_CHIPIDEA_MSM",
+            "PHY_QCOM_USB_HS_28NM",
+            "DRM_SIMPLEDRM",
+            "FRAMEBUFFER_CONSOLE",
+            "I2C_QUP",
+            "TOUCHSCREEN_GOODIX",
+            "FW_LOADER",
+        ] {
+            assert_eq!(
+                config.kconfig.get(symbol),
+                Some(&KconfigValue::Bool(true)),
+                "{symbol}"
+            );
+        }
+        for symbol in [
+            "PM_OPP",
+            "MMC_SDHCI",
+            "MMC_SDHCI_MSM",
+            "SERIAL_MSM",
+            "USB_DWC3",
+        ] {
+            assert!(!config.kconfig.contains_key(symbol), "{symbol}");
+        }
+        assert!(
+            !config
+                .kconfig
+                .values()
+                .any(|value| *value == KconfigValue::Module)
+        );
+        assert_eq!(config.kconfig.get("RUST"), Some(&KconfigValue::Bool(false)));
+        assert_eq!(
+            config.kconfig.get("DRM_PANIC_SCREEN_QR_CODE"),
+            Some(&KconfigValue::Raw("n".into()))
+        );
+        assert_eq!(
+            config.kconfig.get("DRM_PANIC_SCREEN"),
+            Some(&KconfigValue::String("kmsg".into()))
+        );
+
+        let bootimg = config.bootimg.unwrap();
+        assert_eq!(bootimg.header_version, 0);
+        assert_eq!(bootimg.page_size, 2048);
+        assert_eq!(bootimg.kernel_image, "Image.gz");
+        assert!(bootimg.append_dtb);
+        assert_eq!(bootimg.base, 0x80000000);
+        assert_eq!(bootimg.kernel_offset, 0x80000);
+        assert_eq!(bootimg.tags_offset, 0x3400000);
+        assert_eq!(bootimg.ramdisk_offset, 0x3600000);
+        assert_eq!(bootimg.ramdisk_size, 0);
+        assert!(bootimg.preboot.is_none());
+        assert!(bootimg.qcdt.is_none());
+        assert!(bootimg.dtbh.is_none());
+        assert_eq!(
+            bootimg.cmdline,
+            "console=tty0 panic=-1 deferred_probe_timeout=5 pocketboot.log=info pocketboot.usb_role=device lk2nd.pass-simplefb"
+        );
+    }
+
+    #[test]
     fn kernel_source_patch_list_defaults_empty_and_preserves_order() {
         let source: KernelSourceLayer =
             toml::from_str("remote = 'https://example.invalid/linux.git'\nsha = 'abcd'\n").unwrap();

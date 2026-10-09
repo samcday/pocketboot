@@ -1,0 +1,42 @@
+name = "Lenovo Tab 4 10 TB-X304F/L (experimental)"
+
+# WIP boot and touch snapshot for CI, separate from the upstream patch series.
+[kernel-source]
+remote = "https://github.com/samcday/linux.git"
+sha = "ae9e8d65b8215f4af6b999c5f865a4b4f7b960cb"
+
+[kconfig]
+# Keep asynchronous provider waits; all platform drivers remain built-in.
+MODULES = true
+REGULATOR_FIXED_VOLTAGE = true
+INPUT_PM8941_PWRKEY = true
+
+# Goodix touchscreen on BLSP1 QUP3.
+I2C_QUP = true
+TOUCHSCREEN_GOODIX = true
+FW_LOADER = true
+
+# LK2nd's framebuffer supplies the display; fbcon also shows kernel diagnostics.
+DRM_FBDEV_EMULATION = true
+DRM_CLIENT_DEFAULT_FBDEV = true
+FRAMEBUFFER_CONSOLE = true
+DRM_MSM = { raw = "n" }
+
+# PocketBoot /init remains Rust; the kernel needs no Rust/QR-code toolchain.
+RUST = false
+DRM_PANIC_SCREEN_QR_CODE = { raw = "n" }
+DRM_PANIC_SCREEN = { string = "kmsg" }
+
+[bootimg]
+header_version = 0
+page_size = 2048
+kernel_image = "Image.gz"
+append_dtb = true
+base = 0x80000000
+# LK2nd ARM64 handoff, not the stock ARM32 offsets.
+kernel_offset = 0x00080000
+tags_offset = 0x03400000
+ramdisk_offset = 0x03600000
+second_offset = 0
+dtb_offset = 0
+cmdline = "console=tty0 panic=-1 deferred_probe_timeout=5 pocketboot.log=info pocketboot.usb_role=device lk2nd.pass-simplefb"
