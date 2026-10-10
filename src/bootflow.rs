@@ -8,6 +8,7 @@ use std::{
     mem,
     os::{fd::AsRawFd, unix::fs::FileExt},
     path::{Component, Path, PathBuf},
+    sync::{Mutex, PoisonError},
 };
 
 use crate::{
@@ -18,7 +19,14 @@ use crate::{
 const SYS_BLOCK: &str = "/sys/block";
 const DEV: &str = "/dev";
 const DEV_LOOP_CONTROL: &str = "/dev/loop-control";
-const BOOT_MOUNT_ROOT: &str = "/run/pocketboot/boot";
+/// Where boot discovery mounts candidate partitions read-only, one directory
+/// per partition. fastboot flash/erase may unmount these before writing, and
+/// record each one with `mark_boot_mount_released`.
+pub(crate) const BOOT_MOUNT_ROOT: &str = "/run/pocketboot/boot";
+/// Boot-scan mount points unmounted since discovery so a partition could be
+/// rewritten. Entries found under them now point into empty directories.
+/// Discovery mounts each partition once, so nothing is ever removed.
+static RELEASED_BOOT_MOUNTS: Mutex<Vec<PathBuf>> = Mutex::new(Vec::new());
 const FDT_COMPATIBLE_PATH: &str = "/sys/firmware/devicetree/base/compatible";
 const FDT_MAINLINE_COMPATIBLE_PATH: &str =
     "/sys/firmware/devicetree/base/chosen/pocketboot,mainline-compatible";
@@ -101,6 +109,20 @@ impl BootEntry {
         self.options.join(" ")
     }
 
+    /// Whether this entry was found on a boot-scan mount that fastboot has
+    /// since unmounted for flashing, so its payloads can no longer be opened.
+    pub(crate) fn is_stale(&self) -> bool {
+        self.uses_mount_under(&released_boot_mounts())
+    }
+
+    fn uses_mount_under(&self, mount_points: &[PathBuf]) -> bool {
+        let mut paths = [&self.source, &self.linux]
+            .into_iter()
+            .chain(&self.initrds)
+            .chain(&self.dtb);
+        paths.any(|path| mount_points.iter().any(|root| path.starts_with(root)))
+    }
+
     pub(crate) fn load(&self) -> io::Result<()> {
         let kernel = File::open(&self.linux).map_err(|err| {
             io::Error::new(
@@ -147,6 +169,30 @@ impl BootPartitionRole {
             Self::Nested => "nested",
         }
     }
+}
+
+/// Records that `mount_point`, a boot-scan mount, was unmounted so its
+/// partition could be rewritten. Entries discovered on it become stale.
+pub(crate) fn mark_boot_mount_released(mount_point: &Path) {
+    let mut released = RELEASED_BOOT_MOUNTS
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner);
+    if !released.iter().any(|root| root == mount_point) {
+        released.push(mount_point.to_path_buf());
+    }
+}
+
+/// Whether any boot-scan mount was released for flashing, making at least
+/// one discovered entry stale until the next boot scan (a reboot).
+pub(crate) fn boot_mounts_released() -> bool {
+    !released_boot_mounts().is_empty()
+}
+
+fn released_boot_mounts() -> Vec<PathBuf> {
+    RELEASED_BOOT_MOUNTS
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner)
+        .clone()
 }
 
 pub(crate) async fn discover<F, Fut>(mut progress: F) -> io::Result<Vec<BootEntry>>
@@ -2149,6 +2195,24 @@ mod tests {
         let fallback = boot_entry_for_order("extlinux:fallback", 1);
 
         assert_eq!(compare_boot_entries(&default, &fallback), Ordering::Less);
+    }
+
+    #[test]
+    fn detects_entries_on_released_boot_mounts() {
+        let root = PathBuf::from(BOOT_MOUNT_ROOT).join("xbootldr-mmcblk1p2");
+        let mut entry = boot_entry_for_order("fedora.conf", 0);
+        entry.source = root.join("loader/entries/fedora.conf");
+        entry.linux = root.join("vmlinuz");
+        let mut dtb_only = boot_entry_for_order("dtb-only", 0);
+        dtb_only.dtb = Some(root.join("dtb/board.dtb"));
+
+        assert!(entry.uses_mount_under(std::slice::from_ref(&root)));
+        assert!(dtb_only.uses_mount_under(std::slice::from_ref(&root)));
+        assert!(!entry.uses_mount_under(&[]));
+        assert!(!entry.uses_mount_under(&[
+            PathBuf::from(BOOT_MOUNT_ROOT).join("xbootldr-mmcblk1p"),
+            PathBuf::from(BOOT_MOUNT_ROOT).join("xbootldr-mmcblk1p20"),
+        ]));
     }
 
     #[test]

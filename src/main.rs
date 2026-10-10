@@ -226,6 +226,24 @@ async fn run_boot_coordinator(
                     continue;
                 };
                 let entry = &boot_entries[entry_index];
+                if entry.is_stale() {
+                    tracing::warn!(
+                        id = %entry.id,
+                        source = %entry.source.display(),
+                        "UI-selected entry is on a partition unmounted for flashing; reboot to rescan"
+                    );
+                    // Re-sending the menu drops the stale entries and takes
+                    // the UI out of its "booting" state.
+                    let entries = std::mem::take(&mut boot_entries);
+                    apply_boot_entries_update(
+                        ui,
+                        &mut boot_entries,
+                        &mut bootable_entry_indices,
+                        entries,
+                        discovery_complete,
+                    );
+                    continue;
+                }
                 tracing::info!(
                     id = %entry.id,
                     source = %entry.source.display(),
@@ -282,9 +300,10 @@ fn apply_boot_entries_update(
     ui: Option<&ui::Handle>,
     boot_entries: &mut Vec<bootflow::BootEntry>,
     bootable_entry_indices: &mut Vec<usize>,
-    entries: Vec<bootflow::BootEntry>,
+    mut entries: Vec<bootflow::BootEntry>,
     scan_complete: bool,
 ) {
+    entries.retain(|entry| !entry.is_stale());
     let (indices, menu_entries) = boot_menu_entries(&entries);
     *boot_entries = entries;
     *bootable_entry_indices = indices;
