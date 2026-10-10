@@ -48,6 +48,13 @@ const MAX_PAYLOAD_V1: u32 = 4 * 1024;
 const MAX_PAYLOAD: u32 = 1024 * 1024;
 const HEADER_LEN: usize = 24;
 const SHELL_CHUNK: usize = 4 * 1024;
+/// Largest `exec:` output WRTE, further capped by the negotiated max payload.
+/// With one WRTE outstanding per stream, every WRTE also waits out an OKAY
+/// round trip: 4 KiB WRTEs held exec-out to about 10 MiB/s on a link that
+/// moves 1 MiB writes at about 30 MiB/s.
+const EXEC_CHUNK: usize = MAX_PAYLOAD as usize;
+/// Most extra reads that gather already queued exec output into one WRTE.
+const EXEC_COALESCE_READS: usize = 16;
 const SYNC_CHUNK: usize = 64 * 1024;
 const READ_TIMEOUT: Duration = Duration::from_millis(500);
 const TRANSFER_TIMEOUT: Duration = Duration::from_secs(30);
@@ -1192,7 +1199,7 @@ fn run_raw_command_output(
     child_running: Arc<AtomicBool>,
     output: Arc<OutputFlow>,
 ) {
-    let mut buffer = [0; SHELL_CHUNK];
+    let mut buffer = vec![0; exec_chunk_size(writer.max_payload())];
 
     loop {
         if !output.wait_for_write_credit() {
@@ -1201,7 +1208,7 @@ fn run_raw_command_output(
             return;
         }
 
-        let read = match read_fd(&mut output_reader, &mut buffer) {
+        let read = match read_coalesced(&mut output_reader, &mut buffer, EXEC_COALESCE_READS) {
             Ok(0) => break,
             Ok(read) => read,
             Err(err) => {
@@ -1326,6 +1333,37 @@ fn send_stream_payload(
         return false;
     }
     true
+}
+
+/// Sizes exec output WRTEs: as large as the host accepts, up to EXEC_CHUNK.
+fn exec_chunk_size(max_payload: u32) -> usize {
+    EXEC_CHUNK.min(max_payload as usize).max(1)
+}
+
+/// Reads the next WRTE's worth of output. Only the first read blocks; up to
+/// `max_extra_reads` more then take output that is already queued, so a
+/// command writing in bursts fills large WRTEs while interactive output still
+/// goes out as soon as it appears. An error once some output is in `buffer`
+/// is left for the next call to report.
+fn read_coalesced(
+    reader: &mut File,
+    buffer: &mut [u8],
+    max_extra_reads: usize,
+) -> io::Result<usize> {
+    let mut filled = read_fd(reader, buffer)?;
+    for _ in 0..max_extra_reads {
+        if filled == 0 || filled == buffer.len() {
+            break;
+        }
+        if !matches!(poll_readable(reader, Duration::ZERO), Ok(true)) {
+            break;
+        }
+        match read_fd(reader, &mut buffer[filled..]) {
+            Ok(0) | Err(_) => break,
+            Ok(read) => filled += read,
+        }
+    }
+    Ok(filled)
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -1477,6 +1515,7 @@ fn spawn_shell(command: Option<&str>) -> io::Result<(File, u32)> {
 
 fn spawn_raw_command(command: &str) -> io::Result<(ChildStdin, File, Child)> {
     let (output_reader, output_writer) = open_pipe()?;
+    grow_output_pipe(&output_reader);
     let stdout = output_writer.try_clone()?;
     let stderr = output_writer;
 
@@ -1518,6 +1557,26 @@ fn open_pipe() -> io::Result<(File, File)> {
     let read = unsafe { File::from_raw_fd(fds[0]) };
     let write = unsafe { File::from_raw_fd(fds[1]) };
     Ok((read, write))
+}
+
+/// Lets the exec output pipe queue a whole EXEC_CHUNK, so a command writing
+/// large blocks (dd bs=1M) keeps producing while a WRTE waits for its OKAY,
+/// and the next read fills a whole WRTE instead of a 64 KiB slice. A pipe
+/// that cannot grow (pipe-user-pages limits) still works, only slower.
+fn grow_output_pipe(pipe: &File) {
+    if let Err(err) = set_pipe_size(pipe, EXEC_CHUNK) {
+        tracing::debug!(error = ?err, size = EXEC_CHUNK, "adb exec output pipe resize failed");
+    }
+}
+
+fn set_pipe_size(pipe: &File, size: usize) -> io::Result<usize> {
+    let size = libc::c_int::try_from(size)
+        .map_err(|_| io::Error::new(io::ErrorKind::InvalidInput, "pipe size overflows c_int"))?;
+    let result = unsafe { libc::fcntl(pipe.as_raw_fd(), libc::F_SETPIPE_SZ, size) };
+    if result < 0 {
+        return Err(io::Error::last_os_error());
+    }
+    Ok(result as usize)
 }
 
 fn open_pty() -> io::Result<(File, File)> {
@@ -1716,6 +1775,23 @@ fn read_fd(file: &mut File, buffer: &mut [u8]) -> io::Result<usize> {
     }
 }
 
+fn poll_readable(file: &File, timeout: Duration) -> io::Result<bool> {
+    let mut poll_fd = libc::pollfd {
+        fd: file.as_raw_fd(),
+        events: libc::POLLIN,
+        revents: 0,
+    };
+    let timeout = libc::c_int::try_from(timeout.as_millis()).unwrap_or(libc::c_int::MAX);
+    if unsafe { libc::poll(&mut poll_fd, 1, timeout) } >= 0 {
+        return Ok(poll_fd.revents != 0);
+    }
+    let err = io::Error::last_os_error();
+    if err.kind() == io::ErrorKind::Interrupted {
+        return Ok(false);
+    }
+    Err(err)
+}
+
 fn read_pty(master: &mut File, buffer: &mut [u8]) -> io::Result<usize> {
     loop {
         match master.read(buffer) {
@@ -1871,5 +1947,102 @@ mod tests {
             sync_stat_packet(0o100644, 123, 456),
             b"STAT\xA4\x81\x00\x00{\x00\x00\x00\xC8\x01\x00\x00".to_vec()
         );
+    }
+
+    #[test]
+    fn sizes_exec_chunks_to_negotiated_payload() {
+        assert_eq!(exec_chunk_size(MAX_PAYLOAD), EXEC_CHUNK);
+        assert_eq!(exec_chunk_size(256 * 1024), 256 * 1024);
+        assert_eq!(exec_chunk_size(MAX_PAYLOAD_V1), MAX_PAYLOAD_V1 as usize);
+        assert_eq!(exec_chunk_size(u32::MAX), EXEC_CHUNK);
+        assert_eq!(exec_chunk_size(0), 1);
+    }
+
+    /// A packet-mode pipe hands out one write per read, so the tests can
+    /// tell whether output was gathered from several reads.
+    fn packet_pipe() -> (File, File) {
+        let mut fds = [0; 2];
+        let result = unsafe { libc::pipe2(fds.as_mut_ptr(), libc::O_CLOEXEC | libc::O_DIRECT) };
+        assert_eq!(result, 0, "pipe2: {}", io::Error::last_os_error());
+        unsafe { (File::from_raw_fd(fds[0]), File::from_raw_fd(fds[1])) }
+    }
+
+    #[test]
+    fn coalesces_queued_exec_output() {
+        let (mut reader, mut writer) = packet_pipe();
+        for part in [b"one".as_slice(), b"two", b"three", b"four"] {
+            writer.write_all(part).unwrap();
+        }
+        let mut buffer = [0; 64];
+
+        // A single read takes one write; read_coalesced gathers the rest.
+        assert_eq!(read_fd(&mut reader, &mut buffer).unwrap(), 3);
+        let read = read_coalesced(&mut reader, &mut buffer, EXEC_COALESCE_READS).unwrap();
+
+        assert_eq!(&buffer[..read], b"twothreefour");
+    }
+
+    #[test]
+    fn bounds_exec_output_coalescing() {
+        let (mut reader, mut writer) = packet_pipe();
+        for part in [b"a", b"b", b"c", b"d"] {
+            writer.write_all(part).unwrap();
+        }
+        let mut buffer = [0; 64];
+
+        let read = read_coalesced(&mut reader, &mut buffer, 2).unwrap();
+
+        assert_eq!(&buffer[..read], b"abc");
+    }
+
+    #[test]
+    fn stops_exec_output_at_full_buffer() {
+        let (mut reader, mut writer) = open_pipe().unwrap();
+        writer.write_all(b"0123456789abcdef").unwrap();
+        let mut buffer = [0; 10];
+
+        let first = read_coalesced(&mut reader, &mut buffer, EXEC_COALESCE_READS).unwrap();
+        assert_eq!(&buffer[..first], b"0123456789");
+        let second = read_coalesced(&mut reader, &mut buffer, EXEC_COALESCE_READS).unwrap();
+        assert_eq!(&buffer[..second], b"abcdef");
+    }
+
+    #[test]
+    fn returns_exec_output_without_waiting_for_more() {
+        let (mut reader, mut writer) = open_pipe().unwrap();
+        writer.write_all(b"$ ").unwrap();
+        let mut buffer = [0; 64];
+
+        // The writer stays open, so waiting for more output would hang here.
+        let read = read_coalesced(&mut reader, &mut buffer, EXEC_COALESCE_READS).unwrap();
+
+        assert_eq!(&buffer[..read], b"$ ");
+        drop(writer);
+    }
+
+    #[test]
+    fn returns_exec_output_ahead_of_eof() {
+        let (mut reader, mut writer) = open_pipe().unwrap();
+        writer.write_all(b"tail").unwrap();
+        drop(writer);
+        let mut buffer = [0; 64];
+
+        let read = read_coalesced(&mut reader, &mut buffer, EXEC_COALESCE_READS).unwrap();
+        assert_eq!(&buffer[..read], b"tail");
+        assert_eq!(
+            read_coalesced(&mut reader, &mut buffer, EXEC_COALESCE_READS).unwrap(),
+            0
+        );
+    }
+
+    #[test]
+    fn grows_exec_output_pipe_to_a_whole_chunk() {
+        let (reader, _writer) = open_pipe().unwrap();
+
+        let size = set_pipe_size(&reader, EXEC_CHUNK).unwrap();
+
+        assert!(size >= EXEC_CHUNK);
+        let current = unsafe { libc::fcntl(reader.as_raw_fd(), libc::F_GETPIPE_SZ) };
+        assert_eq!(current as usize, size);
     }
 }
