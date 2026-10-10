@@ -12,7 +12,7 @@ pub(crate) mod qemu;
 use std::{
     env,
     ffi::{OsStr, OsString},
-    fs::{self, Permissions},
+    fs::{self, File, Permissions},
     path::{Path, PathBuf},
     process::Command,
     thread,
@@ -207,48 +207,140 @@ fn set_default_kernel_toolchain(
         }
     }
     if let Some(out_dir) = out_dir {
-        prepend_ccache_wrappers(command, out_dir)?;
+        prepend_compiler_cache_wrappers(command, out_dir, &[])?;
     }
     Ok(())
 }
 
-fn prepend_ccache_wrappers(command: &mut Command, out_dir: &Path) -> Result<()> {
-    if env::var_os("CCACHE_DIR").is_none() {
-        return Ok(());
-    }
+/// Bare compiler command names wrapped with the selected compilation cache.
+/// The musl names let BusyBox's default toolchains hit the cache; bare custom
+/// names are supplied per command by the caller. ccache and sccache are
+/// deliberately absent: a cache program is never itself a compiler to wrap.
+const CACHE_WRAPPED_COMPILERS: &[&str] = &[
+    "gcc",
+    "g++",
+    "cc",
+    "c++",
+    "aarch64-linux-gnu-gcc",
+    "aarch64-linux-musl-gcc",
+    "arm-linux-gnueabihf-gcc",
+    "arm-linux-musleabihf-gcc",
+    "clang",
+    "clang++",
+];
 
-    let tool_dir = kernel_tool_dir(out_dir)?;
-    for compiler in [
-        "gcc",
-        "g++",
-        "cc",
-        "c++",
-        "aarch64-linux-gnu-gcc",
-        "arm-linux-gnueabihf-gcc",
-        "clang",
-        "clang++",
-    ] {
+/// Directory names under which distro packages install ccache and sccache
+/// masquerade compilers. Selecting one of those as the "real" compiler would
+/// make our wrapper invoke a cache on a cache.
+const CACHE_MASQUERADE_DIRS: &[&str] = &["ccache", "sccache"];
+
+/// The compilation cache the developer opted into: CCACHE_DIR selects ccache
+/// (existing precedence), otherwise SCCACHE_DIR selects sccache. Only these
+/// two variables opt in: Rust builds keep following RUSTC_WRAPPER on their
+/// own, and Rust wrapper settings must never enable C caching here.
+fn compiler_cache_backend(
+    ccache_dir: Option<&OsStr>,
+    sccache_dir: Option<&OsStr>,
+) -> Option<&'static str> {
+    if ccache_dir.is_some() {
+        Some("ccache")
+    } else if sccache_dir.is_some() {
+        Some("sccache")
+    } else {
+        None
+    }
+}
+
+fn prepend_compiler_cache_wrappers(
+    command: &mut Command,
+    out_dir: &Path,
+    extra_compilers: &[String],
+) -> Result<()> {
+    prepend_compiler_cache_wrappers_with_backend(
+        command,
+        out_dir,
+        extra_compilers,
+        compiler_cache_backend(
+            env::var_os("CCACHE_DIR").as_deref(),
+            env::var_os("SCCACHE_DIR").as_deref(),
+        ),
+    )
+}
+
+/// Write `exec <cache> <compiler>` shims for every wrapped compiler name found
+/// on PATH, then prepend their directory to the command's PATH. Wrappers
+/// invoke the cache program in its stable `<cache> <compiler> <args...>` form
+/// (supported by ccache and sccache releases including 0.10.x) and set no
+/// cache-specific flags, environment, or job settings.
+fn prepend_compiler_cache_wrappers_with_backend(
+    command: &mut Command,
+    out_dir: &Path,
+    extra_compilers: &[String],
+    backend: Option<&str>,
+) -> Result<()> {
+    // Old wrappers must not override a newly selected script or a removed
+    // compiler. Also clean up on opt-out: ARM's linker fallback can put this
+    // directory on PATH even without a compiler cache.
+    remove_cache_wrappers(&out_dir.join("pocketboot-toolchain"))?;
+    let Some(backend) = backend else {
+        return Ok(());
+    };
+    let tool_dir = generated_tool_dir(out_dir)?;
+    let mut compilers = CACHE_WRAPPED_COMPILERS.to_vec();
+    for extra in extra_compilers {
+        if !compilers.contains(&extra.as_str()) {
+            compilers.push(extra.as_str());
+        }
+    }
+    for compiler in compilers {
         if let Some(real_compiler) = compiler_path_command(compiler, &tool_dir) {
-            write_ccache_wrapper(&tool_dir.join(compiler), &real_compiler)?;
+            write_cache_wrapper(&tool_dir.join(compiler), &real_compiler, backend)?;
         }
     }
     prepend_command_path(command, &tool_dir)
 }
 
-/// Resolve a compiler without selecting a distro ccache shim which would make
-/// our own `ccache <compiler>` wrapper recurse back into ccache forever.
-///
-/// An explicit path remains exactly as supplied. Bare command names are
-/// searched in PATH order, skipping the wrapper output directory, conventional
-/// ccache shim directories, and candidates which resolve to the ccache binary.
+fn remove_cache_wrappers(tool_dir: &Path) -> Result<()> {
+    let entries = match fs::read_dir(tool_dir) {
+        Ok(entries) => entries,
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+        Err(err) => return Err(format!("read {}: {err}", tool_dir.display())),
+    };
+    for entry in entries {
+        let entry = entry.map_err(|err| format!("read {} entry: {err}", tool_dir.display()))?;
+        if !entry
+            .file_type()
+            .map_err(|err| format!("stat {}: {err}", entry.path().display()))?
+            .is_file()
+        {
+            continue;
+        }
+        let path = entry.path();
+        let contents = fs::read(&path).map_err(|err| format!("read {}: {err}", path.display()))?;
+        // Preserve other tools in this directory, notably the ld.lld fallback.
+        if contents.starts_with(b"#!/bin/sh\nexec ccache '")
+            || contents.starts_with(b"#!/bin/sh\nexec sccache '")
+        {
+            fs::remove_file(&path).map_err(|err| format!("remove {}: {err}", path.display()))?;
+        }
+    }
+    Ok(())
+}
+
+/// Resolve a compiler command without ever selecting a compilation cache
+/// masquerade, which would make our own `<cache> <compiler>` wrapper recurse
+/// into the cache again: bare names are searched in PATH order, skipping the
+/// generated wrapper directory, ccache/sccache masquerade directories, and
+/// candidates which resolve to either cache binary. A shebang candidate is
+/// refused as well; see `is_shebang_script`.
 fn compiler_path_command(command: &str, wrapper_dir: &Path) -> Option<PathBuf> {
     let paths = env::var_os("PATH")?;
     let search_paths = env::split_paths(&paths).collect::<Vec<_>>();
-    let ccache = path_command("ccache");
+    let cache_binaries = [path_command("ccache"), path_command("sccache")];
     resolve_compiler_command(
         OsStr::new(command),
         &search_paths,
-        ccache.as_deref(),
+        &cache_binaries,
         wrapper_dir,
     )
 }
@@ -256,55 +348,99 @@ fn compiler_path_command(command: &str, wrapper_dir: &Path) -> Option<PathBuf> {
 fn resolve_compiler_command(
     command: &OsStr,
     search_paths: &[PathBuf],
-    ccache: Option<&Path>,
+    cache_binaries: &[Option<PathBuf>],
     wrapper_dir: &Path,
 ) -> Option<PathBuf> {
-    let requested = Path::new(command);
-    if requested.is_absolute() || requested.components().count() > 1 {
+    if !is_bare_command_name(command) {
+        // An explicit path is the user's compiler selection: return it exactly
+        // as supplied. Such paths are documented bypasses of wrapper
+        // resolution and are never second-guessed.
+        let requested = Path::new(command);
         return requested.is_file().then(|| requested.to_path_buf());
     }
 
-    search_paths
+    let selected = search_paths
         .iter()
         .map(|dir| dir.join(command))
         .find(|candidate| {
             candidate.is_file()
                 && !candidate.starts_with(wrapper_dir)
-                && !is_ccache_shim(candidate, ccache)
-        })
+                && !is_cache_shim(candidate, cache_binaries)
+        });
+    match selected {
+        // Check the real compiler, not a script's identity. Leave scripts on
+        // PATH so they can call a wrapped compiler (as Fedora's musl GCC does).
+        // Paths our UTF-8 wrapper writer cannot represent also pass through.
+        // Do not select a later candidate: that would change the compiler.
+        Some(candidate) if candidate.to_str().is_none() || is_shebang_script(&candidate) => None,
+        selected => selected,
+    }
 }
 
-fn is_ccache_shim(candidate: &Path, ccache: Option<&Path>) -> bool {
+/// A bare command name is resolved through PATH; anything else (absolute or
+/// multi-component) is an explicit selection.
+fn is_bare_command_name(command: &OsStr) -> bool {
+    let requested = Path::new(command);
+    !requested.as_os_str().is_empty()
+        && !requested.is_absolute()
+        && requested.components().count() == 1
+}
+
+/// A shebang file is an interpreter script, not a compiler binary. Wrapping
+/// one would make the cache's compiler check identify the script rather than
+/// the compiler it execs, so such candidates are never selected.
+fn is_shebang_script(path: &Path) -> bool {
+    use std::io::Read;
+
+    let Ok(mut file) = File::open(path) else {
+        return false;
+    };
+    let mut prefix = [0; 2];
+    file.read_exact(&mut prefix).is_ok() && prefix == *b"#!"
+}
+
+fn is_cache_shim(candidate: &Path, cache_binaries: &[Option<PathBuf>]) -> bool {
     if candidate
         .parent()
         .and_then(Path::file_name)
-        .is_some_and(|name| name == OsStr::new("ccache"))
+        .is_some_and(|name| {
+            CACHE_MASQUERADE_DIRS
+                .iter()
+                .any(|dir| name == OsStr::new(dir))
+        })
     {
         return true;
     }
 
-    let Some(ccache) = ccache else {
+    let Ok(resolved) = fs::canonicalize(candidate) else {
         return false;
     };
-    match (fs::canonicalize(candidate), fs::canonicalize(ccache)) {
-        (Ok(candidate), Ok(ccache)) => candidate == ccache,
-        _ => false,
-    }
+    cache_binaries
+        .iter()
+        .flatten()
+        .any(|cache| fs::canonicalize(cache).is_ok_and(|binary| binary == resolved))
 }
 
-fn kernel_tool_dir(out_dir: &Path) -> Result<PathBuf> {
+/// Directory for generated tool wrappers inside a build output tree.
+fn generated_tool_dir(out_dir: &Path) -> Result<PathBuf> {
     let tool_dir = out_dir.join("pocketboot-toolchain");
     fs::create_dir_all(&tool_dir).map_err(|err| format!("create {}: {err}", tool_dir.display()))?;
     Ok(tool_dir)
 }
 
-fn write_ccache_wrapper(path: &Path, compiler: &Path) -> Result<()> {
+fn write_cache_wrapper(path: &Path, compiler: &Path, backend: &str) -> Result<()> {
     let compiler = compiler
         .to_str()
         .ok_or_else(|| format!("compiler path is not valid UTF-8: {}", compiler.display()))?;
+    if path.is_symlink() {
+        fs::remove_file(path).map_err(|err| format!("remove {}: {err}", path.display()))?;
+    }
     fs::write(
         path,
-        format!("#!/bin/sh\nexec ccache '{}' \"$@\"\n", sh_quote(compiler)),
+        format!(
+            "#!/bin/sh\nexec {backend} '{}' \"$@\"\n",
+            sh_quote(compiler)
+        ),
     )
     .map_err(|err| format!("write {}: {err}", path.display()))?;
     make_executable(path)
@@ -321,7 +457,7 @@ fn arm_llvm_tool_dir(out_dir: Option<&Path>) -> Result<Option<PathBuf>> {
     if !path_command_exists("rust-lld") {
         return Ok(None);
     }
-    let tool_dir = kernel_tool_dir(out_dir)?;
+    let tool_dir = generated_tool_dir(out_dir)?;
     let ld_lld = tool_dir.join("ld.lld");
     write_ld_lld_wrapper(&ld_lld)?;
     Ok(Some(tool_dir))
@@ -445,7 +581,7 @@ mod tests {
         let selected = resolve_compiler_command(
             OsStr::new("aarch64-linux-gnu-gcc"),
             &[shim_dir, real_dir.clone()],
-            None,
+            &[],
             &wrapper_dir,
         )
         .unwrap();
@@ -474,7 +610,7 @@ mod tests {
         let selected = resolve_compiler_command(
             OsStr::new("gcc"),
             &[shim_dir, real_dir.clone()],
-            Some(&ccache),
+            &[Some(ccache.clone())],
             &wrapper_dir,
         )
         .unwrap();
@@ -493,16 +629,26 @@ mod tests {
         fs::write(&compiler, b"real compiler").unwrap();
 
         let selected =
-            resolve_compiler_command(compiler.as_os_str(), &[], None, &wrapper_dir).unwrap();
+            resolve_compiler_command(compiler.as_os_str(), &[], &[], &wrapper_dir).unwrap();
         assert_eq!(selected, compiler);
 
         let wrapper = wrapper_dir.join("gcc");
-        write_ccache_wrapper(&wrapper, &selected).unwrap();
+        #[cfg(unix)]
+        std::os::unix::fs::symlink(&selected, &wrapper).unwrap();
+        write_cache_wrapper(&wrapper, &selected, "ccache").unwrap();
+        assert_eq!(fs::read(&selected).unwrap(), b"real compiler");
         let contents = fs::read_to_string(&wrapper).unwrap();
         let compiler = selected.to_str().unwrap();
         assert_eq!(
             contents,
             format!("#!/bin/sh\nexec ccache '{}' \"$@\"\n", sh_quote(compiler))
+        );
+
+        write_cache_wrapper(&wrapper, &selected, "sccache").unwrap();
+        let contents = fs::read_to_string(&wrapper).unwrap();
+        assert_eq!(
+            contents,
+            format!("#!/bin/sh\nexec sccache '{}' \"$@\"\n", sh_quote(compiler))
         );
 
         fs::remove_dir_all(root).unwrap();
@@ -521,12 +667,180 @@ mod tests {
         let selected = resolve_compiler_command(
             OsStr::new("clang"),
             &[wrapper_dir.clone(), real_dir.clone()],
-            None,
+            &[],
             &wrapper_dir,
         )
         .unwrap();
 
         assert_eq!(selected, real_dir.join("clang"));
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn compiler_cache_backend_precedence_and_no_opt_in() {
+        assert_eq!(
+            compiler_cache_backend(Some(OsStr::new("/cache")), Some(OsStr::new("/sccache"))),
+            Some("ccache")
+        );
+        assert_eq!(
+            compiler_cache_backend(Some(OsStr::new("/cache")), None),
+            Some("ccache")
+        );
+        assert_eq!(
+            compiler_cache_backend(None, Some(OsStr::new("/sccache"))),
+            Some("sccache")
+        );
+        assert_eq!(compiler_cache_backend(None, None), None);
+    }
+
+    #[test]
+    fn cache_wrapper_refresh_removes_stale_compilers_but_preserves_linker() {
+        let root = test_dir("cache-wrapper-refresh");
+        let tool_dir = generated_tool_dir(&root).unwrap();
+        let stale = tool_dir.join("pocketboot-stale-compiler");
+        let linker = tool_dir.join("ld.lld");
+        write_ld_lld_wrapper(&linker).unwrap();
+        let linker_contents = fs::read(&linker).unwrap();
+
+        for backend in [Some("sccache"), None] {
+            write_cache_wrapper(&stale, Path::new("/old/compiler"), "ccache").unwrap();
+            let mut command = Command::new("make");
+            prepend_compiler_cache_wrappers_with_backend(&mut command, &root, &[], backend)
+                .unwrap();
+            assert!(!stale.exists());
+            assert_eq!(fs::read(&linker).unwrap(), linker_contents);
+            if backend.is_none() {
+                assert!(command.get_envs().next().is_none());
+                assert!(!tool_dir.join("gcc").exists());
+            }
+        }
+
+        let fresh = root.join("no-opt-in");
+        let mut command = Command::new("make");
+        prepend_compiler_cache_wrappers_with_backend(&mut command, &fresh, &[], None).unwrap();
+        assert!(!fresh.exists());
+        assert!(command.get_envs().next().is_none());
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn compiler_resolution_skips_sccache_masquerade_directory() {
+        let root = test_dir("sccache-fedora");
+        let shim_dir = root.join("usr/lib64/sccache");
+        let real_dir = root.join("usr/bin");
+        let wrapper_dir = root.join("out/pocketboot-toolchain");
+        fs::create_dir_all(&shim_dir).unwrap();
+        fs::create_dir_all(&real_dir).unwrap();
+        fs::create_dir_all(&wrapper_dir).unwrap();
+        fs::write(
+            shim_dir.join("aarch64-linux-musl-gcc"),
+            b"sccache masquerade",
+        )
+        .unwrap();
+        fs::write(real_dir.join("aarch64-linux-musl-gcc"), b"real compiler").unwrap();
+
+        let selected = resolve_compiler_command(
+            OsStr::new("aarch64-linux-musl-gcc"),
+            &[shim_dir, real_dir.clone()],
+            &[],
+            &wrapper_dir,
+        )
+        .unwrap();
+
+        assert_eq!(selected, real_dir.join("aarch64-linux-musl-gcc"));
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn compiler_resolution_skips_symlink_to_sccache_outside_named_masquerade_directory() {
+        use std::os::unix::fs::symlink;
+
+        let root = test_dir("sccache-symlink");
+        let shim_dir = root.join("wrappers");
+        let real_dir = root.join("bin");
+        let wrapper_dir = root.join("out/pocketboot-toolchain");
+        fs::create_dir_all(&shim_dir).unwrap();
+        fs::create_dir_all(&real_dir).unwrap();
+        fs::create_dir_all(&wrapper_dir).unwrap();
+        let sccache = real_dir.join("sccache");
+        fs::write(&sccache, b"sccache").unwrap();
+        symlink(&sccache, shim_dir.join("gcc")).unwrap();
+        fs::write(real_dir.join("gcc"), b"real compiler").unwrap();
+
+        let selected = resolve_compiler_command(
+            OsStr::new("gcc"),
+            &[shim_dir, real_dir.clone()],
+            &[Some(sccache)],
+            &wrapper_dir,
+        )
+        .unwrap();
+
+        assert_eq!(selected, real_dir.join("gcc"));
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn shebang_compiler_script_passes_through_and_underlying_gcc_is_resolved() {
+        let root = test_dir("musl-shebang");
+        let bin = root.join("usr/bin");
+        let wrapper_dir = root.join("out/pocketboot-toolchain");
+        fs::create_dir_all(&bin).unwrap();
+        fs::create_dir_all(&wrapper_dir).unwrap();
+        // Fedora ships /usr/bin/aarch64-linux-musl-gcc as exactly such a script.
+        fs::write(
+            bin.join("aarch64-linux-musl-gcc"),
+            b"#!/bin/sh\nexec aarch64-linux-gnu-gcc \"$@\"\n",
+        )
+        .unwrap();
+        fs::write(bin.join("aarch64-linux-gnu-gcc"), b"\x7fELF real compiler").unwrap();
+
+        // The script is never wrapped: the cache's compiler check would
+        // identify the script, so the name resolves unwrapped through PATH at
+        // run time while its inner invocations hit wrapped real compilers.
+        assert_eq!(
+            resolve_compiler_command(
+                OsStr::new("aarch64-linux-musl-gcc"),
+                std::slice::from_ref(&bin),
+                &[],
+                &wrapper_dir
+            ),
+            None
+        );
+        // The real compiler the script execs is selected and cached safely.
+        assert_eq!(
+            resolve_compiler_command(
+                OsStr::new("aarch64-linux-gnu-gcc"),
+                std::slice::from_ref(&bin),
+                &[],
+                &wrapper_dir
+            ),
+            Some(bin.join("aarch64-linux-gnu-gcc"))
+        );
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn compiler_in_non_utf8_path_remains_unwrapped() {
+        use std::os::unix::ffi::OsStrExt;
+
+        let root = test_dir("compiler-path-encoding");
+        let bin = root.join(OsStr::from_bytes(b"bin-\xff"));
+        let fallback = root.join("fallback");
+        fs::create_dir(&bin).unwrap();
+        fs::create_dir(&fallback).unwrap();
+        fs::write(bin.join("gcc"), b"\x7fELF first compiler").unwrap();
+        fs::write(fallback.join("gcc"), b"\x7fELF different compiler").unwrap();
+        assert_eq!(
+            resolve_compiler_command(
+                OsStr::new("gcc"),
+                &[bin, fallback],
+                &[],
+                &root.join("pocketboot-toolchain")
+            ),
+            None
+        );
         fs::remove_dir_all(root).unwrap();
     }
 
