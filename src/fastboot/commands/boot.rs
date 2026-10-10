@@ -41,7 +41,10 @@ pub(super) fn handle_kexec_status(
 }
 
 fn prepare_staged_boot_image(context: &CommandContext<'_>) -> io::Result<KexecImage> {
-    let mut boot_img = context.staged_file()?;
+    prepare_boot_image(context.staged_file()?)
+}
+
+fn prepare_boot_image(mut boot_img: fs::File) -> io::Result<KexecImage> {
     let header = Header::parse(&mut boot_img)
         .map_err(|err| invalid_data(format!("parse Android boot image: {err}")))?;
 
@@ -61,7 +64,6 @@ fn prepare_staged_boot_image(context: &CommandContext<'_>) -> io::Result<KexecIm
         header.kernel_position(),
         header.kernel_size(),
     )?;
-    let kernel = kexec::prepare_kernel_payload(kernel)?;
     let initrd = if header.ramdisk_size() == 0 {
         None
     } else {
@@ -204,4 +206,109 @@ fn android_cmdline(bytes: &[u8]) -> io::Result<String> {
 
 fn invalid_data(message: impl Into<String>) -> io::Error {
     io::Error::new(io::ErrorKind::InvalidData, message.into())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::kexec::tests::{assert_payloads, dtb_fixture, gzip, raw_arm64_image};
+
+    // Encode the on-disk Android header independently of the parser. The v0
+    // layout matches Ferrari: 2048-byte pages and a one-byte ramdisk.
+    fn android_image(kernel: &[u8], explicit_dtb: Option<&[u8]>) -> Vec<u8> {
+        let mut image = vec![0u8; 2048];
+        image[..8].copy_from_slice(b"ANDROID!");
+        image[8..12].copy_from_slice(&(kernel.len() as u32).to_le_bytes());
+        image[12..16].copy_from_slice(&0x80080000u32.to_le_bytes());
+        image[16..20].copy_from_slice(&1u32.to_le_bytes());
+        image[36..40].copy_from_slice(&2048u32.to_le_bytes());
+        image[64..72].copy_from_slice(b"panic=1\0");
+        if let Some(dtb) = explicit_dtb {
+            image[40..44].copy_from_slice(&2u32.to_le_bytes());
+            image[1644..1648].copy_from_slice(&1660u32.to_le_bytes());
+            image[1648..1652].copy_from_slice(&(dtb.len() as u32).to_le_bytes());
+        }
+        image.extend_from_slice(kernel);
+        image.resize(image.len().next_multiple_of(2048), 0);
+        image.push(0); // ramdisk_size=1
+        image.resize(image.len().next_multiple_of(2048), 0);
+        if let Some(dtb) = explicit_dtb {
+            image.extend_from_slice(dtb);
+            image.resize(image.len().next_multiple_of(2048), 0);
+        }
+        image
+    }
+
+    #[test]
+    fn android_v0_gzip_with_appended_dtb_uses_the_packaged_tree() {
+        let raw = raw_arm64_image();
+        let dtb = dtb_fixture();
+        let section = [gzip(&raw), dtb.clone()].concat();
+        let boot = android_image(&section, None);
+        let image = prepare_boot_image(payload_from_slice("boot", &boot).unwrap()).unwrap();
+        assert_payloads(&image, &raw, Some(&dtb));
+    }
+
+    #[test]
+    fn android_v0_preserves_the_whole_preboot_envelope_and_inner_bss() {
+        let mut envelope = raw_arm64_image();
+        envelope[16..24].copy_from_slice(&0x10000u64.to_le_bytes()); // shim runtime
+        envelope.resize(0x180000, 0); // inner Image at physical 0x80200000
+        let mut inner = raw_arm64_image();
+        inner[16..24].copy_from_slice(&0x200000u64.to_le_bytes()); // includes BSS
+        envelope.extend_from_slice(&inner);
+        envelope.resize(0x380000, 0);
+        let dtb = dtb_fixture();
+        let section = [gzip(&envelope), dtb.clone()].concat();
+        let boot = android_image(&section, None);
+        let image = prepare_boot_image(payload_from_slice("preboot", &boot).unwrap()).unwrap();
+        // In particular, do not truncate to the outer image_size (shim only).
+        assert_payloads(&image, &envelope, Some(&dtb));
+    }
+
+    #[test]
+    fn android_v2_explicit_dtb_wins_over_the_appended_tree() {
+        let raw = raw_arm64_image();
+        let appended = dtb_fixture();
+        let mut explicit = appended.clone();
+        explicit[28..32].copy_from_slice(&0x100u32.to_be_bytes());
+        let section = [gzip(&raw), appended].concat();
+        let boot = android_image(&section, Some(&explicit));
+        let image = prepare_boot_image(payload_from_slice("v2", &boot).unwrap()).unwrap();
+        assert_payloads(&image, &raw, Some(&explicit));
+    }
+
+    #[test]
+    fn android_gzip_without_dtb_preserves_the_live_tree_fallback() {
+        let raw = raw_arm64_image();
+        let boot = android_image(&gzip(&raw), None);
+        let image = prepare_boot_image(payload_from_slice("plain", &boot).unwrap()).unwrap();
+        assert_payloads(&image, &raw, None);
+    }
+
+    #[test]
+    fn truncated_android_kernel_section_is_rejected_before_preparation() {
+        let section = [gzip(&raw_arm64_image()), dtb_fixture()].concat();
+        let mut boot = android_image(&section, None);
+        boot.truncate(2048 + section.len() - 1);
+        assert!(prepare_boot_image(payload_from_slice("short", &boot).unwrap()).is_err());
+    }
+
+    /// Optional real-artifact check. Expected files should be independently
+    /// extracted (e.g. with Python's zlib) and are never loaded with kexec.
+    #[test]
+    #[ignore = "requires POCKETBOOT_TEST_BOOT_IMAGE, POCKETBOOT_TEST_KERNEL and POCKETBOOT_TEST_DTB"]
+    fn inspect_supplied_android_image() {
+        let path = |name| std::env::var_os(name).expect(name);
+        let boot = fs::File::open(path("POCKETBOOT_TEST_BOOT_IMAGE")).unwrap();
+        let kernel = fs::read(path("POCKETBOOT_TEST_KERNEL")).unwrap();
+        let dtb = fs::read(path("POCKETBOOT_TEST_DTB")).unwrap();
+        let image = prepare_boot_image(boot).unwrap();
+        assert_payloads(&image, &kernel, Some(&dtb));
+        println!(
+            "validated Android image: kernel={} bytes, DTB={} bytes; no kexec performed",
+            kernel.len(),
+            dtb.len()
+        );
+    }
 }

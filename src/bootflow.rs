@@ -108,7 +108,6 @@ impl BootEntry {
                 format!("open kernel {}: {err}", self.linux.display()),
             )
         })?;
-        let kernel = kexec::prepare_kernel_payload(kernel)?;
         let initrd = open_initrd_payload(&self.initrds)?;
         let dtb = self
             .dtb
