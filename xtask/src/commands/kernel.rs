@@ -65,7 +65,7 @@ struct KernelConfigFile {
     sha256: String,
 }
 
-const KERNEL_CONFIG_RECIPE_VERSION: u32 = 1;
+const KERNEL_CONFIG_RECIPE_VERSION: u32 = 2;
 const PROCESSED_DTB: &str = "pocketboot.dtb";
 const DTBO_MASK_FORMAT: u32 = 1;
 const DTBO_MASK_VALIDATION_PROPERTY: &str = "pocketboot,dtbo-mask-target";
@@ -164,9 +164,14 @@ fn build_device_kernel(
     write_if_changed(&pocketboot_config, config.kconfig_contents()?.as_bytes())?;
 
     let initramfs_config = out_dir.join("pocketboot-initramfs.config");
+    let initramfs_source = kernel_initramfs_source(&out_dir, &initrd)?;
     write_if_changed(
         &initramfs_config,
-        format!("CONFIG_INITRAMFS_SOURCE=\"{}\"\n", kconfig_string(&initrd)?).as_bytes(),
+        format!(
+            "CONFIG_INITRAMFS_SOURCE=\"{}\"\n",
+            kconfig_string(&initramfs_source)?
+        )
+        .as_bytes(),
     )?;
 
     let merge_config = kernel_tree.join("scripts/kconfig/merge_config.sh");
@@ -1194,6 +1199,36 @@ fn build_device_initrd(
     )
 }
 
+/// Kbuild reads relative initramfs paths from its canonical output directory.
+/// Keep the normal target/cpio layout stable across output roots: an absolute
+/// path changes autoconf.h and forces ccache to preprocess kernel objects.
+fn kernel_initramfs_source(out_dir: &Path, initrd: &Path) -> Result<PathBuf> {
+    let out_dir = fs::canonicalize(out_dir)
+        .map_err(|err| format!("canonicalize {}: {err}", out_dir.display()))?;
+    let name = initrd
+        .file_name()
+        .ok_or_else(|| format!("initrd path has no file name: {}", initrd.display()))?;
+    let parent = initrd
+        .parent()
+        .filter(|parent| !parent.as_os_str().is_empty())
+        .unwrap_or_else(|| Path::new("."));
+    // Resolve directory symlinks, but retain the basename: Kbuild uses the
+    // .cpio / .cpio.* suffix to decide whether to generate or copy an archive.
+    let initrd = fs::canonicalize(parent)
+        .map_err(|err| format!("canonicalize {}: {err}", parent.display()))?
+        .join(name);
+    // A leading ./ also keeps an archive inside out_dir from looking like an option.
+    let mut relative = PathBuf::from(".");
+    for base in out_dir.ancestors() {
+        if let Ok(suffix) = initrd.strip_prefix(base) {
+            return Ok(relative.join(suffix));
+        }
+        relative.push("..");
+    }
+    // Different filesystem roots cannot share a relative path.
+    Ok(initrd)
+}
+
 fn ensure_kernel_config(
     kernel_tree: &Path,
     out_dir: &Path,
@@ -1310,6 +1345,71 @@ fn path_stamp_value(path: &Path) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn initramfs_source_is_stable_across_output_roots() {
+        let root = tempfile::tempdir().unwrap();
+        for target in ["first/target", "deeper/second/target"] {
+            let target = root.path().join(target);
+            let out_dir = target.join("kernel/qcom/sdm670-google-sargo");
+            let initrd = target.join("cpio/qcom/sdm670-google-sargo/pocketboot-initrd.cpio");
+            fs::create_dir_all(&out_dir).unwrap();
+            fs::create_dir_all(initrd.parent().unwrap()).unwrap();
+            fs::write(&initrd, b"archive").unwrap();
+
+            let source = kernel_initramfs_source(&out_dir, &initrd).unwrap();
+            assert_eq!(
+                source,
+                Path::new("./../../../cpio/qcom/sdm670-google-sargo/pocketboot-initrd.cpio")
+            );
+            assert_eq!(
+                fs::canonicalize(out_dir.join(&source)).unwrap(),
+                fs::canonicalize(&initrd).unwrap()
+            );
+            // Kbuild still depends on the original archive, not a staged copy.
+            fs::write(&initrd, b"changed archive").unwrap();
+            assert_eq!(fs::read(out_dir.join(source)).unwrap(), b"changed archive");
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn initramfs_source_resolves_directory_symlinks_but_keeps_archive_suffix() {
+        use std::os::unix::fs::symlink;
+
+        let root = tempfile::tempdir().unwrap();
+        let out_dir = root.path().join("nested/output");
+        let alias = root.path().join("output-alias");
+        let images = root.path().join("images");
+        let images_alias = root.path().join("images-alias");
+        fs::create_dir_all(&out_dir).unwrap();
+        fs::create_dir(&images).unwrap();
+        symlink(&out_dir, &alias).unwrap();
+        symlink(&images, &images_alias).unwrap();
+        fs::write(images.join("payload.bin"), b"archive").unwrap();
+        let initrd = images_alias.join("archive.cpio.gz");
+        symlink("payload.bin", &initrd).unwrap();
+
+        let source = kernel_initramfs_source(&alias, &initrd).unwrap();
+        assert_eq!(source, Path::new("./../../images/archive.cpio.gz"));
+        assert_eq!(
+            fs::canonicalize(alias.join(source)).unwrap(),
+            fs::canonicalize(initrd).unwrap()
+        );
+    }
+
+    #[test]
+    fn initramfs_source_preserves_custom_file_names_and_protects_leading_dash() {
+        let out_dir = tempfile::tempdir().unwrap();
+        for name in ["-custom.cpio.gz", "custom-list.txt"] {
+            let initrd = out_dir.path().join(name);
+            fs::write(&initrd, b"input").unwrap();
+            assert_eq!(
+                kernel_initramfs_source(out_dir.path(), &initrd).unwrap(),
+                Path::new(".").join(name)
+            );
+        }
+    }
 
     #[test]
     fn crosshatch_mask_manifest_records_pinned_official_dtbo_fixups() {
