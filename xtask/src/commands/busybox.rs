@@ -1,7 +1,7 @@
 use std::{
     collections::BTreeMap,
     env,
-    ffi::OsString,
+    ffi::{OsStr, OsString},
     fs::{self, File},
     io::{self, Seek, Write},
     os::unix::{ffi::OsStrExt, fs::PermissionsExt},
@@ -15,8 +15,8 @@ use sha2::{Digest, Sha256};
 use crate::Result;
 
 use super::{
-    FeatureSet, ensure_file, feature_set, parallel_jobs, path_command_exists, run_command,
-    target_dir, workspace_root,
+    FeatureSet, ensure_file, feature_set, is_bare_command_name, parallel_jobs, path_command_exists,
+    prepend_compiler_cache_wrappers, run_command, target_dir, workspace_root,
 };
 
 pub(super) const BUSYBOX_VERSION: &str = "1.38.0";
@@ -641,7 +641,7 @@ fn set_kconfig_int(contents: &mut String, name: &str, value: u32) {
 }
 
 fn run_busybox_make(source: &Path, build: &Path, target: &str, args: &[&str]) -> Result<()> {
-    let mut command = busybox_make_command(source, build, target);
+    let mut command = busybox_make_command(source, build, target)?;
     command.stdin(Stdio::null());
     command.args(args);
     run_command(command, "make busybox")
@@ -654,7 +654,7 @@ fn run_busybox_make_quiet(
     args: &[&str],
     action: &str,
 ) -> Result<()> {
-    let mut command = busybox_make_command(source, build, target);
+    let mut command = busybox_make_command(source, build, target)?;
     command
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
@@ -671,7 +671,7 @@ fn run_busybox_make_quiet(
 }
 
 fn run_busybox_oldconfig(source: &Path, build: &Path, target: &str) -> Result<()> {
-    let mut command = busybox_make_command(source, build, target);
+    let mut command = busybox_make_command(source, build, target)?;
     command
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
@@ -706,7 +706,7 @@ fn command_output_error(action: &str, output: &std::process::Output) -> String {
     )
 }
 
-fn busybox_make_command(source: &Path, build: &Path, target: &str) -> Command {
+fn busybox_make_command(source: &Path, build: &Path, target: &str) -> Result<Command> {
     let mut command = Command::new(env::var_os("MAKE").unwrap_or_else(|| "make".into()));
     command
         .current_dir(source)
@@ -724,7 +724,37 @@ fn busybox_make_command(source: &Path, build: &Path, target: &str) -> Command {
             value
         });
     }
-    command
+    // Cache BusyBox C compilations through the same wrapper machinery the
+    // kernel build uses. Without CCACHE_DIR or SCCACHE_DIR this leaves the
+    // command untouched.
+    prepend_compiler_cache_wrappers(&mut command, build, &busybox_extra_cache_compilers(target))?;
+    Ok(command)
+}
+
+/// BusyBox-specific compiler names to wrap beyond the shared defaults: the
+/// compiler commands this target's build will invoke, when they are bare
+/// names. Explicit absolute selections stay unwrapped bypasses, exactly as
+/// supplied.
+fn busybox_extra_cache_compilers(target: &str) -> Vec<String> {
+    busybox_extra_compiler_names(&busybox_cc(target), &busybox_cross_compile(target))
+}
+
+fn busybox_extra_compiler_names(cc: &OsStr, cross_compile: &OsStr) -> Vec<String> {
+    let mut prefixed_gcc = cross_compile.to_os_string();
+    prefixed_gcc.push("gcc");
+    let mut names = Vec::new();
+    for compiler in [cc.to_os_string(), prefixed_gcc] {
+        if !is_bare_command_name(&compiler) {
+            continue;
+        }
+        let Some(name) = compiler.to_str() else {
+            continue;
+        };
+        if !names.iter().any(|existing| existing == name) {
+            names.push(name.to_string());
+        }
+    }
+    names
 }
 
 fn ensure_busybox_toolchain(build: &Path, target: &str) -> Result<()> {
@@ -747,6 +777,9 @@ fn ensure_busybox_toolchain(build: &Path, target: &str) -> Result<()> {
         .arg(&source)
         .arg("-o")
         .arg(&output);
+    // Probe through the same wrapper PATH that make receives, so the check
+    // exercises the compiler invocation the build actually runs.
+    prepend_compiler_cache_wrappers(&mut command, build, &busybox_extra_cache_compilers(target))?;
 
     let status = command.status().map_err(|err| {
         busybox_toolchain_error(target, &compiler, format!("run compiler: {err}"))
@@ -855,6 +888,101 @@ mod tests {
     use std::io::Read;
 
     use super::*;
+
+    #[test]
+    fn busybox_wrapper_names_cover_target_defaults_and_bare_custom_compilers() {
+        // Default aarch64 musl target: the musl compiler and the GNU compiler
+        // behind the default cross prefix.
+        assert_eq!(
+            busybox_extra_compiler_names(
+                OsStr::new("aarch64-linux-musl-gcc"),
+                OsStr::new("aarch64-linux-gnu-")
+            ),
+            ["aarch64-linux-musl-gcc", "aarch64-linux-gnu-gcc"]
+        );
+        // The same name from both selections is deduplicated.
+        assert_eq!(
+            busybox_extra_compiler_names(
+                OsStr::new("aarch64-linux-musl-gcc"),
+                OsStr::new("aarch64-linux-musl-")
+            ),
+            ["aarch64-linux-musl-gcc"]
+        );
+        // A bare custom BUSYBOX_CC name is wrapped; an explicit absolute path
+        // is a bypass and never wrapped.
+        assert_eq!(
+            busybox_extra_compiler_names(OsStr::new("custom-clang"), OsStr::new("")),
+            ["custom-clang", "gcc"]
+        );
+        assert_eq!(
+            busybox_extra_compiler_names(
+                OsStr::new("/opt/tools/gcc"),
+                OsStr::new("arm-linux-gnueabihf-")
+            ),
+            ["arm-linux-gnueabihf-gcc"]
+        );
+        assert_eq!(
+            busybox_extra_compiler_names(OsStr::from_bytes(b"custom-\xff"), OsStr::new("")),
+            ["gcc"]
+        );
+    }
+
+    #[test]
+    fn busybox_probe_and_make_receive_the_same_wrapper_path() {
+        const CHILD_ROOT: &str = "POCKETBOOT_TEST_BUSYBOX_CACHE_PATH";
+        if let Some(root) = env::var_os(CHILD_ROOT) {
+            let root = PathBuf::from(root);
+            let build = root.join("build");
+            fs::create_dir(&build).unwrap();
+            ensure_busybox_toolchain(&build, super::super::cpio::DEFAULT_TARGET).unwrap();
+            let make =
+                busybox_make_command(&root, &build, super::super::cpio::DEFAULT_TARGET).unwrap();
+            let make_path = make
+                .get_envs()
+                .find(|(key, _)| *key == OsStr::new("PATH"))
+                .and_then(|(_, value)| value)
+                .unwrap();
+            let probe_path = fs::read(root.join("probe-path")).unwrap();
+            assert_eq!(probe_path, make_path.as_bytes());
+            assert_eq!(
+                env::split_paths(make_path).next().unwrap(),
+                build.join("pocketboot-toolchain")
+            );
+            return;
+        }
+
+        // Set cache options in a child process, not the parallel test runner.
+        let dir = tempfile::tempdir().unwrap();
+        let compiler = dir.path().join("compiler");
+        std::os::unix::fs::symlink(env::current_exe().unwrap(), &compiler).unwrap();
+        let cache = dir.path().join("sccache");
+        fs::write(
+            &cache,
+            b"#!/bin/sh\nprintf %s \"$PATH\" > \"$POCKETBOOT_TEST_BUSYBOX_CACHE_PATH/probe-path\"\n",
+        )
+        .unwrap();
+        super::super::make_executable(&cache).unwrap();
+        let mut paths = vec![dir.path().to_path_buf()];
+        paths.extend(env::split_paths(&env::var_os("PATH").unwrap_or_default()));
+        let output = Command::new(env::current_exe().unwrap())
+            .args([
+                "--exact",
+                "commands::busybox::tests::busybox_probe_and_make_receive_the_same_wrapper_path",
+            ])
+            .env(CHILD_ROOT, dir.path())
+            .env_remove("CCACHE_DIR")
+            .env("SCCACHE_DIR", dir.path().join("cache"))
+            .env("BUSYBOX_CC", "compiler")
+            .env("PATH", env::join_paths(paths).unwrap())
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "{}\n{}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
 
     #[test]
     fn archive_verification_returns_rewound_file_and_rejects_wrong_hash() {
