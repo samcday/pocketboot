@@ -1,5 +1,7 @@
 use std::{fs, io, path::Path};
 
+const USB_ROLE_PARAM: &str = "pocketboot.usb_role";
+
 #[derive(Clone, Debug, Default)]
 pub(crate) struct KernelCommandLine {
     args: Vec<String>,
@@ -30,6 +32,23 @@ impl KernelCommandLine {
 
     pub(crate) fn is_set(&self, key: &str) -> bool {
         self.args.iter().any(|arg| arg == key)
+    }
+
+    pub(crate) fn usb_device_role(&self) -> Result<bool, String> {
+        // values() omits empty values, but these must not silently opt out.
+        if self.is_set(USB_ROLE_PARAM) || self.is_set(&format!("{USB_ROLE_PARAM}=")) {
+            return Err(format!("{USB_ROLE_PARAM} requires the value 'device'"));
+        }
+        let mut requested = false;
+        for value in self.values(USB_ROLE_PARAM) {
+            if value != "device" {
+                return Err(format!(
+                    "unsupported {USB_ROLE_PARAM}={value}; only 'device' is supported"
+                ));
+            }
+            requested = true;
+        }
+        Ok(requested)
     }
 }
 
@@ -67,5 +86,50 @@ mod tests {
             cmdline.values("empty").collect::<Vec<_>>(),
             Vec::<&str>::new()
         );
+    }
+
+    #[test]
+    fn usb_device_role_requires_explicit_opt_in() {
+        for contents in [
+            "",
+            "pocketboot.usb_role.extra=device",
+            "other.usb_role=device",
+        ] {
+            assert!(
+                !KernelCommandLine::parse(contents)
+                    .usb_device_role()
+                    .unwrap()
+            );
+        }
+        for contents in [
+            "foo pocketboot.usb_role=device bar",
+            "pocketboot.usb_role=device pocketboot.usb_role=device",
+        ] {
+            assert!(
+                KernelCommandLine::parse(contents)
+                    .usb_device_role()
+                    .unwrap()
+            );
+        }
+    }
+
+    #[test]
+    fn usb_device_role_rejects_unsupported_or_missing_values() {
+        for contents in [
+            "pocketboot.usb_role=host",
+            "pocketboot.usb_role=none",
+            "pocketboot.usb_role=otg",
+            "pocketboot.usb_role=Device",
+            "pocketboot.usb_role",
+            "pocketboot.usb_role=",
+            "pocketboot.usb_role=device pocketboot.usb_role=host",
+            "pocketboot.usb_role=host pocketboot.usb_role=device",
+            "pocketboot.usb_role=device pocketboot.usb_role=",
+        ] {
+            let err = KernelCommandLine::parse(contents)
+                .usb_device_role()
+                .unwrap_err();
+            assert!(err.contains(USB_ROLE_PARAM), "{contents}: {err}");
+        }
     }
 }

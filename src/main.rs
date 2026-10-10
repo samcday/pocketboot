@@ -68,6 +68,7 @@ async fn run() -> Result<()> {
 
     kmsg::init_tracing(&cmdline);
     tracing::info!("starting up");
+    let usb_device_role = cmdline.usb_device_role()?;
     reaper::spawn();
     getty::spawn(&cmdline);
 
@@ -103,7 +104,7 @@ async fn run() -> Result<()> {
             None
         }
     };
-    let gadget = gadget::Gadget::new(serialno.clone());
+    let gadget = gadget::Gadget::new(serialno.clone()).with_usb_device_role(usb_device_role);
     let acm = cmdline.is_set(ACM_CMDLINE_PARAM);
     let fastboot_thread = gadget
         .spawn(gadget::Mode::Fastboot {
